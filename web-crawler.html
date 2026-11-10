@@ -1,0 +1,651 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Web Crawler · Classic System Design</title>
+<meta name="description" content="Design a search engine crawler: a polite URL frontier with per-host queues, DNS and robots.txt caching, URL and content dedupe with Bloom filters, and crawler traps.">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700&family=Instrument+Sans:ital,wght@0,400;0,500;0,600;1,400&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+  /* Layout: a slim site bar, then either a card grid (home), a sticky contents rail + reading column (articles), or a filterable term list (glossary). Light, single look. */
+  :root {
+    color-scheme: light;
+    --bg: #e9ecef; --paper: #f7f8f9; --ink: #1c2530; --muted: #586473; --line: #cdd4dc; --line-strong: #9aa5b1;
+    --accent: #4255d4; --accent-ink: #ffffff; --track: #d3d9e0; --code-bg: #eef1f4; --wire: #7d8996;
+    --c-ingest: #2a9d8f; --c-kb: #4d5fd8; --c-serve: #d7932a; --c-model: #e2674f; --c-gov: #b2456e; --c-cross: #4a5562; --c-dlq: #b23a3a; --c-ok: #2f8f5b;
+    --t-src: #e4e8ec; --t-ingest: #d8eeea; --t-kb: #dfe3fa; --t-serve: #f8ead2; --t-model: #fbe1da; --t-gov: #f3dde6; --t-cross: #dfe2e6; --t-dlq: #f6dddb;
+    --font-display: "Bricolage Grotesque", "Avenir Next", "Segoe UI", system-ui, sans-serif;
+    --font-body: "Instrument Sans", "Helvetica Neue", "Segoe UI", system-ui, sans-serif;
+    --font-mono: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  @media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
+  body { margin: 0; background: var(--bg); color: var(--ink); font-family: var(--font-body); font-size: 16px; line-height: 1.6; }
+  a { color: var(--accent); }
+  .wrap { max-width: 1240px; margin: 0 auto; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
+
+  .sitebar { border-bottom: 1px solid var(--line); background: var(--paper); }
+  .sitebar .wrap { display: flex; align-items: center; gap: 18px; flex-wrap: wrap; padding-block: 12px; }
+  .brand { font-family: var(--font-display); font-weight: 700; font-size: 17px; color: var(--ink); text-decoration: none; margin-right: auto; }
+  .sitebar nav { display: flex; gap: 16px; flex-wrap: wrap; font-size: 14px; }
+  .sitebar nav a { color: var(--muted); text-decoration: none; }
+  .sitebar nav a:hover, .sitebar nav a[aria-current="page"] { color: var(--ink); }
+  .sitebar nav a[aria-current="page"] { font-weight: 600; }
+
+  .intro { padding-block: 40px 8px; display: grid; gap: 10px; max-width: 820px; }
+  .eyebrow { margin: 0; font-family: var(--font-mono); font-size: 12px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+  h1 { margin: 0; font-family: var(--font-display); font-weight: 700; font-size: clamp(30px, 5vw, 46px); line-height: 1.05; text-wrap: balance; }
+  .intro .lead { font-size: 18px; margin: 0; }
+
+  .doc { display: grid; grid-template-columns: 220px minmax(0, 1fr); gap: 48px; padding-block: 36px 72px; }
+  .toc { position: sticky; top: calc(env(safe-area-inset-top, 0px) + 20px); align-self: start; }
+  .toc p { margin: 0 0 8px; font-family: var(--font-mono); font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+  .toc ol { margin: 0; padding: 0; list-style: none; display: grid; gap: 2px; counter-reset: toc; }
+  .toc li { counter-increment: toc; }
+  .toc a { display: flex; gap: 8px; padding: 3px 0; font-size: 14px; color: var(--muted); text-decoration: none; }
+  .toc a::before { content: counter(toc, decimal-leading-zero); font-family: var(--font-mono); font-size: 11.5px; padding-top: 2px; color: var(--line-strong); }
+  .toc a:hover { color: var(--ink); }
+  article { min-width: 0; max-width: 760px; }
+  section { padding-bottom: 36px; margin-bottom: 36px; border-bottom: 1px solid var(--line); scroll-margin-top: 20px; }
+  section:last-child { border-bottom: 0; }
+  h2 { margin: 0 0 10px; font-family: var(--font-display); font-weight: 700; font-size: 28px; line-height: 1.15; text-wrap: balance; }
+  h3 { margin: 26px 0 6px; font-family: var(--font-display); font-weight: 600; font-size: 19px; line-height: 1.25; }
+  p { margin: 0 0 14px; }
+  .lead { font-size: 18px; }
+  ul.plain, ol.plain { margin: 0 0 16px; padding-left: 22px; display: grid; gap: 6px; }
+  code { font-family: var(--font-mono); font-size: 0.88em; background: var(--code-bg); padding: 1px 5px; border-radius: 4px; }
+  pre { margin: 0 0 16px; padding: 14px 16px; background: var(--code-bg); border-radius: 10px; overflow-x: auto; font-size: 13px; line-height: 1.55; }
+  pre code { background: none; padding: 0; font-size: inherit; }
+  .table { overflow-x: auto; margin: 0 0 18px; }
+  table { width: 100%; border-collapse: collapse; font-size: 14.5px; line-height: 1.45; }
+  th, td { text-align: left; vertical-align: top; padding: 8px 10px; border-bottom: 1px solid var(--line); }
+  th { font-family: var(--font-mono); font-size: 11.5px; font-weight: 500; letter-spacing: .05em; text-transform: uppercase; color: var(--muted); }
+  td.num { font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .note { border-left: 3px solid var(--accent); background: var(--paper); padding: 12px 16px; border-radius: 0 10px 10px 0; margin: 0 0 18px; }
+  .note p:last-child { margin: 0; }
+  .formula { font-family: var(--font-mono); font-size: 14px; background: var(--paper); border: 1px solid var(--line); border-radius: 10px; padding: 12px 16px; margin: 0 0 16px; overflow-x: auto; white-space: nowrap; }
+  .related { display: flex; flex-wrap: wrap; gap: 8px; margin: 0; padding: 0; list-style: none; }
+  .related a { display: inline-block; padding: 4px 12px; border: 1px solid var(--line); border-radius: 999px; font-size: 14px; color: var(--ink); text-decoration: none; background: var(--paper); }
+  .related a:hover { border-color: var(--ink); }
+  .pager { display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; font-size: 14px; }
+  footer.site { border-top: 1px solid var(--line); padding-block: 20px 40px; font-size: 13px; color: var(--muted); }
+  a:focus-visible, input:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+  /* home */
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 16px; margin: 0 0 40px; padding: 0; list-style: none; }
+  .card { display: grid; gap: 8px; height: 100%; padding: 18px; background: var(--paper); border: 1px solid var(--line); border-radius: 14px; color: var(--ink); text-decoration: none; }
+  .card:hover { border-color: var(--ink); }
+  .card .k { font-family: var(--font-mono); font-size: 11px; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
+  .card h3 { margin: 0; font-size: 20px; }
+  .card p { margin: 0; font-size: 14.5px; color: var(--muted); }
+  .card svg { width: 100%; height: auto; display: block; }
+  .card.feature svg { max-width: 420px; justify-self: center; }
+  .card.feature { grid-column: 1 / -1; grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr); align-items: center; gap: 24px; }
+  .home-h { margin: 28px 0 12px; font-family: var(--font-display); font-size: 24px; }
+
+  /* glossary */
+  .gl-tools { position: sticky; top: 0; z-index: 2; background: var(--bg); padding-block: 12px; display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+  .gl-tools input { flex: 1 1 260px; min-width: 0; font: 15px var(--font-body); padding: 9px 12px; border-radius: 10px; border: 1px solid var(--line-strong); background: #fff; color: var(--ink); }
+  .gl-letters { display: flex; flex-wrap: wrap; gap: 4px; font-family: var(--font-mono); font-size: 13px; }
+  .gl-letters a { padding: 2px 6px; border-radius: 6px; text-decoration: none; color: var(--muted); }
+  .gl-letters a:hover { background: var(--paper); color: var(--ink); }
+  .gl { max-width: 860px; }
+  .gl-item { margin: 0; }
+  .gl-item { display: grid; grid-template-columns: 220px minmax(0, 1fr); gap: 16px; padding: 12px 0; border-bottom: 1px solid var(--line); scroll-margin-top: 70px; }
+  .gl-item dt { font-weight: 600; }
+  .gl-item dt small { display: block; font-weight: 400; font-family: var(--font-mono); font-size: 11px; color: var(--muted); letter-spacing: .04em; text-transform: uppercase; margin-top: 2px; }
+  .gl-item dd { margin: 0; }
+  .gl-item dd .see { font-size: 13.5px; }
+  .gl-letter { margin: 26px 0 4px; font-family: var(--font-display); font-size: 22px; scroll-margin-top: 70px; }
+
+  @media (max-width: 900px) {
+    .doc { grid-template-columns: minmax(0, 1fr); gap: 24px; padding-block: 28px 56px; }
+    .toc { position: static; }
+    .toc ol { grid-template-columns: repeat(2, minmax(0, 1fr)); column-gap: 12px; }
+    .card.feature { grid-template-columns: minmax(0, 1fr); }
+  }
+  @media (max-width: 640px) {
+    .gl-item { grid-template-columns: minmax(0, 1fr); gap: 4px; }
+    h2 { font-size: 24px; }
+    .intro .lead, .lead { font-size: 16.5px; }
+  }
+
+  /* diagrams */
+  .fig { margin: 6px 0 24px; overflow-x: auto; }
+  .fig svg { display: block; width: 100%; height: auto; min-width: 600px; }
+  .fig figcaption { margin-top: 8px; font-size: 13px; line-height: 1.45; color: var(--muted); }
+  .dg text { font-family: var(--font-body); font-size: 13px; fill: var(--ink); }
+  .dg .sm { font-size: 11.5px; fill: var(--muted); }
+  .dg .small { font-size: 12px; }
+  .dg .b { font-weight: 600; }
+  .dg .mono { font-family: var(--font-mono); }
+  .dg .it { font-style: italic; }
+  .dg .mute { fill: var(--muted); }
+  .dg .gov { fill: var(--c-gov); font-weight: 600; }
+  .dg .okt { fill: var(--c-ok); font-weight: 600; }
+  .dg .bad { fill: var(--c-dlq); font-weight: 600; }
+  .dg .cap { font-family: var(--font-mono); font-size: 11px; letter-spacing: .06em; fill: var(--muted); }
+  .dg .big { font-family: var(--font-display); font-size: 30px; font-weight: 700; fill: var(--ink); }
+  .dg .box { fill: var(--paper); stroke: var(--line-strong); stroke-width: 1.25; }
+  .dg .ghost { fill: none; stroke: var(--line-strong); stroke-width: 1.25; stroke-dasharray: 5 5; }
+  .dg .track { fill: var(--track); }
+  .dg .rule { stroke: var(--line); stroke-width: 1; }
+  .dg .axis { stroke: var(--line-strong); stroke-width: 1.25; }
+  .dg .wire { fill: none; stroke: var(--wire); stroke-width: 1.4; }
+  .dg .wire.dash { stroke-dasharray: 4 4; }
+  .dg .wire.hot { stroke: var(--accent); stroke-width: 2; }
+  .dg .wire.red { stroke: var(--c-dlq); }
+  .dg .ah { fill: var(--wire); }
+  .dg .xmark { stroke: var(--c-dlq); stroke-width: 1.8; fill: none; }
+  .dg .tick { stroke: var(--c-ok); stroke-width: 2; fill: none; }
+  .dg .k-src { fill: var(--t-src); stroke: #8795a3; stroke-width: 1.5; }
+  .dg .k-ingest { fill: var(--t-ingest); stroke: var(--c-ingest); stroke-width: 1.5; }
+  .dg .k-kb { fill: var(--t-kb); stroke: var(--c-kb); stroke-width: 1.5; }
+  .dg .k-serve { fill: var(--t-serve); stroke: var(--c-serve); stroke-width: 1.5; }
+  .dg .k-model { fill: var(--t-model); stroke: var(--c-model); stroke-width: 1.5; }
+  .dg .k-gov { fill: var(--t-gov); stroke: var(--c-gov); stroke-width: 1.5; }
+  .dg .k-cross { fill: var(--t-cross); stroke: var(--c-cross); stroke-width: 1.5; }
+  .dg .k-dlq { fill: var(--t-dlq); stroke: var(--c-dlq); stroke-width: 1.5; }
+  .dg .k-user { fill: #ffffff; stroke: var(--line-strong); stroke-width: 1.5; }
+  .dg .f-serve { fill: var(--c-serve); } .dg .f-kb { fill: var(--c-kb); } .dg .f-model { fill: var(--c-model); } .dg .f-gov { fill: var(--c-gov); } .dg .f-ingest { fill: var(--c-ingest); } .dg .f-cross { fill: #b8c0c9; } .dg .f-dlq { fill: var(--c-dlq); } .dg .f-ok { fill: var(--c-ok); }
+  .dg .cell { fill: var(--paper); stroke: var(--line-strong); stroke-width: 1; }
+  .dg .cell.hot { fill: var(--t-ingest); stroke: var(--c-ingest); stroke-width: 1.5; }
+  .dg .cell.old { fill: var(--t-kb); stroke: var(--c-kb); }
+  .dg .cell.new { fill: var(--t-ingest); stroke: var(--c-ingest); stroke-width: 1.5; }
+  .dg .cell.gone { fill: var(--paper); stroke: var(--line); }
+  .dg .dot-hr { fill: var(--c-gov); } .dg .dot-it { fill: var(--c-kb); } .dg .dot-eng { fill: var(--c-ingest); } .dg .dot-q { fill: var(--c-serve); stroke: var(--ink); stroke-width: 1.5; }
+  .dg .halo { fill: none; stroke: var(--c-serve); stroke-width: 1.5; stroke-dasharray: 4 4; }
+  .dg .zone { fill: var(--paper); stroke: var(--line); stroke-width: 1; }
+</style>
+
+<style>
+  .lab { margin: 6px 0 26px; padding: 14px 16px 16px; background: var(--paper); border: 1px solid var(--line); border-radius: 14px; }
+  .lab-row { display: flex; flex-wrap: wrap; gap: 10px 18px; align-items: center; margin: 0 0 12px; }
+  .lab-k { font-family: var(--font-mono); font-size: 11px; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
+  .lab label { display: inline-flex; gap: 8px; align-items: center; font-size: 14px; }
+  .lab input[type=range] { width: 150px; accent-color: var(--accent); }
+  .lab input[type=checkbox] { width: 16px; height: 16px; accent-color: var(--accent); }
+  .lab input[type=text] { flex: 1 1 260px; min-width: 0; font: 15px var(--font-body); padding: 8px 11px; border-radius: 9px; border: 1px solid var(--line-strong); background: #fff; color: var(--ink); }
+  .lab output { font-family: var(--font-mono); font-size: 12.5px; min-width: 6ch; font-variant-numeric: tabular-nums; }
+  .seg { display: inline-flex; flex-wrap: wrap; gap: 6px; }
+  .seg button, .chips button { font: 600 13px var(--font-body); color: var(--ink); background: #fff; border: 1px solid var(--line); border-radius: 8px; padding: 6px 12px; cursor: pointer; }
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; }
+  .chips button { font-weight: 500; border-radius: 999px; padding: 4px 11px; font-size: 13px; }
+  .seg button:hover, .chips button:hover { border-color: var(--ink); }
+  .seg button[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+  .seg button:focus-visible, .chips button:focus-visible, .lab input:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .lab-out { margin: 12px 0 0; padding: 10px 12px; background: #fff; border: 1px solid var(--line); border-radius: 10px; font-size: 14.5px; line-height: 1.5; font-variant-numeric: tabular-nums; }
+  .chunks { display: grid; gap: 8px; max-height: 470px; overflow: auto; padding-right: 4px; }
+  .chunk { min-width: 0; padding: 8px 11px; background: #fff; border: 1px solid var(--line); border-left: 4px solid var(--c-kb); border-radius: 8px; font-size: 14px; line-height: 1.5; overflow-wrap: anywhere; }
+  .chunk:nth-child(even) { border-left-color: var(--c-ingest); }
+  .chunk.ans { box-shadow: 0 0 0 2px var(--c-serve); }
+  .chunk .ch { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-bottom: 4px; font-family: var(--font-mono); font-size: 11px; color: var(--muted); }
+  .chunk .pfx { display: block; font-family: var(--font-mono); font-size: 11.5px; color: var(--c-kb); }
+  .chunk .ov { background: var(--track); border-radius: 3px; }
+  .chunk mark { background: #ffe9b3; border-radius: 3px; padding: 0 2px; }
+  .chunk table { width: auto; font-size: 13px; margin: 4px 0; }
+  .chunk td { padding: 2px 10px 2px 0; border-bottom: 1px solid var(--line); }
+  .badge { display: inline-block; padding: 0 7px; border-radius: 999px; border: 1px solid; font-family: var(--font-mono); font-size: 10.5px; line-height: 1.6; }
+  .badge.bad { color: var(--c-dlq); border-color: var(--c-dlq); background: var(--t-dlq); }
+  .badge.ok { color: var(--c-ok); border-color: var(--c-ok); background: #e3f3ea; }
+  .badge.info { color: var(--c-kb); border-color: var(--c-kb); background: var(--t-kb); }
+  .bars { display: grid; gap: 8px; margin: 4px 0 0; }
+  .bar-row { display: grid; grid-template-columns: minmax(0, 150px) minmax(0, 1fr) 46px; gap: 10px; align-items: center; font-size: 14px; }
+  .bar { position: relative; height: 14px; border-radius: 7px; background: var(--track); }
+  .bar i { position: absolute; inset: 0 auto 0 0; border-radius: 7px; background: var(--c-kb); transition: width .3s; }
+  .bar b { position: absolute; top: -4px; bottom: -4px; width: 2px; background: var(--c-dlq); }
+  .bar-row .v { font-family: var(--font-mono); font-size: 12.5px; text-align: right; }
+  .stages { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 10px; padding: 0; list-style: none; font-size: 13px; }
+  .stages li { padding: 2px 10px; border-radius: 999px; border: 1px solid var(--line); color: var(--muted); background: #fff; }
+  .stages li.hit { border-color: var(--accent); color: var(--accent-ink); background: var(--accent); }
+  .stages li.skip { text-decoration: line-through; }
+  .rlist { display: grid; gap: 6px; margin: 0; padding: 0; list-style: none; counter-reset: r; }
+  .rlist li { counter-increment: r; display: grid; grid-template-columns: 28px minmax(0, 1fr) auto; gap: 10px; align-items: center; padding: 6px 10px; background: #fff; border: 1px solid var(--line); border-radius: 8px; font-size: 14px; }
+  .rlist li::before { content: counter(r); font-family: var(--font-mono); font-size: 12px; color: var(--muted); }
+  .rlist li.rel { border-color: var(--c-ok); background: #f0f8f3; }
+  .rlist button { font: 600 12px var(--font-body); padding: 3px 10px; border-radius: 999px; border: 1px solid var(--line-strong); background: #fff; color: var(--ink); cursor: pointer; white-space: nowrap; }
+  .rlist li.rel button { background: var(--c-ok); border-color: var(--c-ok); color: #fff; }
+  .metrics { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 8px; margin: 12px 0 0; }
+  .metric { padding: 8px 10px; background: #fff; border: 1px solid var(--line); border-radius: 10px; }
+  .metric .n { display: block; font-family: var(--font-display); font-size: 24px; font-weight: 700; font-variant-numeric: tabular-nums; }
+  .metric .l { font-family: var(--font-mono); font-size: 11px; letter-spacing: .04em; text-transform: uppercase; color: var(--muted); }
+  .metric small { display: block; font-size: 12px; color: var(--muted); line-height: 1.35; margin-top: 2px; }
+  td.pass { color: var(--c-ok); font-weight: 600; } td.fail { color: var(--c-dlq); font-weight: 600; }
+  .say { border-left: 3px solid var(--c-serve); background: var(--paper); padding: 12px 16px; border-radius: 0 10px 10px 0; margin: 0 0 16px; font-size: 15.5px; }
+  .say p:last-child { margin: 0; }
+</style>
+
+<style>
+  .lab-chart { display: block; width: 100%; height: auto; margin: 4px 0 0; }
+  .lab-chart text { font-family: var(--font-body); font-size: 12px; fill: var(--muted); }
+  .grid-cells { display: grid; gap: 4px; }
+  .srv { display: grid; grid-template-columns: 92px minmax(0,1fr) 70px; gap: 10px; align-items: center; font-size: 14px; }
+  .muted { color: var(--muted); }
+  .lab select { font: 14px var(--font-body); padding: 6px 8px; border-radius: 8px; border: 1px solid var(--line-strong); background: #fff; color: var(--ink); }
+  .lab input[type=number] { width: 9ch; font: 14px var(--font-mono); padding: 6px 8px; border-radius: 8px; border: 1px solid var(--line-strong); background: #fff; color: var(--ink); }
+</style><style>
+  .prompt { margin: 0; font-size: 18px; line-height: 1.5; color: var(--ink); }
+  .prompt q { font-style: italic; }
+  .legend { display: flex; flex-wrap: wrap; gap: 6px 14px; margin: 4px 0 0; padding: 0; list-style: none; font-size: 13px; color: var(--muted); }
+  .legend li { display: flex; align-items: center; gap: 6px; }
+  .legend i { width: 11px; height: 11px; border-radius: 3px; display: inline-block; }
+  .tags { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 16px; padding: 0; list-style: none; }
+  .tags li { font-family: var(--font-mono); font-size: 11px; letter-spacing: .04em; padding: 2px 8px; border-radius: 6px; border: 1px solid var(--line); color: var(--muted); }
+  @media (max-width: 640px) { .prompt { font-size: 16.5px; } }
+</style>
+<link rel="stylesheet" href="assets/scene3d.css">
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs><marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" class="ah" style="fill:#7d8996"/></marker></defs></svg>
+<header class="sitebar"><div class="wrap"><a class="brand" href="index.html">Classic System Design</a><nav aria-label="Site"><a href="index.html">Home</a><a href="index.html#blocks">Building blocks</a><a href="index.html#designs" aria-current="page">Designs</a><a href="https://devlcodes.github.io/agentic-ai-notebook/system-design/index.html">Agentic designs ↗</a></nav></div></header>
+<main>
+<header class="wrap"><div class="intro"><p class="eyebrow">Classic system design walkthrough</p><h1>Web Crawler</h1><p class="prompt"><q>Design a crawler for a search engine. Starting from a set of seed URLs, it should download 15 billion pages in four weeks, keep them fresh afterwards, never overload a website, respect robots.txt, and not get stuck in endless generated pages. Assume HTML only for now, but make it easy to add other content types.</q></p><ul class="legend" aria-label="Colour key"><li><i style="background:var(--c-ingest)"></i>Fetch path</li><li><i style="background:var(--c-serve)"></i>Parsing and extraction</li><li><i style="background:var(--c-kb)"></i>Storage</li><li><i style="background:var(--c-cross)"></i>Frontier and queues</li><li><i style="background:var(--c-gov)"></i>Politeness and filters</li></ul></div></header>
+<div class="wrap"><figure class="fig3d hero" id="hero">
+  <div class="stage3d" role="img" aria-label="Animated 3D view of the crawl loop: seed URLs enter the frontier, which keeps one queue per website. A fetcher takes the next URL from a host whose politeness delay has passed, resolves the host through a local DNS cache, checks robots.txt and downloads the page. The extractor checks whether the content was seen before, stores new pages in the blob store, and pulls out links. Links are normalized, filtered and checked against the URL-seen filter; only new ones go back into the frontier."><p class="hint3">3D · drag to turn</p><button class="reset3 ghost" type="button" hidden>Reset view</button><p class="nogl">The 3D view needs WebGL and a connection, because Three.js loads from a CDN. The sections below cover the same ground.</p></div>
+  <div class="ctl3"><button class="pp" type="button">Pause</button><span class="k">Step</span><div class="steps3"></div><span class="meta3"></span></div>
+  <div class="track3"><div class="fill3"></div></div>
+  <p class="out3" aria-live="polite"></p>
+  <figcaption>Illustrative. The crawl is a loop: every page fetched feeds new URLs back into the frontier.</figcaption>
+</figure></div>
+<div class="wrap doc">
+  <nav class="toc" aria-label="Sections"><p>The solution</p><ol><li><a href="#requirements">Requirements</a></li><li><a href="#success">Success metrics</a></li><li><a href="#estimates">Estimates</a></li><li><a href="#interfaces">Interfaces</a></li><li><a href="#architecture">Architecture</a></li><li><a href="#frontier">The URL frontier</a></li><li><a href="#politeness">Politeness, robots.txt and DNS</a></li><li><a href="#dedupe">Seen it before?</a></li><li><a href="#lab">Try it: size the URL-seen filter</a></li><li><a href="#traps">Crawler traps</a></li><li><a href="#storage">Storage</a></li><li><a href="#distribution">Distributing the crawl</a></li><li><a href="#freshness">Freshness and recrawling</a></li><li><a href="#observability">Observability</a></li><li><a href="#risks">Risks and v2</a></li><li><a href="#presenting">Presenting it in 45 minutes</a></li><li><a href="#numbers">Numbers to remember</a></li></ol></nav>
+  <article>
+
+<section id="requirements">
+  <h2>Requirements</h2>
+  <ul class="tags"><li>Clarify</li><li><a href="requirements.html">Non-functional requirements</a></li></ul>
+  <p class="lead">The basic loop fits on a whiteboard: take a URL, download it, find links, repeat. The design is about doing it 6,000 times a second while being polite, avoiding duplicates and not falling into traps.</p>
+  <div class="table"><table>
+    <thead><tr><th>Question</th><th>Assumption</th><th>Why it matters</th></tr></thead>
+    <tbody>
+      <tr><td>Scale</td><td class="num">15B pages from ~1B websites in 4 weeks</td><td>Sets fetch rate, storage and frontier size</td></tr>
+      <tr><td>Content</td><td>HTML only for v1; images, PDFs and video later</td><td>Fetching and processing must be pluggable by protocol and MIME type</td></tr>
+      <tr><td>Protocols</td><td>HTTP and HTTPS; FTP possible later</td><td>Protocol modules chosen by URL scheme</td></tr>
+      <tr><td>Politeness</td><td>At most one connection per host; a delay between requests; obey robots.txt</td><td>Otherwise we are a denial-of-service attack and get blocked</td></tr>
+      <tr><td>Freshness</td><td>Important pages revisited within hours to days</td><td>The crawl never really ends</td></tr>
+      <tr><td>Robustness</td><td>Malformed HTML, slow servers, traps, crashes mid-crawl</td><td>A four-week job must survive machine failures without starting over</td></tr>
+      <tr><td>Extensibility</td><td>New processors (indexer, link graph, spam detection) attach without changing the core</td><td>Downloaded documents are shared by several consumers</td></tr>
+    </tbody>
+  </table></div>
+  <p>Out of scope: ranking and serving search results, and rendering JavaScript-heavy pages (a later, much more expensive tier with headless browsers).</p>
+</section>
+
+<section id="success">
+  <h2>Success metrics</h2>
+  <ul class="tags"><li>Define success</li></ul>
+  <div class="table"><table>
+    <thead><tr><th>Kind</th><th>Metric</th><th>Target</th></tr></thead>
+    <tbody>
+      <tr><td>Coverage</td><td>Pages fetched per second; share of known important pages crawled</td><td class="num">≥ 6,200/s; &gt; 99%</td></tr>
+      <tr><td>Freshness</td><td>Median age of the stored copy for the top 1% of pages</td><td class="num">&lt; 1 day</td></tr>
+      <tr><td>Efficiency</td><td>Share of fetches that are duplicates or trap pages</td><td class="num">&lt; 5%</td></tr>
+      <tr><td>Guardrail</td><td>Complaints and blocks from site owners; robots.txt violations</td><td class="num">near zero; zero</td></tr>
+    </tbody>
+  </table></div>
+</section>
+
+<section id="estimates">
+  <h2>Estimates</h2>
+  <ul class="tags"><li>Back of the envelope</li><li><a href="numbers.html">Numbers</a></li></ul>
+  <figure class="fig"><svg viewBox="0 0 722 150" class="dg" role="img" aria-label="Key numbers: 6,200 pages a second, about 5 gigabits a second of download, 1.5 petabytes of pages and 2.14 petabytes provisioned, 120 GB of URL checksums">
+    <rect x="10" y="10" width="134" height="92" rx="8" class="k-ingest"/><text x="24" y="52" class="big">6.2k/s</text><text x="24" y="78" class="sm">pages fetched</text><text x="24" y="94" class="sm">15B ÷ 2.4M seconds</text>
+    <rect x="154" y="10" width="134" height="92" rx="8" class="k-ingest"/><text x="168" y="52" class="big">5 Gb/s</text><text x="168" y="78" class="sm">download bandwidth</text><text x="168" y="94" class="sm">6.2k × 100 KB</text>
+    <rect x="298" y="10" width="134" height="92" rx="8" class="k-kb"/><text x="312" y="52" class="big">1.5 PB</text><text x="312" y="78" class="sm">pages + metadata</text><text x="312" y="94" class="sm">~2.14 PB at 70% full</text>
+    <rect x="442" y="10" width="134" height="92" rx="8" class="k-gov"/><text x="456" y="52" class="big">120 GB</text><text x="456" y="78" class="sm">URL checksums</text><text x="456" y="94" class="sm">15B × 8 bytes</text>
+    <rect x="586" y="10" width="126" height="92" rx="8" class="k-cross"/><text x="600" y="52" class="big">~1B</text><text x="600" y="78" class="sm">host queues</text><text x="600" y="94" class="sm">one per website</text>
+    <text x="10" y="132" class="small">Bandwidth and storage are large but ordinary. Politeness, deduplication and traps are where crawlers go wrong.</text>
+  </svg></figure>
+  <ul class="plain">
+    <li><strong>Fetch rate:</strong> 4 weeks ≈ 2.4M seconds, so 15B ÷ 2.4M ≈ 6,200 pages a second. Plan for 2× that to absorb slow hosts and retries.</li>
+    <li><strong>Concurrency:</strong> if a fetch takes about 1 s end to end (DNS, connect, slow servers), we need ~6,000–12,000 fetches in flight. With async I/O, a single machine handles hundreds to a few thousand, so a few dozen fetcher machines.</li>
+    <li><strong>Storage:</strong> 15B × (100 KB page + 500 B metadata) ≈ 1.5 PB. Keeping storage at most 70% full means about 2.14 PB. Compression (HTML compresses 5–10×) cuts that a lot.</li>
+    <li><strong>Dedupe sets:</strong> an 8-byte checksum per URL is 15B × 8 B = 120 GB, and the same again for content checksums. Too big for one machine's RAM comfortably, fine when sharded.</li>
+  </ul>
+</section>
+
+<section id="interfaces">
+  <h2>Interfaces</h2>
+  <ul class="tags"><li>Interface</li></ul>
+<pre><code>// internal, not public
+AddSeeds(urls[], priority)                       // operators and the "submit a URL" tool
+Frontier.Next(worker_id) → { url, host, deadline }   // a URL whose host is free
+Frontier.Add(urls[], source_url)                 // after filters and the seen test
+Fetcher.Fetch(url) → { status, headers, body_ref, fetched_at }
+
+// emitted on Kafka for downstream consumers
+page.fetched  { url, content_hash, body_ref, links[], fetched_at }
+page.changed  { url, old_hash, new_hash }</code></pre>
+  <p>The crawler is an internal pipeline, so its "API" is mostly the contracts between components and the events it emits. Indexing, link-graph building and spam detection subscribe to <code>page.fetched</code> instead of being built into the crawler.</p>
+</section>
+
+<section id="architecture">
+  <h2>Architecture</h2>
+  <ul class="tags"><li>Whole system</li></ul>
+  <figure class="fig"><svg viewBox="0 0 722 300" class="dg" role="img" aria-label="Architecture: the frontier feeds fetchers, which use a DNS cache and robots.txt cache and download from websites; pages go to the content dedupe check and the blob store; the extractor pulls links, which pass the URL filter and URL-seen test before returning to the frontier; page events go to Kafka for the indexer">
+    <text x="10" y="22" class="cap">FETCH · ~6,200 PAGES/S</text>
+    <rect x="10" y="34" width="110" height="44" rx="8" class="k-cross"/><text x="65" y="53" class="small b" text-anchor="middle">URL frontier</text><text x="65" y="69" class="sm" text-anchor="middle">priority · per host</text>
+    <path d="M120 56 L160 56" class="wire" marker-end="url(#ah)"/>
+    <rect x="162" y="34" width="120" height="44" rx="8" class="k-ingest"/><text x="222" y="53" class="small b" text-anchor="middle">Fetchers</text><text x="222" y="69" class="sm" text-anchor="middle">async HTTP</text>
+    <path d="M222 34 L222 16 L316 16" class="wire dash" marker-end="url(#ah)"/><rect x="318" y="4" width="120" height="24" rx="8" class="k-gov"/><text x="378" y="21" class="sm b" text-anchor="middle">DNS · robots caches</text>
+    <path d="M282 56 L352 56" class="wire" marker-end="url(#ah)"/><text x="317" y="50" class="sm" text-anchor="middle">GET</text>
+    <rect x="354" y="34" width="110" height="44" rx="8" class="k-user"/><text x="409" y="60" class="small b" text-anchor="middle">Websites</text>
+    <path d="M222 78 L222 128" class="wire" marker-end="url(#ah)"/><text x="230" y="108" class="sm">page</text>
+    <text x="10" y="122" class="cap">PROCESS</text>
+    <rect x="162" y="130" width="120" height="44" rx="8" class="k-serve"/><text x="222" y="149" class="small b" text-anchor="middle">Document stream</text><text x="222" y="165" class="sm" text-anchor="middle">re-readable copy</text>
+    <path d="M282 152 L352 152" class="wire" marker-end="url(#ah)"/>
+    <rect x="354" y="130" width="120" height="44" rx="8" class="k-gov"/><text x="414" y="149" class="small b" text-anchor="middle">Content seen?</text><text x="414" y="165" class="sm" text-anchor="middle">checksum set</text>
+    <path d="M474 152 L524 152" class="wire" marker-end="url(#ah)"/><text x="499" y="146" class="sm" text-anchor="middle">new</text>
+    <rect x="526" y="132" width="90" height="40" rx="18" class="k-kb"/><text x="571" y="156" class="small b" text-anchor="middle">Blob store</text>
+    <path d="M616 152 L640 152 L640 230" class="wire dash" marker-end="url(#ah)"/>
+    <rect x="590" y="232" width="122" height="40" rx="20" class="k-cross"/><text x="651" y="250" class="small b" text-anchor="middle">Kafka</text><text x="651" y="264" class="sm" text-anchor="middle">→ indexer, link graph</text>
+    <path d="M222 174 L222 222" class="wire" marker-end="url(#ah)"/>
+    <text x="10" y="216" class="cap">LINKS</text>
+    <rect x="162" y="224" width="120" height="44" rx="8" class="k-serve"/><text x="222" y="243" class="small b" text-anchor="middle">Extractor</text><text x="222" y="259" class="sm" text-anchor="middle">links · normalize</text>
+    <path d="M282 246 L352 246" class="wire" marker-end="url(#ah)"/>
+    <rect x="354" y="224" width="140" height="44" rx="8" class="k-gov"/><text x="424" y="243" class="small b" text-anchor="middle">URL filter + seen?</text><text x="424" y="259" class="sm" text-anchor="middle">rules · Bloom filter</text>
+    <path d="M354 268 L354 288 L65 288 L65 80" class="wire" marker-end="url(#ah)"/><text x="200" y="284" class="sm" text-anchor="middle">new URLs back into the frontier</text>
+  </svg><figcaption>Each stage can be scaled independently, and new processors hang off the document stream or Kafka without touching the fetch loop.</figcaption></figure>
+  <p>A worker runs the loop: take a URL from the frontier, resolve its host, check robots.txt, download into a <strong>document input stream</strong> (an in-memory buffer for pages up to ~64 KB, spilling to a temp file beyond that, so several processors can read the same page without fetching it again), run the content dedupe test, store the page, extract links, filter and dedupe them, and add the survivors to the frontier.</p>
+  <p>Protocol modules (HTTP, later FTP) are chosen by URL scheme, and processing modules by MIME type, so adding PDFs means adding a module, not changing the loop.</p>
+</section>
+
+<section id="frontier">
+  <h2>The URL frontier</h2>
+  <ul class="tags"><li>Deep dive 1</li><li><a href="queues.html">Queues</a></li></ul>
+  <p class="lead">The frontier decides what to fetch next. It has two jobs that pull against each other: fetch important pages first, and never hit one host too often.</p>
+  <ol class="plain">
+    <li><strong>Front queues: priority.</strong> Incoming URLs are scored (link-based importance such as PageRank, how often the page changes, how long since the last fetch) and placed in one of several priority queues.</li>
+    <li><strong>Back queues: politeness.</strong> Each back queue holds URLs for exactly one host. A heap orders back queues by the earliest time each host may be contacted again.</li>
+    <li><strong>Selection.</strong> A worker pops the host whose time has come, takes its next URL, and after the fetch the host's next allowed time is set to now plus a delay (for example 10× the last response time, or the robots.txt crawl delay). When a back queue empties, it is refilled from the front queues, biased towards high priority.</li>
+  </ol>
+  <p>This is the design of the Mercator crawler, and it gives both properties: at most one connection per host, and important pages first. Breadth-first order falls out naturally; a worker may go depth-first within one site to reuse a connection.</p>
+  <p><strong>Size:</strong> hundreds of millions to billions of URLs, so the frontier lives on disk. Each queue keeps a small in-memory buffer at both ends: an enqueue buffer flushed to disk when full, and a dequeue buffer refilled from disk ahead of the workers.</p>
+</section>
+
+<section id="politeness">
+  <h2>Politeness, robots.txt and DNS</h2>
+  <ul class="tags"><li>Deep dive 2</li><li><a href="dns.html">DNS</a></li><li><a href="rate-limiting.html">Rate limiting</a></li></ul>
+  <ul class="plain">
+    <li><strong>robots.txt.</strong> Before crawling a host, fetch <code>https://host/robots.txt</code> and obey its <code>User-agent</code>, <code>Disallow</code>, <code>Allow</code> and (where supported) <code>Crawl-delay</code> rules. Cache the parsed rules per host for about a day, so it isn't fetched before every page.</li>
+    <li><strong>One host, one worker.</strong> Hashing hosts to back queues and back queues to workers means a single worker ever talks to a given host. No coordination needed.</li>
+    <li><strong>Back off on trouble.</strong> On 429 or 503 responses, or rising latency, lengthen that host's delay. A site that is struggling should see us slow down.</li>
+    <li><strong>Identify yourself.</strong> A clear user agent with a contact URL, so site owners can reach you instead of blocking your IP range.</li>
+    <li><strong>DNS caching.</strong> 6,200 fetches a second would mean thousands of DNS lookups a second, and standard resolver libraries are often synchronous. Run a local caching resolver per machine (respecting TTLs), and resolve asynchronously ahead of fetches. Without this, DNS becomes the bottleneck.</li>
+  </ul>
+</section>
+
+<section id="dedupe">
+  <h2>Seen it before?</h2>
+  <ul class="tags"><li>Deep dive 3</li><li><a href="merkle-trees.html">Hashing</a></li></ul>
+  <p class="lead">Two different checks, at two points in the loop.</p>
+  <div class="table"><table>
+    <thead><tr><th>Check</th><th>Question</th><th>How</th></tr></thead>
+    <tbody>
+      <tr><td><strong>URL seen</strong>, before adding to the frontier</td><td>Have we already queued or fetched this URL?</td><td>Normalize the URL (lowercase host, drop fragments and default ports, sort or strip tracking parameters), take a 64-bit hash, look it up in a sharded set, with a cache of popular URLs in front</td></tr>
+      <tr><td><strong>Content seen</strong>, after fetching</td><td>Have we stored this exact page under another URL (mirrors, session ids)?</td><td>Checksum of the content (a 64-bit hash, or MD5/SHA truncated) looked up in another sharded set; near-duplicates use SimHash</td></tr>
+    </tbody>
+  </table></div>
+  <p>Each set is 15B × 8 bytes = 120 GB. A <strong>Bloom filter</strong> can hold the URL-seen set in a fraction of that: a bit array with k hash functions, where "not present" is certain and "present" is probably true. Its one flaw matters here: a false positive means a new URL is wrongly treated as seen and <em>never crawled</em>. Size the filter so that rate is tiny, or confirm positives against the exact store for important URLs.</p>
+</section>
+
+<section id="lab">
+  <h2>Try it: size the URL-seen filter</h2>
+  <ul class="tags"><li>Lab</li></ul>
+  <p>Choose how many URLs the filter must remember and how many bits it spends per URL. The number of hash functions is set to the best value for that size.</p>
+  <div class="lab" id="bflab">
+    <div class="lab-row"><label for="bf-n">URLs remembered <input type="range" id="bf-n" min="0" max="4" step="1" value="3"><output id="bf-n-o"></output></label><label for="bf-b">Bits per URL <input type="range" id="bf-b" min="2" max="24" step="1" value="10"><output id="bf-b-o"></output></label></div>
+    <div class="metrics" id="bf-m"></div>
+    <p class="lab-out" id="bf-out" aria-live="polite"></p>
+  </div>
+  <p class="muted" style="font-size:13.5px">False positive rate p = (1 − e<sup>−kn/m</sup>)<sup>k</sup> with the optimal k = (m/n)·ln 2. "Pages never crawled" assumes 5 billion genuinely new URLs are tested against the filter during the crawl. The exact store needs 8 bytes per URL.</p>
+</section>
+
+<section id="traps">
+  <h2>Crawler traps</h2>
+  <ul class="tags"><li>Governance</li></ul>
+  <p class="lead">A trap is a set of URLs that never ends. Most are accidents of site design; some are deliberate, to catch spam crawlers.</p>
+  <figure class="fig3d" id="trap3d">
+    <div class="stage3d" role="img" aria-label="Three websites each have their own queue in the frontier. Fetchers take one URL at a time from each host, waiting between requests. One site is a calendar that links to the next day forever; its URLs pile up until they hit the per-host budget and pattern rules, after which new links from it are dropped while the other sites keep being crawled."><p class="hint3">3D · drag to turn</p><button class="reset3 ghost" type="button" hidden>Reset view</button><p class="nogl">The 3D view needs WebGL and a connection.</p></div>
+    <div class="ctl3"><button class="pp" type="button">Pause</button><span class="k">Step</span><div class="steps3"></div><span class="meta3"></span></div>
+    <div class="track3"><div class="fill3"></div></div>
+    <p class="out3" aria-live="polite"></p>
+    <figcaption>Illustrative. Per-host queues keep a trap from slowing the rest of the crawl; per-host budgets stop it from growing forever.</figcaption>
+  </figure>
+  <div class="table"><table>
+    <thead><tr><th>Trap</th><th>Example</th><th>Defence</th></tr></thead>
+    <tbody>
+      <tr><td>Infinite calendars</td><td><code>/calendar?date=2391-04-17</code>, each page linking to the next day</td><td>Per-host page budget; pattern detection on URLs that differ only in a number</td></tr>
+      <tr><td>Query-parameter explosions</td><td>Faceted search: every combination of filters and sort orders</td><td>Strip or limit parameters; cap distinct URLs per path</td></tr>
+      <tr><td>Session ids in URLs</td><td><code>?sid=8f3a…</code> on every link</td><td>Normalize known session parameters; the content-seen test catches the rest</td></tr>
+      <tr><td>Cyclic paths</td><td><code>/a/b/a/b/a/b/…</code> from relative links or symlinks</td><td>Maximum URL length and depth; repeated path segment detection</td></tr>
+      <tr><td>Generated junk</td><td>Pages created on the fly to waste crawler time</td><td>Low quality score lowers priority; per-host budgets based on importance</td></tr>
+    </tbody>
+  </table></div>
+  <p>The strongest single signal is an impossibly large number of URLs for one host compared with its importance. Budgets per host, scaled by importance, turn every trap into a bounded cost.</p>
+</section>
+
+<section id="storage">
+  <h2>Storage</h2>
+  <ul class="tags"><li><a href="databases.html">Databases</a></li><li><a href="cassandra-vs-cockroachdb.html">Cassandra</a></li></ul>
+<pre><code>urls  (Cassandra, partitioned by url_hash)
+  url_hash      blob     PRIMARY KEY    -- 64-bit hash of the normalized URL
+  url           text
+  host          text
+  last_fetched  timestamp
+  next_fetch    timestamp
+  content_hash  blob
+  priority      float
+  status        int      -- last HTTP status</code></pre>
+  <ul class="plain">
+    <li><strong>Page bodies:</strong> compressed, in object storage or a distributed file system, batched into large files (WARC format, many pages per file) because billions of 100 KB objects are expensive to manage one by one.</li>
+    <li><strong>URL metadata:</strong> billions of rows written at thousands a second and read by key: a wide-column store such as Cassandra, Bigtable or HBase. LSM storage suits the insert-heavy load, and tunable consistency is fine because a crawl tolerates slight staleness.</li>
+    <li><strong>Seen sets:</strong> sharded in memory (Bloom filter or hash set) on the crawler machines that own those hosts, backed by the URL table.</li>
+  </ul>
+</section>
+
+<section id="distribution">
+  <h2>Distributing the crawl</h2>
+  <ul class="tags"><li><a href="sharding.html">Consistent hashing</a></li></ul>
+  <p>Partition everything by <strong>host</strong>. A consistent hash of the hostname picks the crawler node that owns that host's frontier queue, its URL-seen and content-seen shards, and its robots and DNS cache entries. Politeness then needs no coordination, and most lookups are local.</p>
+  <p>When an extractor finds a link to a host owned by another node, it batches those URLs and sends them to the owner. Most links on a page point to the same site, so cross-node traffic is a minority.</p>
+  <p><strong>Failures:</strong> a four-week crawl will lose machines. Each node checkpoints its frontier and seen sets to remote storage every few minutes. When a node dies, consistent hashing hands its hosts to neighbours, which load the latest checkpoint and continue; a few minutes of work is redone, and the dedupe tests make that harmless.</p>
+</section>
+
+<section id="freshness">
+  <h2>Freshness and recrawling</h2>
+  <ul class="tags"><li>Production</li></ul>
+  <p>After the first pass the crawler becomes a scheduler: each URL's next fetch time depends on how often it has changed before and how important it is. A news homepage may be fetched every few minutes, an old blog post every few months.</p>
+  <ul class="plain">
+    <li>Use <strong>conditional requests</strong> (<code>If-Modified-Since</code>, <code>If-None-Match</code>): an unchanged page costs a 304 with no body.</li>
+    <li>Read <strong>sitemaps</strong>, which list URLs with last-modified dates, and accept push notifications where sites offer them (such as IndexNow).</li>
+    <li>Compare the new content hash with the old one; emit <code>page.changed</code> only when it differs, so the indexer doesn't redo work.</li>
+  </ul>
+</section>
+
+<section id="observability">
+  <h2>Observability</h2>
+  <ul class="tags"><li>Production</li></ul>
+  <div class="table"><table>
+    <thead><tr><th>Signal</th><th>Why</th><th>Alert when</th></tr></thead>
+    <tbody>
+      <tr><td>Pages fetched per second, per node</td><td>On track for the 4-week goal</td><td>Below 6,200/s overall for an hour</td></tr>
+      <tr><td>Response codes and timeouts by host</td><td>Blocking, broken sites, our own bugs</td><td>A big site starts returning 403 or 429</td></tr>
+      <tr><td>DNS lookup latency and failures</td><td>The classic hidden bottleneck</td><td>p99 above 100 ms</td></tr>
+      <tr><td>URLs per host in the frontier, top hosts</td><td>Traps grow here first</td><td>A low-importance host in the top 100</td></tr>
+      <tr><td>Duplicate rate (content seen)</td><td>Normalization and trap rules working</td><td>Above 10%</td></tr>
+    </tbody>
+  </table></div>
+</section>
+
+<section id="risks">
+  <h2>Risks and v2</h2>
+  <ul class="tags"><li>Wrap-up</li></ul>
+  <div class="table"><table>
+    <thead><tr><th>Risk</th><th>How you detect it</th><th>Mitigation</th></tr></thead>
+    <tbody>
+      <tr><td>Overloading a website</td><td>Latency and error rates per host, complaints</td><td>Per-host queues, adaptive delays, crawl-delay, a contact URL</td></tr>
+      <tr><td>Crawl budget wasted on traps and duplicates</td><td>Per-host URL counts, duplicate rate</td><td>Budgets scaled by importance, URL normalization, pattern rules</td></tr>
+      <tr><td>Important new pages never crawled</td><td>Sample known URLs, Bloom false-positive estimate</td><td>Size the filter generously; exact check for high-priority URLs</td></tr>
+      <tr><td>Node failure loses weeks of state</td><td>Checkpoint age</td><td>Frequent checkpoints, consistent hashing reassignment</td></tr>
+      <tr><td>Legal and privacy issues</td><td>Takedown requests</td><td>Obey robots.txt and removal requests; don't crawl behind logins</td></tr>
+    </tbody>
+  </table></div>
+  <p><strong>v2 ideas:</strong> a rendering tier with headless browsers for JavaScript sites, image and PDF processors, near-duplicate detection with SimHash, and a link graph for importance scoring.</p>
+</section>
+
+<section id="presenting">
+  <h2>Presenting it in 45 minutes</h2>
+  <ul class="tags"><li>Interview script</li></ul>
+  <div class="table"><table>
+    <thead><tr><th>Step</th><th>Time</th><th>What to cover</th></tr></thead>
+    <tbody>
+      <tr><td>1. Clarify</td><td class="num">5 min</td><td>Scale, content types, protocols, politeness, freshness</td></tr>
+      <tr><td>2. Estimate</td><td class="num">4 min</td><td>6,200 pages/s, 1.5 PB (2.14 PB provisioned), 120 GB checksum sets</td></tr>
+      <tr><td>3. The basic loop</td><td class="num">4 min</td><td>Pick, resolve, fetch, parse, filter, add</td></tr>
+      <tr><td>4. Draw the whole system</td><td class="num">7 min</td><td>Frontier, fetchers, DNS and robots caches, dedupe, blob store, extractor</td></tr>
+      <tr><td>5. Deep dive: frontier</td><td class="num">10 min</td><td>Front priority queues, per-host back queues, heap of next-allowed times</td></tr>
+      <tr><td>6. Deep dive: dedupe and traps</td><td class="num">10 min</td><td>URL vs content seen, Bloom filters, normalization, budgets</td></tr>
+      <tr><td>7. Distribution and failure</td><td class="num">5 min</td><td>Partition by host, consistent hashing, checkpoints</td></tr>
+    </tbody>
+  </table></div>
+  <div class="say"><p>"15 billion pages in four weeks is about 6,200 pages a second, 5 Gb/s and 1.5 petabytes. The frontier has priority queues in front and one queue per host behind, ordered by when each host may next be contacted, so we fetch important pages first and never hit a site with more than one connection. Workers use a local DNS cache and cached robots.txt rules. After fetching, a content checksum drops duplicates; extracted links are normalized, filtered and checked against a URL-seen set before going back into the frontier. Everything is partitioned by host with consistent hashing, so politeness needs no coordination, and nodes checkpoint so a failure costs minutes, not weeks."</p></div>
+</section>
+
+<section id="numbers">
+  <h2>Numbers to remember</h2>
+  <ul class="tags"><li>Cheat sheet</li></ul>
+  <div class="table"><table><tbody>
+    <tr><td>4 weeks</td><td class="num">≈ 2.4M seconds</td></tr>
+    <tr><td>15B pages in 4 weeks</td><td class="num">≈ 6,200 pages a second</td></tr>
+    <tr><td>15B × 100 KB</td><td class="num">1.5 PB (2.14 PB at 70% full)</td></tr>
+    <tr><td>15B × 8-byte checksum</td><td class="num">120 GB</td></tr>
+    <tr><td>Bloom filter at 10 bits per item</td><td class="num">~1% false positives</td></tr>
+    <tr><td>robots.txt cache</td><td class="num">~1 day per host</td></tr>
+  </tbody></table></div>
+</section>
+  </article>
+</div>
+</main>
+
+<footer class="site"><div class="wrap">Part of Classic System Design, a companion to the <a href="https://devlcodes.github.io/agentic-ai-notebook/system-design/index.html">agentic system designs</a>. The 3D views use Three.js loaded from a CDN, so they need a connection; the text and tables cover the same ground. Figures marked illustrative show the shape of a system, not measured numbers. Check vendor docs before relying on a specific product limit.</div></footer>
+<script>
+(function(){
+  var $ = function(id){ return document.getElementById(id); };
+  var NS = [1e8, 1e9, 5e9, 15e9, 5e10];
+  function fmt(n){ if (n >= 1e9) return +(n/1e9).toFixed(n < 1e10 ? 1 : 0) + 'B'; if (n >= 1e6) return +(n/1e6).toFixed(n < 1e7 ? 1 : 0) + 'M'; if (n >= 1e3) return +(n/1e3).toFixed(n < 1e4 ? 1 : 0) + 'k'; return String(Math.round(n)); }
+  function bytes(b){ if (b >= 1e12) return +(b/1e12).toFixed(1) + ' TB'; if (b >= 1e9) return +(b/1e9).toFixed(b < 1e10 ? 1 : 0) + ' GB'; return Math.round(b/1e6) + ' MB'; }
+  function pct(p){ if (p >= 0.1) return (p*100).toFixed(0) + '%'; if (p >= 0.001) return (p*100).toFixed(2) + '%'; return (p*100).toExponential(1) + '%'; }
+  function run(){
+    var n = NS[+$('bf-n').value], b = +$('bf-b').value;
+    $('bf-n-o').textContent = fmt(n); $('bf-b-o').textContent = b + ' bits';
+    var k = Math.max(1, Math.round(b * Math.LN2)), p = Math.pow(1 - Math.exp(-k / b), k);
+    var mem = n * b / 8, exact = n * 8, lost = 5e9 * p;
+    $('bf-m').innerHTML = '<div class="metric"><span class="n">' + bytes(mem) + '</span><span class="l">filter size</span><small>vs ' + bytes(exact) + ' exact</small></div>' +
+      '<div class="metric"><span class="n">' + k + '</span><span class="l">hash functions</span></div>' +
+      '<div class="metric"><span class="n">' + pct(p) + '</span><span class="l">false positives</span></div>' +
+      '<div class="metric"><span class="n"' + (lost > 1e7 ? ' style="color:var(--c-dlq)"' : '') + '>' + fmt(lost) + '</span><span class="l">pages never crawled</span><small>of 5B new URLs tested</small></div>';
+    var msg;
+    if (p > 0.05) msg = 'Too small: ' + pct(p) + ' of new URLs look already seen and are silently skipped, about ' + fmt(lost) + ' pages. Spend more bits per URL.';
+    else if (p > 0.002) msg = 'A common setting: ' + bytes(mem) + ' of RAM instead of ' + bytes(exact) + ', but ' + fmt(lost) + ' new pages are still skipped. Acceptable for low-priority URLs; check high-priority ones against the exact store.';
+    else msg = 'Very accurate: only about ' + fmt(lost) + ' pages lost, using ' + bytes(mem) + ' (' + Math.round(100 * mem / exact) + '% of an exact 8-byte set). Each extra bit per URL roughly cuts false positives by a third to a half.';
+    if (mem > 5e10) msg += ' At ' + bytes(mem) + ', shard the filter by host across crawler nodes, which you would do anyway.';
+    $('bf-out').textContent = msg;
+  }
+  ['bf-n','bf-b'].forEach(function(id){ $(id).addEventListener('input', run); });
+  run();
+})();
+
+</script>
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+  }
+}
+</script>
+<script type="module">
+import { boot } from './assets/scene3d.js';
+const D = {};
+D.hero = {
+  hero: true,
+  loop: 17,
+  view: { target: [-1, 0, 0], w: 30, d: 21, el: 52 },
+  steps: [
+    { t: 0.0, text: 'Seed URLs enter the frontier, which keeps priority queues in front and one queue per website behind.' },
+    { t: 1.6, text: 'A fetcher takes the next URL from a host whose politeness delay has passed.' },
+    { t: 2.8, text: 'It resolves the hostname through a local DNS cache instead of asking a remote resolver every time.' },
+    { t: 4.0, text: 'With robots.txt rules already cached for this host, it downloads the page.' },
+    { t: 6.2, text: 'The extractor checks the page\'s checksum. It hasn\'t been seen before, so the page goes to the blob store and an event goes to the indexer.' },
+    { t: 8.4, text: 'It pulls out the links, normalizes them and runs them through URL filters and the URL-seen test.' },
+    { t: 10.2, text: 'Two links were already seen and are dropped. The new ones go back into the frontier, into their hosts\' queues.' },
+    { t: 12.4, text: 'Thousands of fetchers run this loop in parallel, about 6,200 pages a second.' },
+  ],
+  build(c) {
+    const { V, C, P } = c;
+    const seeds = c.obj('cards', -13, 0, 'Seed URLs');
+    const fr = c.obj(c.SHAPES.topic({ parts: 3, len: 3.4, color: C.cross }), -7.5, 0, 'URL frontier', 'priority · per host');
+    const fe = c.obj(c.SHAPES.server({ emi: C.ingest }), -1.5, 0, 'Fetchers', 'async HTTP');
+    const dns = c.obj(c.SHAPES.database(C.gov, { r: 0.7, tiers: 2 }), -5.5, -5.5, 'DNS cache');
+    const web = c.obj(c.SHAPES.browser(0x8795a3), 3, -5.5, 'example.com', 'robots.txt cached');
+    const ex = c.obj(c.SHAPES.server({ color: 0x8a6a2e, emi: C.serve }), 5, 0, 'Extractor', 'content seen? · links');
+    const blob = c.obj('bucket', 11, 0, 'Blob store', 'compressed pages');
+    const flt = c.obj(c.SHAPES.shield(C.gov), 5, 5.5, 'URL filter + seen?', 'rules · Bloom filter');
+    c.lane([V(-13, 0), V(11, 0)]);
+    c.lane([V(-1.5, 0), V(-1.5, -3), V(-5.5, -3), V(-5.5, -5.5)]);
+    c.lane([V(-1.5, -3), V(3, -3), V(3, -5.5)]);
+    c.lane([V(5, 0), V(5, 5.5), V(-7.5, 5.5), V(-7.5, 0)]);
+    c.lane([V(5, 5.5), V(8.5, 5.5)]);
+    c.packet({ pts: [V(-13, 0), V(-7.5, 0)], t0: 0.2, t1: 1.2, n: 3, st: 0.2, kind: 'doc', s: 0.7, from: seeds, to: fr });
+    c.packet({ pts: [V(-7.5, 0), V(-1.5, 0)], t0: 1.7, t1: 2.5, kind: 'ask', to: fe, label: 'example.com/a' });
+    c.packet({ pts: [V(-1.5, 0), V(-1.5, -3), V(-5.5, -3), V(-5.5, -5.5)], t0: 2.9, t1: 3.4, kind: 'span', to: dns, label: 'IP?' });
+    c.packet({ pts: [V(-5.5, -5.5), V(-5.5, -3), V(-1.5, -3), V(-1.5, 0)], t0: 3.4, t1: 3.9, kind: 'span', color: P.ship, to: fe });
+    c.packet({ pts: [V(-1.5, 0), V(-1.5, -3), V(3, -3), V(3, -5.5)], t0: 4.1, t1: 4.9, kind: 'ask', to: web, label: 'GET /a' });
+    c.packet({ pts: [V(3, -5.5), V(3, -3), V(-1.5, -3), V(-1.5, 0)], t0: 5.0, t1: 5.8, kind: 'doc', to: fe, label: 'HTML' });
+    c.packet({ pts: [V(-1.5, 0), V(5, 0)], t0: 6.0, t1: 6.7, kind: 'doc', to: ex });
+    c.packet({ pts: [V(5, 0), V(11, 0)], t0: 6.9, t1: 7.8, kind: 'doc', color: P.ship, to: blob, label: 'new page' });
+    c.packet({ pts: [V(5, 0), V(5, 5.5)], t0: 8.5, t1: 9.3, n: 5, st: 0.12, kind: 'span', s: 1.3, to: flt, label: 'links' });
+    c.packet({ pts: [V(5, 5.5), V(8.5, 5.5)], t0: 10.2, t1: 10.9, n: 2, st: 0.15, kind: 'span', s: 1.3, color: P.bad, label: 'seen: drop' });
+    c.packet({ pts: [V(5, 5.5), V(-7.5, 5.5), V(-7.5, 0)], t0: 10.3, t1: 11.9, n: 3, st: 0.15, kind: 'span', s: 1.3, color: P.ship, to: fr, label: 'new URLs' });
+    c.packet({ pts: [V(-7.5, 0), V(-1.5, 0)], t0: 12.5, t1: 13.3, n: 5, st: 0.25, kind: 'ask', s: 0.7, to: fe });
+    c.packet({ pts: [V(-1.5, 0), V(5, 0)], t0: 13.5, t1: 14.3, n: 5, st: 0.25, kind: 'doc', s: 0.7, to: ex });
+    c.note('crawl loop · ~6,200 pages/s', -1.5, 8);
+  },
+};
+D.trap3d = {
+  loop: 15,
+  view: { target: [-2, 0, 1.2], w: 33, d: 16, el: 48 },
+  steps: [
+    { t: 0.0, text: 'Three websites, three back queues. Each queue belongs to exactly one host, so only one fetcher ever talks to that host.' },
+    { t: 1.6, text: 'Fetchers take one URL per host and then wait: each host gets a delay before its next request.' },
+    { t: 4.6, text: 'Site C is a calendar. Every page links to the next day, forever, so its queue keeps growing.' },
+    { t: 8.0, text: 'Site C hits its per-host budget and a pattern rule (URLs that differ only by a date). New links from it are dropped.' },
+    { t: 10.6, text: 'Sites A and B keep being crawled at their normal pace. The trap cost a bounded amount of work and slowed nobody else.' },
+  ],
+  build(c) {
+    const { V, C, P } = c;
+    const zs = [-4.5, 0, 4.5], names = ['Site A', 'Site B', 'Site C · calendar'];
+    const qs = zs.map((z, i) => c.obj(c.SHAPES.topic({ parts: 1, len: 3, color: C.cross }), -7, z, i === 0 ? 'Per-host queues' : ''));
+    const fe = c.obj(c.SHAPES.server({ emi: C.ingest, w: 1.6 }), 0, 0, 'Fetchers', 'one host each');
+    const sites = zs.map((z, i) => c.obj(c.SHAPES.browser(i === 2 ? C.dlq : 0x8795a3), 8, z, names[i]));
+    const bud = c.obj(c.SHAPES.shield(C.gov), -12.5, 4.5, 'Budget + rules', 'drop trap URLs');
+    zs.forEach((z) => { c.lane([V(-7, z), V(-3.5, z), V(-3.5, 0), V(0, 0)]); c.lane([V(0, 0), V(3.5, 0), V(3.5, z), V(8, z)]); });
+    c.lane([V(8, 4.5), V(8, 7.5), V(-12.5, 7.5), V(-12.5, 4.5), V(-7, 4.5)]);
+    [0, 1].forEach((r) => zs.forEach((z, i) => {
+      const t = 1.7 + r * 4.5 + i * 0.5;
+      c.packet({ pts: [V(-7, z), V(-3.5, z), V(-3.5, 0), V(0, 0)], t0: t, t1: t + 0.8, kind: 'ask', s: 0.8, to: fe });
+      c.packet({ pts: [V(0, 0), V(3.5, 0), V(3.5, z), V(8, z)], t0: t + 0.9, t1: t + 1.6, kind: 'ask', s: 0.8, to: sites[i] });
+    }));
+    c.packet({ pts: [V(8, 4.5), V(8, 7.5), V(-12.5, 7.5), V(-12.5, 4.5), V(-7, 4.5)], t0: 4.7, t1: 6.8, n: 6, st: 0.18, kind: 'span', s: 1.3, color: P.bad, to: qs[2], label: '?date=+1 day' });
+    c.packet({ pts: [V(8, 4.5), V(8, 7.5), V(-12.5, 7.5), V(-12.5, 4.5)], t0: 8.1, t1: 9.8, n: 6, st: 0.18, kind: 'span', s: 1.3, color: P.bad, to: bud, label: 'dropped' });
+    [0, 1].forEach((i) => { const z = zs[i]; const t = 10.8 + i * 0.5;
+      c.packet({ pts: [V(-7, z), V(-3.5, z), V(-3.5, 0), V(0, 0)], t0: t, t1: t + 0.8, kind: 'ask', s: 0.8, to: fe });
+      c.packet({ pts: [V(0, 0), V(3.5, 0), V(3.5, z), V(8, z)], t0: t + 0.9, t1: t + 1.6, kind: 'ask', s: 0.8, to: sites[i] }); });
+  },
+};
+
+boot(D);
+</script>
+</body>
+</html>

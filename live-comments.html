@@ -1,0 +1,652 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Live Comments · Classic System Design</title>
+<meta name="description" content="Design live comments for posts and live streams: push over WebSockets, a stream-to-gateway registry, and ranking, batching and sub-sharding for hot streams.">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700&family=Instrument+Sans:ital,wght@0,400;0,500;0,600;1,400&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+  /* Layout: a slim site bar, then either a card grid (home), a sticky contents rail + reading column (articles), or a filterable term list (glossary). Light, single look. */
+  :root {
+    color-scheme: light;
+    --bg: #e9ecef; --paper: #f7f8f9; --ink: #1c2530; --muted: #586473; --line: #cdd4dc; --line-strong: #9aa5b1;
+    --accent: #4255d4; --accent-ink: #ffffff; --track: #d3d9e0; --code-bg: #eef1f4; --wire: #7d8996;
+    --c-ingest: #2a9d8f; --c-kb: #4d5fd8; --c-serve: #d7932a; --c-model: #e2674f; --c-gov: #b2456e; --c-cross: #4a5562; --c-dlq: #b23a3a; --c-ok: #2f8f5b;
+    --t-src: #e4e8ec; --t-ingest: #d8eeea; --t-kb: #dfe3fa; --t-serve: #f8ead2; --t-model: #fbe1da; --t-gov: #f3dde6; --t-cross: #dfe2e6; --t-dlq: #f6dddb;
+    --font-display: "Bricolage Grotesque", "Avenir Next", "Segoe UI", system-ui, sans-serif;
+    --font-body: "Instrument Sans", "Helvetica Neue", "Segoe UI", system-ui, sans-serif;
+    --font-mono: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  @media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
+  body { margin: 0; background: var(--bg); color: var(--ink); font-family: var(--font-body); font-size: 16px; line-height: 1.6; }
+  a { color: var(--accent); }
+  .wrap { max-width: 1240px; margin: 0 auto; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
+
+  .sitebar { border-bottom: 1px solid var(--line); background: var(--paper); }
+  .sitebar .wrap { display: flex; align-items: center; gap: 18px; flex-wrap: wrap; padding-block: 12px; }
+  .brand { font-family: var(--font-display); font-weight: 700; font-size: 17px; color: var(--ink); text-decoration: none; margin-right: auto; }
+  .sitebar nav { display: flex; gap: 16px; flex-wrap: wrap; font-size: 14px; }
+  .sitebar nav a { color: var(--muted); text-decoration: none; }
+  .sitebar nav a:hover, .sitebar nav a[aria-current="page"] { color: var(--ink); }
+  .sitebar nav a[aria-current="page"] { font-weight: 600; }
+
+  .intro { padding-block: 40px 8px; display: grid; gap: 10px; max-width: 820px; }
+  .eyebrow { margin: 0; font-family: var(--font-mono); font-size: 12px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+  h1 { margin: 0; font-family: var(--font-display); font-weight: 700; font-size: clamp(30px, 5vw, 46px); line-height: 1.05; text-wrap: balance; }
+  .intro .lead { font-size: 18px; margin: 0; }
+
+  .doc { display: grid; grid-template-columns: 220px minmax(0, 1fr); gap: 48px; padding-block: 36px 72px; }
+  .toc { position: sticky; top: calc(env(safe-area-inset-top, 0px) + 20px); align-self: start; }
+  .toc p { margin: 0 0 8px; font-family: var(--font-mono); font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+  .toc ol { margin: 0; padding: 0; list-style: none; display: grid; gap: 2px; counter-reset: toc; }
+  .toc li { counter-increment: toc; }
+  .toc a { display: flex; gap: 8px; padding: 3px 0; font-size: 14px; color: var(--muted); text-decoration: none; }
+  .toc a::before { content: counter(toc, decimal-leading-zero); font-family: var(--font-mono); font-size: 11.5px; padding-top: 2px; color: var(--line-strong); }
+  .toc a:hover { color: var(--ink); }
+  article { min-width: 0; max-width: 760px; }
+  section { padding-bottom: 36px; margin-bottom: 36px; border-bottom: 1px solid var(--line); scroll-margin-top: 20px; }
+  section:last-child { border-bottom: 0; }
+  h2 { margin: 0 0 10px; font-family: var(--font-display); font-weight: 700; font-size: 28px; line-height: 1.15; text-wrap: balance; }
+  h3 { margin: 26px 0 6px; font-family: var(--font-display); font-weight: 600; font-size: 19px; line-height: 1.25; }
+  p { margin: 0 0 14px; }
+  .lead { font-size: 18px; }
+  ul.plain, ol.plain { margin: 0 0 16px; padding-left: 22px; display: grid; gap: 6px; }
+  code { font-family: var(--font-mono); font-size: 0.88em; background: var(--code-bg); padding: 1px 5px; border-radius: 4px; }
+  pre { margin: 0 0 16px; padding: 14px 16px; background: var(--code-bg); border-radius: 10px; overflow-x: auto; font-size: 13px; line-height: 1.55; }
+  pre code { background: none; padding: 0; font-size: inherit; }
+  .table { overflow-x: auto; margin: 0 0 18px; }
+  table { width: 100%; border-collapse: collapse; font-size: 14.5px; line-height: 1.45; }
+  th, td { text-align: left; vertical-align: top; padding: 8px 10px; border-bottom: 1px solid var(--line); }
+  th { font-family: var(--font-mono); font-size: 11.5px; font-weight: 500; letter-spacing: .05em; text-transform: uppercase; color: var(--muted); }
+  td.num { font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .note { border-left: 3px solid var(--accent); background: var(--paper); padding: 12px 16px; border-radius: 0 10px 10px 0; margin: 0 0 18px; }
+  .note p:last-child { margin: 0; }
+  .formula { font-family: var(--font-mono); font-size: 14px; background: var(--paper); border: 1px solid var(--line); border-radius: 10px; padding: 12px 16px; margin: 0 0 16px; overflow-x: auto; white-space: nowrap; }
+  .related { display: flex; flex-wrap: wrap; gap: 8px; margin: 0; padding: 0; list-style: none; }
+  .related a { display: inline-block; padding: 4px 12px; border: 1px solid var(--line); border-radius: 999px; font-size: 14px; color: var(--ink); text-decoration: none; background: var(--paper); }
+  .related a:hover { border-color: var(--ink); }
+  .pager { display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; font-size: 14px; }
+  footer.site { border-top: 1px solid var(--line); padding-block: 20px 40px; font-size: 13px; color: var(--muted); }
+  a:focus-visible, input:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+  /* home */
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 16px; margin: 0 0 40px; padding: 0; list-style: none; }
+  .card { display: grid; gap: 8px; height: 100%; padding: 18px; background: var(--paper); border: 1px solid var(--line); border-radius: 14px; color: var(--ink); text-decoration: none; }
+  .card:hover { border-color: var(--ink); }
+  .card .k { font-family: var(--font-mono); font-size: 11px; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
+  .card h3 { margin: 0; font-size: 20px; }
+  .card p { margin: 0; font-size: 14.5px; color: var(--muted); }
+  .card svg { width: 100%; height: auto; display: block; }
+  .card.feature svg { max-width: 420px; justify-self: center; }
+  .card.feature { grid-column: 1 / -1; grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr); align-items: center; gap: 24px; }
+  .home-h { margin: 28px 0 12px; font-family: var(--font-display); font-size: 24px; }
+
+  /* glossary */
+  .gl-tools { position: sticky; top: 0; z-index: 2; background: var(--bg); padding-block: 12px; display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+  .gl-tools input { flex: 1 1 260px; min-width: 0; font: 15px var(--font-body); padding: 9px 12px; border-radius: 10px; border: 1px solid var(--line-strong); background: #fff; color: var(--ink); }
+  .gl-letters { display: flex; flex-wrap: wrap; gap: 4px; font-family: var(--font-mono); font-size: 13px; }
+  .gl-letters a { padding: 2px 6px; border-radius: 6px; text-decoration: none; color: var(--muted); }
+  .gl-letters a:hover { background: var(--paper); color: var(--ink); }
+  .gl { max-width: 860px; }
+  .gl-item { margin: 0; }
+  .gl-item { display: grid; grid-template-columns: 220px minmax(0, 1fr); gap: 16px; padding: 12px 0; border-bottom: 1px solid var(--line); scroll-margin-top: 70px; }
+  .gl-item dt { font-weight: 600; }
+  .gl-item dt small { display: block; font-weight: 400; font-family: var(--font-mono); font-size: 11px; color: var(--muted); letter-spacing: .04em; text-transform: uppercase; margin-top: 2px; }
+  .gl-item dd { margin: 0; }
+  .gl-item dd .see { font-size: 13.5px; }
+  .gl-letter { margin: 26px 0 4px; font-family: var(--font-display); font-size: 22px; scroll-margin-top: 70px; }
+
+  @media (max-width: 900px) {
+    .doc { grid-template-columns: minmax(0, 1fr); gap: 24px; padding-block: 28px 56px; }
+    .toc { position: static; }
+    .toc ol { grid-template-columns: repeat(2, minmax(0, 1fr)); column-gap: 12px; }
+    .card.feature { grid-template-columns: minmax(0, 1fr); }
+  }
+  @media (max-width: 640px) {
+    .gl-item { grid-template-columns: minmax(0, 1fr); gap: 4px; }
+    h2 { font-size: 24px; }
+    .intro .lead, .lead { font-size: 16.5px; }
+  }
+
+  /* diagrams */
+  .fig { margin: 6px 0 24px; overflow-x: auto; }
+  .fig svg { display: block; width: 100%; height: auto; min-width: 600px; }
+  .fig figcaption { margin-top: 8px; font-size: 13px; line-height: 1.45; color: var(--muted); }
+  .dg text { font-family: var(--font-body); font-size: 13px; fill: var(--ink); }
+  .dg .sm { font-size: 11.5px; fill: var(--muted); }
+  .dg .small { font-size: 12px; }
+  .dg .b { font-weight: 600; }
+  .dg .mono { font-family: var(--font-mono); }
+  .dg .it { font-style: italic; }
+  .dg .mute { fill: var(--muted); }
+  .dg .gov { fill: var(--c-gov); font-weight: 600; }
+  .dg .okt { fill: var(--c-ok); font-weight: 600; }
+  .dg .bad { fill: var(--c-dlq); font-weight: 600; }
+  .dg .cap { font-family: var(--font-mono); font-size: 11px; letter-spacing: .06em; fill: var(--muted); }
+  .dg .big { font-family: var(--font-display); font-size: 30px; font-weight: 700; fill: var(--ink); }
+  .dg .box { fill: var(--paper); stroke: var(--line-strong); stroke-width: 1.25; }
+  .dg .ghost { fill: none; stroke: var(--line-strong); stroke-width: 1.25; stroke-dasharray: 5 5; }
+  .dg .track { fill: var(--track); }
+  .dg .rule { stroke: var(--line); stroke-width: 1; }
+  .dg .axis { stroke: var(--line-strong); stroke-width: 1.25; }
+  .dg .wire { fill: none; stroke: var(--wire); stroke-width: 1.4; }
+  .dg .wire.dash { stroke-dasharray: 4 4; }
+  .dg .wire.hot { stroke: var(--accent); stroke-width: 2; }
+  .dg .wire.red { stroke: var(--c-dlq); }
+  .dg .ah { fill: var(--wire); }
+  .dg .xmark { stroke: var(--c-dlq); stroke-width: 1.8; fill: none; }
+  .dg .tick { stroke: var(--c-ok); stroke-width: 2; fill: none; }
+  .dg .k-src { fill: var(--t-src); stroke: #8795a3; stroke-width: 1.5; }
+  .dg .k-ingest { fill: var(--t-ingest); stroke: var(--c-ingest); stroke-width: 1.5; }
+  .dg .k-kb { fill: var(--t-kb); stroke: var(--c-kb); stroke-width: 1.5; }
+  .dg .k-serve { fill: var(--t-serve); stroke: var(--c-serve); stroke-width: 1.5; }
+  .dg .k-model { fill: var(--t-model); stroke: var(--c-model); stroke-width: 1.5; }
+  .dg .k-gov { fill: var(--t-gov); stroke: var(--c-gov); stroke-width: 1.5; }
+  .dg .k-cross { fill: var(--t-cross); stroke: var(--c-cross); stroke-width: 1.5; }
+  .dg .k-dlq { fill: var(--t-dlq); stroke: var(--c-dlq); stroke-width: 1.5; }
+  .dg .k-user { fill: #ffffff; stroke: var(--line-strong); stroke-width: 1.5; }
+  .dg .f-serve { fill: var(--c-serve); } .dg .f-kb { fill: var(--c-kb); } .dg .f-model { fill: var(--c-model); } .dg .f-gov { fill: var(--c-gov); } .dg .f-ingest { fill: var(--c-ingest); } .dg .f-cross { fill: #b8c0c9; } .dg .f-dlq { fill: var(--c-dlq); } .dg .f-ok { fill: var(--c-ok); }
+  .dg .cell { fill: var(--paper); stroke: var(--line-strong); stroke-width: 1; }
+  .dg .cell.hot { fill: var(--t-ingest); stroke: var(--c-ingest); stroke-width: 1.5; }
+  .dg .cell.old { fill: var(--t-kb); stroke: var(--c-kb); }
+  .dg .cell.new { fill: var(--t-ingest); stroke: var(--c-ingest); stroke-width: 1.5; }
+  .dg .cell.gone { fill: var(--paper); stroke: var(--line); }
+  .dg .dot-hr { fill: var(--c-gov); } .dg .dot-it { fill: var(--c-kb); } .dg .dot-eng { fill: var(--c-ingest); } .dg .dot-q { fill: var(--c-serve); stroke: var(--ink); stroke-width: 1.5; }
+  .dg .halo { fill: none; stroke: var(--c-serve); stroke-width: 1.5; stroke-dasharray: 4 4; }
+  .dg .zone { fill: var(--paper); stroke: var(--line); stroke-width: 1; }
+</style>
+
+<style>
+  .lab { margin: 6px 0 26px; padding: 14px 16px 16px; background: var(--paper); border: 1px solid var(--line); border-radius: 14px; }
+  .lab-row { display: flex; flex-wrap: wrap; gap: 10px 18px; align-items: center; margin: 0 0 12px; }
+  .lab-k { font-family: var(--font-mono); font-size: 11px; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
+  .lab label { display: inline-flex; gap: 8px; align-items: center; font-size: 14px; }
+  .lab input[type=range] { width: 150px; accent-color: var(--accent); }
+  .lab input[type=checkbox] { width: 16px; height: 16px; accent-color: var(--accent); }
+  .lab input[type=text] { flex: 1 1 260px; min-width: 0; font: 15px var(--font-body); padding: 8px 11px; border-radius: 9px; border: 1px solid var(--line-strong); background: #fff; color: var(--ink); }
+  .lab output { font-family: var(--font-mono); font-size: 12.5px; min-width: 6ch; font-variant-numeric: tabular-nums; }
+  .seg { display: inline-flex; flex-wrap: wrap; gap: 6px; }
+  .seg button, .chips button { font: 600 13px var(--font-body); color: var(--ink); background: #fff; border: 1px solid var(--line); border-radius: 8px; padding: 6px 12px; cursor: pointer; }
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; }
+  .chips button { font-weight: 500; border-radius: 999px; padding: 4px 11px; font-size: 13px; }
+  .seg button:hover, .chips button:hover { border-color: var(--ink); }
+  .seg button[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+  .seg button:focus-visible, .chips button:focus-visible, .lab input:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .lab-out { margin: 12px 0 0; padding: 10px 12px; background: #fff; border: 1px solid var(--line); border-radius: 10px; font-size: 14.5px; line-height: 1.5; font-variant-numeric: tabular-nums; }
+  .chunks { display: grid; gap: 8px; max-height: 470px; overflow: auto; padding-right: 4px; }
+  .chunk { min-width: 0; padding: 8px 11px; background: #fff; border: 1px solid var(--line); border-left: 4px solid var(--c-kb); border-radius: 8px; font-size: 14px; line-height: 1.5; overflow-wrap: anywhere; }
+  .chunk:nth-child(even) { border-left-color: var(--c-ingest); }
+  .chunk.ans { box-shadow: 0 0 0 2px var(--c-serve); }
+  .chunk .ch { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-bottom: 4px; font-family: var(--font-mono); font-size: 11px; color: var(--muted); }
+  .chunk .pfx { display: block; font-family: var(--font-mono); font-size: 11.5px; color: var(--c-kb); }
+  .chunk .ov { background: var(--track); border-radius: 3px; }
+  .chunk mark { background: #ffe9b3; border-radius: 3px; padding: 0 2px; }
+  .chunk table { width: auto; font-size: 13px; margin: 4px 0; }
+  .chunk td { padding: 2px 10px 2px 0; border-bottom: 1px solid var(--line); }
+  .badge { display: inline-block; padding: 0 7px; border-radius: 999px; border: 1px solid; font-family: var(--font-mono); font-size: 10.5px; line-height: 1.6; }
+  .badge.bad { color: var(--c-dlq); border-color: var(--c-dlq); background: var(--t-dlq); }
+  .badge.ok { color: var(--c-ok); border-color: var(--c-ok); background: #e3f3ea; }
+  .badge.info { color: var(--c-kb); border-color: var(--c-kb); background: var(--t-kb); }
+  .bars { display: grid; gap: 8px; margin: 4px 0 0; }
+  .bar-row { display: grid; grid-template-columns: minmax(0, 150px) minmax(0, 1fr) 46px; gap: 10px; align-items: center; font-size: 14px; }
+  .bar { position: relative; height: 14px; border-radius: 7px; background: var(--track); }
+  .bar i { position: absolute; inset: 0 auto 0 0; border-radius: 7px; background: var(--c-kb); transition: width .3s; }
+  .bar b { position: absolute; top: -4px; bottom: -4px; width: 2px; background: var(--c-dlq); }
+  .bar-row .v { font-family: var(--font-mono); font-size: 12.5px; text-align: right; }
+  .stages { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 10px; padding: 0; list-style: none; font-size: 13px; }
+  .stages li { padding: 2px 10px; border-radius: 999px; border: 1px solid var(--line); color: var(--muted); background: #fff; }
+  .stages li.hit { border-color: var(--accent); color: var(--accent-ink); background: var(--accent); }
+  .stages li.skip { text-decoration: line-through; }
+  .rlist { display: grid; gap: 6px; margin: 0; padding: 0; list-style: none; counter-reset: r; }
+  .rlist li { counter-increment: r; display: grid; grid-template-columns: 28px minmax(0, 1fr) auto; gap: 10px; align-items: center; padding: 6px 10px; background: #fff; border: 1px solid var(--line); border-radius: 8px; font-size: 14px; }
+  .rlist li::before { content: counter(r); font-family: var(--font-mono); font-size: 12px; color: var(--muted); }
+  .rlist li.rel { border-color: var(--c-ok); background: #f0f8f3; }
+  .rlist button { font: 600 12px var(--font-body); padding: 3px 10px; border-radius: 999px; border: 1px solid var(--line-strong); background: #fff; color: var(--ink); cursor: pointer; white-space: nowrap; }
+  .rlist li.rel button { background: var(--c-ok); border-color: var(--c-ok); color: #fff; }
+  .metrics { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 8px; margin: 12px 0 0; }
+  .metric { padding: 8px 10px; background: #fff; border: 1px solid var(--line); border-radius: 10px; }
+  .metric .n { display: block; font-family: var(--font-display); font-size: 24px; font-weight: 700; font-variant-numeric: tabular-nums; }
+  .metric .l { font-family: var(--font-mono); font-size: 11px; letter-spacing: .04em; text-transform: uppercase; color: var(--muted); }
+  .metric small { display: block; font-size: 12px; color: var(--muted); line-height: 1.35; margin-top: 2px; }
+  td.pass { color: var(--c-ok); font-weight: 600; } td.fail { color: var(--c-dlq); font-weight: 600; }
+  .say { border-left: 3px solid var(--c-serve); background: var(--paper); padding: 12px 16px; border-radius: 0 10px 10px 0; margin: 0 0 16px; font-size: 15.5px; }
+  .say p:last-child { margin: 0; }
+</style>
+
+<style>
+  .lab-chart { display: block; width: 100%; height: auto; margin: 4px 0 0; }
+  .lab-chart text { font-family: var(--font-body); font-size: 12px; fill: var(--muted); }
+  .grid-cells { display: grid; gap: 4px; }
+  .srv { display: grid; grid-template-columns: 92px minmax(0,1fr) 70px; gap: 10px; align-items: center; font-size: 14px; }
+  .muted { color: var(--muted); }
+  .lab select { font: 14px var(--font-body); padding: 6px 8px; border-radius: 8px; border: 1px solid var(--line-strong); background: #fff; color: var(--ink); }
+  .lab input[type=number] { width: 9ch; font: 14px var(--font-mono); padding: 6px 8px; border-radius: 8px; border: 1px solid var(--line-strong); background: #fff; color: var(--ink); }
+</style><style>
+  .prompt { margin: 0; font-size: 18px; line-height: 1.5; color: var(--ink); }
+  .prompt q { font-style: italic; }
+  .legend { display: flex; flex-wrap: wrap; gap: 6px 14px; margin: 4px 0 0; padding: 0; list-style: none; font-size: 13px; color: var(--muted); }
+  .legend li { display: flex; align-items: center; gap: 6px; }
+  .legend i { width: 11px; height: 11px; border-radius: 3px; display: inline-block; }
+  .tags { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 16px; padding: 0; list-style: none; }
+  .tags li { font-family: var(--font-mono); font-size: 11px; letter-spacing: .04em; padding: 2px 8px; border-radius: 6px; border: 1px solid var(--line); color: var(--muted); }
+  @media (max-width: 640px) { .prompt { font-size: 16.5px; } }
+</style>
+<link rel="stylesheet" href="assets/scene3d.css">
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs><marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" class="ah" style="fill:#7d8996"/></marker></defs></svg>
+<header class="sitebar"><div class="wrap"><a class="brand" href="index.html">Classic System Design</a><nav aria-label="Site"><a href="index.html">Home</a><a href="index.html#blocks">Building blocks</a><a href="index.html#designs" aria-current="page">Designs</a><a href="https://devlcodes.github.io/agentic-ai-notebook/system-design/index.html">Agentic designs ↗</a></nav></div></header>
+<main>
+<header class="wrap"><div class="intro"><p class="eyebrow">Classic system design walkthrough</p><h1>Live Comments</h1><p class="prompt"><q>Design live comments for posts and live videos, as on Facebook Live or YouTube Live: when someone comments, everyone currently watching that post sees it within seconds. Every minute about 1 million posts and streams are being watched by 50 million people, who write 650,000 comments, and 60% of those land on the 10,000 hottest streams.</q></p><ul class="legend" aria-label="Colour key"><li><i style="background:var(--c-ingest)"></i>Comment write path</li><li><i style="background:var(--c-serve)"></i>Delivery to viewers</li><li><i style="background:var(--c-kb)"></i>Storage and routing state</li><li><i style="background:var(--c-cross)"></i>Streams</li><li><i style="background:var(--c-gov)"></i>Moderation</li></ul></div></header>
+<div class="wrap"><figure class="fig3d hero" id="hero">
+  <div class="stage3d" role="img" aria-label="Animated 3D view: a viewer opens a stream and their gateway registers that it has a viewer of that stream. Another viewer posts a comment; the comment service checks it, writes it to Kafka keyed by stream, and stores it. A fan-out worker reads it, looks up which gateways have viewers of that stream, and sends it once to each of them; each gateway pushes it down the open connections of its local viewers."><p class="hint3">3D · drag to turn</p><button class="reset3 ghost" type="button" hidden>Reset view</button><p class="nogl">The 3D view needs WebGL and a connection, because Three.js loads from a CDN. The sections below cover the same ground.</p></div>
+  <div class="ctl3"><button class="pp" type="button">Pause</button><span class="k">Step</span><div class="steps3"></div><span class="meta3"></span></div>
+  <div class="track3"><div class="fill3"></div></div>
+  <p class="out3" aria-live="polite"></p>
+  <figcaption>Illustrative. The back row is the comment write path; the front row is delivery through the gateways that hold viewers' connections.</figcaption>
+</figure></div>
+<div class="wrap doc">
+  <nav class="toc" aria-label="Sections"><p>The solution</p><ol><li><a href="#requirements">Requirements</a></li><li><a href="#success">Success metrics</a></li><li><a href="#estimates">Estimates</a></li><li><a href="#api">API</a></li><li><a href="#architecture">Architecture</a></li><li><a href="#push">Push, not poll</a></li><li><a href="#routing">Who is watching what</a></li><li><a href="#hot">Hot streams</a></li><li><a href="#lab">Try it: fan out one stream</a></li><li><a href="#storage">Storage</a></li><li><a href="#moderation">Moderation</a></li><li><a href="#deployment">Deployment and failure</a></li><li><a href="#observability">Observability</a></li><li><a href="#risks">Risks and v2</a></li><li><a href="#presenting">Presenting it in 45 minutes</a></li><li><a href="#numbers">Numbers to remember</a></li></ol></nav>
+  <article>
+
+<section id="requirements">
+  <h2>Requirements</h2>
+  <ul class="tags"><li>Clarify</li><li><a href="requirements.html">Non-functional requirements</a></li></ul>
+  <p class="lead">The write rate is modest. The hard parts are knowing who is watching what as people scroll, and fanning comments out to huge audiences concentrated on a few hot streams.</p>
+  <div class="table"><table>
+    <thead><tr><th>Question</th><th>Assumption</th><th>Why it matters</th></tr></thead>
+    <tbody>
+      <tr><td>Audience</td><td class="num">50M viewers, 1M posts or streams being watched</td><td>Sets connections and how fast "who watches what" changes</td></tr>
+      <tr><td>Comments</td><td class="num">650k a minute ≈ 11k a second</td><td>Small, steady write load</td></tr>
+      <tr><td>Skew</td><td class="num">60% on the 10k hottest streams</td><td>Hotspots in both writes and fan-out</td></tr>
+      <tr><td>Latency</td><td class="num">visible to watchers within 10 s, ideally 1–2 s</td><td>Push is required; tunable per surface</td></tr>
+      <tr><td>Delivery</td><td class="num">99% delivered live is fine</td><td>Live delivery can be best effort; the stored comment can't be lost</td></tr>
+      <tr><td>Every comment to everyone?</td><td>No: on busy streams show a ranked, rate-limited sample</td><td>Nobody can read 500 comments a second</td></tr>
+      <tr><td>Consistency</td><td>Availability over consistency</td><td>Comments may arrive slightly out of order or late; never block a viewer</td></tr>
+    </tbody>
+  </table></div>
+  <p>Out of scope: threaded replies, reactions (same design, smaller payloads) and comment search.</p>
+</section>
+
+<section id="success">
+  <h2>Success metrics</h2>
+  <ul class="tags"><li>Define success</li></ul>
+  <div class="table"><table>
+    <thead><tr><th>Kind</th><th>Metric</th><th>Target</th></tr></thead>
+    <tbody>
+      <tr><td>Product</td><td>Comments per viewer-minute; share of viewers who comment</td><td class="num">growing</td></tr>
+      <tr><td>Reliability</td><td>Time from post to visible on other viewers' screens, p95; share delivered live</td><td class="num">&lt; 2 s; &gt; 99%</td></tr>
+      <tr><td>Guardrail</td><td>Abusive comments visible more than a few seconds; gateway reconnect rate</td><td class="num">near zero; steady</td></tr>
+    </tbody>
+  </table></div>
+</section>
+
+<section id="estimates">
+  <h2>Estimates</h2>
+  <ul class="tags"><li>Back of the envelope</li><li><a href="numbers.html">Numbers</a></li></ul>
+  <figure class="fig"><svg viewBox="0 0 722 150" class="dg" role="img" aria-label="Key numbers: 11,000 comments a second, 50 million open connections on about 500 gateway servers, 40 GB of comments an hour, about 1,000 subscription changes per second per gateway">
+    <rect x="10" y="10" width="134" height="92" rx="8" class="k-ingest"/><text x="24" y="52" class="big">11k/s</text><text x="24" y="78" class="sm">comments written</text><text x="24" y="94" class="sm">~6.5k/s on hot streams</text>
+    <rect x="154" y="10" width="134" height="92" rx="8" class="k-serve"/><text x="168" y="52" class="big">50M</text><text x="168" y="78" class="sm">open connections</text><text x="168" y="94" class="sm">~500 gateways</text>
+    <rect x="298" y="10" width="134" height="92" rx="8" class="k-kb"/><text x="312" y="52" class="big">40 GB</text><text x="312" y="78" class="sm">comments an hour</text><text x="312" y="94" class="sm">at ~1 KB each</text>
+    <rect x="442" y="10" width="134" height="92" rx="8" class="k-kb"/><text x="456" y="52" class="big">~500k/s</text><text x="456" y="78" class="sm">viewing changes</text><text x="456" y="94" class="sm">open, scroll, leave</text>
+    <rect x="586" y="10" width="126" height="92" rx="8" class="k-serve"/><text x="600" y="52" class="big">≤10/s</text><text x="600" y="78" class="sm">comments shown</text><text x="600" y="94" class="sm">per viewer, max</text>
+    <text x="10" y="132" class="small">Writes are easy. Fan-out and subscription churn are the system; capping what each viewer sees keeps fan-out bounded.</text>
+  </svg></figure>
+  <ul class="plain">
+    <li><strong>Writes:</strong> 650k ÷ 60 ≈ 11k comments a second. At ~1 KB with metadata, about 11 MB/s or 40 GB an hour. (Notes that say 650 GB an hour are off by about 16×.) One modest Kafka cluster with 100 partitions handles it at ~110 messages a second each.</li>
+    <li><strong>Connections:</strong> 50M viewers at ~100k connections per gateway server ≈ 500 gateways, each with a few GB of RAM for connection state.</li>
+    <li><strong>Subscription churn:</strong> people scroll past posts every few seconds. If each viewer changes what they watch every ~100 s, that is 500k subscribe or unsubscribe events a second. This, not comments, is the busiest write stream.</li>
+    <li><strong>Fan-out:</strong> a hot stream with 1M viewers and 200 comments a second would be 200M pushes a second if sent naively. Capping each viewer at 10 comments a second, batched once a second, makes it 1M small pushes a second for that stream.</li>
+  </ul>
+</section>
+
+<section id="api">
+  <h2>API</h2>
+  <ul class="tags"><li>Interface</li><li><a href="protocols.html">Protocols</a></li></ul>
+<pre><code>WebSocket  wss://live.example.com/ws        (one per app or tab)
+  → { "type": "watch",   "stream_id": "s_91" }      // ActivateViewership
+  → { "type": "unwatch", "stream_id": "s_91" }      // DeactivateViewership
+  ← { "type": "comments", "stream_id": "s_91",
+      "items": [ { "id": "c_77", "user": {…}, "text": "🔥", "ts": … } ] }
+
+POST /api/streams/{id}/comments             (or gRPC SubmitComment)
+  { "client_id": "uuid-for-dedupe", "text": "Great goal!" }
+→ 202 { "comment_id": "c_77" }
+
+GET /api/streams/{id}/comments?before=c_77&amp;limit=50   (history on open)</code></pre>
+  <p>Submitting is a normal request, so it gets retries, auth and rate limits for free; a client-generated id makes retries safe. Receiving is a single long-lived connection per client that multiplexes every stream on screen. gRPC with protobuf is a good choice between our own services and for native apps; browsers use HTTPS or the WebSocket itself.</p>
+</section>
+
+<section id="architecture">
+  <h2>Architecture</h2>
+  <ul class="tags"><li>Whole system</li></ul>
+  <figure class="fig"><svg viewBox="0 0 722 300" class="dg" role="img" aria-label="Architecture: comment service writes to Kafka keyed by stream and to Cassandra; fan-out workers read Kafka, look up the subscription registry for which gateways have viewers of the stream, and send each comment once per gateway; gateways push to local viewers over WebSockets and keep the registry up to date">
+    <text x="10" y="22" class="cap">WRITE PATH · ~11K/S</text>
+    <rect x="10" y="34" width="90" height="40" rx="8" class="k-user"/><text x="55" y="58" class="small b" text-anchor="middle">Commenter</text>
+    <path d="M100 54 L130 54" class="wire" marker-end="url(#ah)"/>
+    <rect x="132" y="34" width="120" height="40" rx="8" class="k-ingest"/><text x="192" y="52" class="small b" text-anchor="middle">Comment service</text><text x="192" y="67" class="sm" text-anchor="middle">auth · limits · filters</text>
+    <path d="M252 54 L292 54" class="wire" marker-end="url(#ah)"/>
+    <rect x="294" y="34" width="130" height="40" rx="20" class="k-cross"/><text x="359" y="52" class="small b" text-anchor="middle">Kafka: comments</text><text x="359" y="67" class="sm" text-anchor="middle">key = stream_id</text>
+    <path d="M424 54 L464 54" class="wire" marker-end="url(#ah)"/>
+    <rect x="466" y="34" width="110" height="40" rx="18" class="k-kb"/><text x="521" y="58" class="small b" text-anchor="middle">Cassandra</text>
+    <text x="604" y="50" class="sm">history,</text><text x="604" y="64" class="sm">source of truth</text>
+    <path d="M359 74 L359 120" class="wire" marker-end="url(#ah)"/>
+    <text x="10" y="112" class="cap">FAN-OUT</text>
+    <rect x="294" y="122" width="130" height="40" rx="8" class="k-serve"/><text x="359" y="140" class="small b" text-anchor="middle">Fan-out workers</text><text x="359" y="155" class="sm" text-anchor="middle">rank · sample · batch</text>
+    <path d="M424 142 L464 142" class="wire" marker-end="url(#ah)"/><text x="444" y="134" class="sm" text-anchor="middle">who?</text>
+    <rect x="466" y="122" width="150" height="40" rx="8" class="k-kb"/><text x="541" y="140" class="small b" text-anchor="middle">Subscription registry</text><text x="541" y="155" class="sm" text-anchor="middle">stream → gateways</text>
+    <path d="M330 162 L200 214 M359 162 L359 214 M388 162 L520 214" class="wire hot" marker-end="url(#ah)"/><text x="470" y="190" class="sm">one copy per gateway</text>
+    <text x="10" y="206" class="cap">DELIVERY · 50M CONNECTIONS</text>
+    <rect x="130" y="216" width="130" height="40" rx="8" class="k-serve"/><text x="195" y="240" class="small b" text-anchor="middle">Gateway 1</text>
+    <rect x="294" y="216" width="130" height="40" rx="8" class="k-serve"/><text x="359" y="240" class="small b" text-anchor="middle">Gateway 2</text>
+    <rect x="458" y="216" width="130" height="40" rx="8" class="k-serve"/><text x="523" y="240" class="small b" text-anchor="middle">Gateway 500</text>
+    <path d="M588 230 C650 230 650 150 618 148" class="wire dash" marker-end="url(#ah)"/><text x="640" y="196" class="sm">watch /</text><text x="640" y="210" class="sm">unwatch</text>
+    <path d="M160 256 L140 284 M195 256 L195 284 M230 256 L250 284 M330 256 L320 284 M388 256 L400 284 M523 256 L523 284" class="wire hot"/>
+    <text x="10" y="294" class="sm">Each gateway pushes to its own viewers of the stream over WebSocket (SSE as a fallback).</text>
+  </svg><figcaption>Routing is by gateway, not by user: the fan-out sends one copy of a comment to each gateway that has at least one viewer of the stream, and the gateway does the last fan-out in memory.</figcaption></figure>
+  <ul class="plain">
+    <li><strong>Comment service:</strong> stateless; checks auth, rate limits and content filters, assigns an id, and appends to Kafka keyed by <code>stream_id</code>, so a stream's comments stay in order on one partition.</li>
+    <li><strong>Storage consumer:</strong> writes comments to Cassandra for history. Kafka keeps them if the database is slow.</li>
+    <li><strong>Fan-out workers:</strong> consume Kafka, decide what to deliver (everything on quiet streams, a ranked sample on busy ones), look up which gateways care, and send.</li>
+    <li><strong>Gateways:</strong> hold WebSocket connections, keep a local map <code>stream → my connections</code>, and keep the registry up to date as viewers watch and unwatch.</li>
+  </ul>
+</section>
+
+<section id="push">
+  <h2>Push, not poll</h2>
+  <ul class="tags"><li>Deep dive 1</li><li><a href="protocols.html#push">Polling vs push</a></li></ul>
+  <p class="lead">Facebook first tried polling for new comments and dropped it: to feel live, every page would need to poll every few seconds, and the request rate would dwarf the actual comments.</p>
+  <p>With 50M viewers polling every 5 seconds, that is 10M requests a second, nearly all answering "nothing new", and comments still arrive 2.5 seconds late on average. Pushing over an open connection sends only real updates, as soon as they exist. The cost is state: someone must hold 50M connections and know which ones care about each stream.</p>
+  <div class="table"><table>
+    <thead><tr><th>Option</th><th>Fit</th></tr></thead>
+    <tbody>
+      <tr><td>Short polling</td><td>Simple and cacheable, but wasteful and laggy at this scale; fine for a page with a few comments a day</td></tr>
+      <tr><td>Server-Sent Events</td><td>One-way server push over HTTP with automatic reconnect; enough for receiving comments</td></tr>
+      <tr><td>WebSocket</td><td>Two-way; lets watch and unwatch messages travel on the same connection. The usual choice</td></tr>
+    </tbody>
+  </table></div>
+  <p>Batch what you push: one message a second per stream carrying several comments costs far less than one message per comment, and viewers can't tell the difference.</p>
+</section>
+
+<section id="routing">
+  <h2>Who is watching what</h2>
+  <ul class="tags"><li>Deep dive 2</li><li><a href="sharding.html">Sharding</a></li></ul>
+  <p class="lead">The registry is a fast-changing map from stream to audience. How you key it decides whether it melts under hot streams.</p>
+  <ol class="plain">
+    <li><strong>Key by gateway, not user.</strong> Storing <code>stream → [user ids]</code> means millions of entries for a hot stream and an update on every scroll. Storing <code>stream → {gateways}</code> means at most ~500 entries per stream, and a gateway only updates the registry when its <em>first</em> viewer of a stream arrives or its <em>last</em> one leaves. Most scrolling stays inside the gateway.</li>
+    <li><strong>Prefer composite keys to big lists.</strong> If you do keep per-user data, store <code>(stream_id, gateway_id)</code> as separate keys and read them with a prefix scan, rather than one big list value that must be locked and rewritten on every change.</li>
+    <li><strong>Expire, don't trust.</strong> Every entry has a TTL of a minute or two, refreshed by the gateway while it still has viewers. A crashed gateway's entries vanish by themselves, so the fan-out stops sending to it.</li>
+    <li><strong>Shard by stream id.</strong> The registry (Redis or a similar store) is partitioned by <code>stream_id</code>, so a lookup touches one shard. Gateways are found by id, so delivery is "send to gateway 17", not a broadcast.</li>
+  </ol>
+  <div class="note"><p><strong>Write locally, read globally.</strong> Each region keeps its own registry and gateways. A comment is published to every region's Kafka (or replicated with MirrorMaker), and each region fans out to its own viewers. No cross-region lookups on the delivery path.</p></div>
+</section>
+
+<section id="hot">
+  <h2>Hot streams</h2>
+  <ul class="tags"><li>Deep dive 3</li><li><a href="caching.html">Caching</a></li></ul>
+  <p class="lead">10,000 streams carry 60% of comments, and a single World Cup stream can have millions of viewers. Everything keyed by stream id becomes a hot key.</p>
+  <figure class="fig3d" id="hot3d">
+    <div class="stage3d" role="img" aria-label="A hot stream: hundreds of comments a second arrive on one Kafka partition. A dedicated fan-out worker ranks them and keeps the best ten a second, drops the rest from live delivery while still storing them, batches the chosen ones once a second, and sends one batch to each of hundreds of gateways, which push it to their local viewers."><p class="hint3">3D · drag to turn</p><button class="reset3 ghost" type="button" hidden>Reset view</button><p class="nogl">The 3D view needs WebGL and a connection.</p></div>
+    <div class="ctl3"><button class="pp" type="button">Pause</button><span class="k">Step</span><div class="steps3"></div><span class="meta3"></span></div>
+    <div class="track3"><div class="fill3"></div></div>
+    <p class="out3" aria-live="polite"></p>
+    <figcaption>Illustrative. Ranking and batching bound fan-out by the number of gateways, not the number of comments.</figcaption>
+  </figure>
+  <div class="table"><table>
+    <thead><tr><th>Technique</th><th>What it fixes</th><th>Cost</th></tr></thead>
+    <tbody>
+      <tr><td><strong>Rank and sample</strong> to ~10 comments a second per stream (friends first, then quality score)</td><td>Fan-out volume and readability</td><td>Most comments on huge streams are never shown live (still stored)</td></tr>
+      <tr><td><strong>Batch</strong> once a second per stream per gateway</td><td>Message count</td><td>Up to a second of extra delay</td></tr>
+      <tr><td><strong>Sub-shard the hot key</strong>: <code>s_91#0 … s_91#15</code> for registry entries and Kafka keys</td><td>One shard or partition melting</td><td>Readers must merge the sub-keys</td></tr>
+      <tr><td><strong>Separate lane</strong>: dedicated partitions and workers for streams above a threshold</td><td>Noisy hot streams delaying quiet ones</td><td>Detection and migration logic</td></tr>
+      <tr><td><strong>Relay tree</strong>: fan-out sends to regional relays, which send to their gateways</td><td>Fan-out of one message to hundreds of gateways</td><td>An extra hop</td></tr>
+      <tr><td><strong>Coalesce registry updates</strong> per hot stream</td><td>Subscription churn on one key</td><td>Registry is a few seconds stale</td></tr>
+    </tbody>
+  </table></div>
+  <p>Replication alone doesn't fix a hot registry key, because the problem is write volume: every replica still takes every write. Coalescing and sub-sharding do.</p>
+</section>
+
+<section id="lab">
+  <h2>Try it: fan out one stream</h2>
+  <ul class="tags"><li>Lab</li></ul>
+  <p>One stream, spread over 500 gateways. Change its audience and comment rate, then turn on a per-viewer cap and batching to see what each does to the work.</p>
+  <div class="lab" id="lclab">
+    <div class="lab-row"><label for="lc-v">Viewers of this stream <input type="range" id="lc-v" min="0" max="6" step="1" value="4"><output id="lc-v-o"></output></label><label for="lc-c">Comments a second <input type="range" id="lc-c" min="0" max="6" step="1" value="4"><output id="lc-c-o"></output></label></div>
+    <div class="lab-row"><span class="lab-k">Per viewer</span><span class="seg" role="group" aria-label="Per-viewer cap" id="lc-cap"><button type="button" data-v="0" aria-pressed="true">Every comment</button><button type="button" data-v="10" aria-pressed="false">Top 10 a second</button></span></div>
+    <div class="lab-row"><span class="lab-k">Push</span><span class="seg" role="group" aria-label="Batching" id="lc-b"><button type="button" data-v="0" aria-pressed="true">Each comment</button><button type="button" data-v="1" aria-pressed="false">Batched every second</button></span></div>
+    <div class="metrics" id="lc-m"></div>
+    <p class="lab-out" id="lc-out" aria-live="polite"></p>
+  </div>
+  <p class="muted" style="font-size:13.5px">Viewers are spread at random over 500 gateways, so a stream with V viewers touches about 500 × (1 − e<sup>−V/500</sup>) of them. A gateway can push roughly 200k small messages a second.</p>
+</section>
+
+<section id="storage">
+  <h2>Storage</h2>
+  <ul class="tags"><li><a href="cassandra-vs-cockroachdb.html">Cassandra</a></li></ul>
+<pre><code>comments_by_stream
+  stream_id   text         -- partition key (plus a day bucket for long streams)
+  comment_id  timeuuid     -- clustering key, newest first
+  user_id, text, status (visible | hidden | deleted), score</code></pre>
+  <p>Comments are append-only, read newest-first by stream, and written at a steady 11k a second with spikes on hot streams. That is the shape Cassandra or ScyllaDB is built for: leaderless, so there is no primary to fail over, and writes scale by adding nodes. Write at <code>LOCAL_QUORUM</code>. A document database with a single primary per shard works at lower volume, but under hot-stream spikes its primary becomes the bottleneck and an election blocks writes.</p>
+  <p>Kafka keeps comments for a day, so a slow or failed storage consumer catches up without losing anything, and a new consumer (search, analytics, moderation models) can replay recent history.</p>
+</section>
+
+<section id="moderation">
+  <h2>Moderation</h2>
+  <ul class="tags"><li>Governance</li><li><a href="rate-limiting.html">Rate limiting</a></li></ul>
+  <ul class="plain">
+    <li><strong>Before fan-out:</strong> per-user and per-stream rate limits, blocklists, and a fast classifier for spam and slurs. Anything flagged is stored but not delivered.</li>
+    <li><strong>After fan-out:</strong> a hide or delete sends a tombstone message on the same path, so clients remove the comment already on screen.</li>
+    <li><strong>Creator controls:</strong> slow mode (one comment per user per N seconds), followers-only, keyword filters, all enforced in the comment service.</li>
+  </ul>
+</section>
+
+<section id="deployment">
+  <h2>Deployment and failure</h2>
+  <ul class="tags"><li>Production</li></ul>
+  <ul class="plain">
+    <li><strong>Gateway dies:</strong> its 100k clients reconnect to other gateways with jittered backoff, re-send their watch list, and fetch missed comments with <code>?after=last_seen_id</code>. The dead gateway's registry entries expire. Drain gateways gracefully before deploys so reconnects are spread out.</li>
+    <li><strong>Registry shard lost:</strong> rebuild from gateways, which re-announce their streams; until then, fan-out for those streams falls back to broadcasting to all gateways in the region, which costs more but delivers.</li>
+    <li><strong>Fan-out lagging:</strong> drop the oldest live deliveries first. A comment delivered 30 seconds late is worse than one shown only in history.</li>
+    <li><strong>Kafka down:</strong> the comment service writes straight to Cassandra and returns success; live delivery pauses, history is intact.</li>
+  </ul>
+</section>
+
+<section id="observability">
+  <h2>Observability</h2>
+  <ul class="tags"><li>Production</li></ul>
+  <div class="table"><table>
+    <thead><tr><th>Signal</th><th>Why</th><th>Alert when</th></tr></thead>
+    <tbody>
+      <tr><td>Post-to-screen latency p95 (synthetic viewer per region)</td><td>The core experience</td><td>Above 2 s for 5 minutes</td></tr>
+      <tr><td>Kafka consumer lag for fan-out and storage</td><td>Delivery falling behind</td><td>Over 10 s of lag</td></tr>
+      <tr><td>Connections and reconnects per gateway</td><td>Gateway health, reconnect storms</td><td>Reconnect rate spikes</td></tr>
+      <tr><td>Registry ops per shard, hottest keys</td><td>Hot streams before they hurt</td><td>One shard far above the others</td></tr>
+      <tr><td>Comments dropped by sampling, by stream</td><td>Confirms ranking is doing its job</td><td>Sampling on streams below the threshold</td></tr>
+    </tbody>
+  </table></div>
+</section>
+
+<section id="risks">
+  <h2>Risks and v2</h2>
+  <ul class="tags"><li>Wrap-up</li></ul>
+  <div class="table"><table>
+    <thead><tr><th>Risk</th><th>How you detect it</th><th>Mitigation</th></tr></thead>
+    <tbody>
+      <tr><td>A global event creates one enormous stream</td><td>Viewer count per stream</td><td>Hot lane, sampling, relay tree, pre-scaled gateways</td></tr>
+      <tr><td>Reconnect storm after a deploy or network blip</td><td>Reconnects per second</td><td>Jittered backoff, connection draining, admission control at gateways</td></tr>
+      <tr><td>Spam floods a stream</td><td>Comment rate per user and per stream</td><td>Rate limits, slow mode, classifier before fan-out</td></tr>
+      <tr><td>Registry staleness sends to the wrong gateways</td><td>Deliveries to gateways with no viewers</td><td>Short TTLs, gateways ignore streams they don't hold</td></tr>
+    </tbody>
+  </table></div>
+  <p><strong>v2 ideas:</strong> personalized ranking per viewer, live reactions and polls on the same channel, and translated comments.</p>
+</section>
+
+<section id="presenting">
+  <h2>Presenting it in 45 minutes</h2>
+  <ul class="tags"><li>Interview script</li></ul>
+  <div class="table"><table>
+    <thead><tr><th>Step</th><th>Time</th><th>What to cover</th></tr></thead>
+    <tbody>
+      <tr><td>1. Clarify</td><td class="num">5 min</td><td>Latency, loss tolerance, do we show every comment, skew</td></tr>
+      <tr><td>2. Estimate</td><td class="num">4 min</td><td>11k writes/s, 50M connections, 500 gateways, subscription churn</td></tr>
+      <tr><td>3. Push vs poll</td><td class="num">4 min</td><td>Why polling fails; WebSocket with SSE fallback</td></tr>
+      <tr><td>4. Draw the whole system</td><td class="num">8 min</td><td>Comment service, Kafka by stream, Cassandra, fan-out, registry, gateways</td></tr>
+      <tr><td>5. Deep dive: routing</td><td class="num">10 min</td><td>Stream → gateways, TTLs, sharding, write locally read globally</td></tr>
+      <tr><td>6. Deep dive: hot streams</td><td class="num">9 min</td><td>Ranking, batching, sub-sharding, separate lanes</td></tr>
+      <tr><td>7. Failure and risks</td><td class="num">5 min</td><td>Gateway loss, reconnect storms, moderation</td></tr>
+    </tbody>
+  </table></div>
+  <div class="say"><p>"Writes are only 11k a second; the challenge is fan-out. Clients keep one WebSocket to a gateway and send watch and unwatch as they scroll. Gateways register 'I have viewers of stream X' in a registry sharded by stream, with TTLs. A comment goes through the comment service to Kafka keyed by stream and to Cassandra; fan-out workers look up the gateways for that stream and send one copy to each, and each gateway pushes to its local viewers. Hot streams get ranking down to about 10 comments a second, one batch a second, sub-sharded keys and their own lane, so fan-out is bounded by gateways, not comments."</p></div>
+</section>
+
+<section id="numbers">
+  <h2>Numbers to remember</h2>
+  <ul class="tags"><li>Cheat sheet</li></ul>
+  <div class="table"><table><tbody>
+    <tr><td>650k comments a minute</td><td class="num">≈ 11k a second</td></tr>
+    <tr><td>11k/s × 1 KB</td><td class="num">≈ 40 GB an hour</td></tr>
+    <tr><td>Connections per gateway</td><td class="num">~100k</td></tr>
+    <tr><td>50M viewers</td><td class="num">≈ 500 gateways</td></tr>
+    <tr><td>Polling every 5 s for 50M viewers</td><td class="num">10M requests a second</td></tr>
+    <tr><td>Readable comment rate</td><td class="num">~10 a second, batched every second</td></tr>
+  </tbody></table></div>
+</section>
+  </article>
+</div>
+</main>
+
+<footer class="site"><div class="wrap">Part of Classic System Design, a companion to the <a href="https://devlcodes.github.io/agentic-ai-notebook/system-design/index.html">agentic system designs</a>. The 3D views use Three.js loaded from a CDN, so they need a connection; the text and tables cover the same ground. Figures marked illustrative show the shape of a system, not measured numbers. Check vendor docs before relying on a specific product limit.</div></footer>
+<script>
+(function(){
+  var $ = function(id){ return document.getElementById(id); }, cap = 0, batch = 0, G = 500;
+  var VS = [100, 1e3, 1e4, 1e5, 1e6, 3e6, 1e7], CS = [0.2, 1, 5, 20, 100, 500, 2000];
+  function fmt(n){ if (n >= 1e9) return +(n/1e9).toFixed(n < 1e10 ? 1 : 0) + 'B'; if (n >= 1e6) return +(n/1e6).toFixed(n < 1e7 ? 1 : 0) + 'M'; if (n >= 1e3) return +(n/1e3).toFixed(n < 1e4 ? 1 : 0) + 'k'; return n < 10 ? String(+n.toFixed(1)) : String(Math.round(n)); }
+  function seg(id, set){ $(id).addEventListener('click', function(e){ var b = e.target.closest('button'); if (!b) return; set(+b.dataset.v); this.querySelectorAll('button').forEach(function(x){ x.setAttribute('aria-pressed', x === b); }); run(); }); }
+  function run(){
+    var V = VS[+$('lc-v').value], C = CS[+$('lc-c').value];
+    $('lc-v-o').textContent = fmt(V); $('lc-c-o').textContent = fmt(C) + '/s';
+    var gw = G * (1 - Math.exp(-V / G)), shown = cap ? Math.min(C, cap) : C;
+    var msgRate = batch ? Math.min(shown, 1) : shown;
+    var internal = gw * msgRate, pushes = V * msgRate, perGw = pushes / gw;
+    $('lc-m').innerHTML = '<div class="metric"><span class="n">' + fmt(gw) + '</span><span class="l">gateways involved</span></div>' +
+      '<div class="metric"><span class="n">' + fmt(internal) + '/s</span><span class="l">fan-out to gateways</span></div>' +
+      '<div class="metric"><span class="n">' + fmt(pushes) + '/s</span><span class="l">pushes to viewers</span><small>' + fmt(shown) + ' comments/s shown each</small></div>' +
+      '<div class="metric"><span class="n"' + (perGw > 2e5 ? ' style="color:var(--c-dlq)"' : '') + '>' + fmt(perGw) + '/s</span><span class="l">per gateway</span><small>budget ~200k/s</small></div>';
+    var msg;
+    if (perGw > 2e5) msg = 'Too much: each gateway would push ' + fmt(perGw) + ' messages a second for this one stream. ' + (!cap ? 'Cap what each viewer sees: nobody reads ' + fmt(C) + ' comments a second.' : !batch ? 'Batch the pushes: one message a second carrying several comments.' : 'Spread this stream over more gateways or a relay tier.');
+    else if (C > 10 && !cap) msg = 'It fits, but each viewer gets ' + fmt(C) + ' comments a second, faster than anyone can read. Ranking down to 10 a second improves the experience and cuts the work by ' + fmt(C / 10) + '×.';
+    else if (V < 1e3) msg = 'A quiet stream: ' + fmt(gw) + ' gateways, ' + fmt(pushes) + ' pushes a second. This is the long tail, and most of the million streams look like this.';
+    else msg = 'Comfortable: ' + fmt(internal) + ' internal messages and ' + fmt(pushes) + ' pushes a second, about ' + fmt(perGw) + ' per gateway. Routing by gateway means the fan-out service sends ' + fmt(V / gw) + '× fewer messages than routing by user.';
+    $('lc-out').textContent = msg;
+  }
+  seg('lc-cap', function(v){ cap = v; }); seg('lc-b', function(v){ batch = v; });
+  ['lc-v','lc-c'].forEach(function(id){ $(id).addEventListener('input', run); });
+  run();
+})();
+
+</script>
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+  }
+}
+</script>
+<script type="module">
+import { boot } from './assets/scene3d.js';
+const D = {};
+D.hero = {
+  hero: true,
+  loop: 16,
+  view: { target: [-1, 0, 2], w: 29, d: 24, el: 52 },
+  steps: [
+    { t: 0.0, text: 'A viewer opens stream s_91. Their gateway has no other viewers of it yet, so it tells the registry: "gateway 2 has viewers of s_91".' },
+    { t: 2.4, text: 'Someone else comments. The comment service checks auth, rate limits and filters, and gives the comment an id.' },
+    { t: 3.8, text: 'The comment goes onto Kafka keyed by stream id, so all of s_91\'s comments stay in order on one partition.' },
+    { t: 5.0, text: 'A storage consumer writes it to Cassandra: the source of truth for history.' },
+    { t: 5.8, text: 'A fan-out worker reads it and asks the registry which gateways have viewers of s_91: gateways 1 and 2.' },
+    { t: 7.8, text: 'It sends exactly one copy to each of those gateways, however many viewers each one holds.' },
+    { t: 9.4, text: 'Each gateway pushes the comment down the open connections of its own viewers of s_91.' },
+    { t: 11.8, text: 'Both viewers on gateway 1 scroll away. Gateway 1 removes itself from the registry, so the next comment goes only to gateway 2.' },
+  ],
+  build(c) {
+    const { V, C, P } = c;
+    const cm = c.obj(c.SHAPES.browser(C.ingest), -13, -6, 'Commenter');
+    const svc = c.obj(c.SHAPES.server({ emi: C.ingest }), -7.5, -6, 'Comment service', 'auth · limits · filters');
+    const kf = c.obj(c.SHAPES.topic({ parts: 1, len: 3.4, color: C.cross }), -1.5, -6, 'Kafka', 'key = stream_id');
+    const cas = c.obj(c.SHAPES.database(C.kb, { r: 1.0 }), 5, -6, 'Cassandra', 'history');
+    const fo = c.obj(c.SHAPES.server({ color: 0x8a6a2e, emi: C.serve }), -1.5, 0.5, 'Fan-out worker');
+    const reg = c.obj(c.SHAPES.database(C.kb, { r: 0.9, tiers: 2 }), 5, 0.5, 'Registry', 'stream → gateways');
+    const g1 = c.obj(c.SHAPES.server({ color: 0x8a6a2e, emi: C.serve, h: 1.3 }), -5, 6.5, 'Gateway 1');
+    const g2 = c.obj(c.SHAPES.server({ color: 0x8a6a2e, emi: C.serve, h: 1.3 }), 3, 6.5, 'Gateway 2');
+    const vx = [-7, -3, 1, 5];
+    const vw = vx.map((x, i) => c.obj('person', x, 10.8, i === 0 ? 'Viewers' : ''));
+    c.lane([V(-13, -6), V(5, -6)]);
+    c.lane([V(-1.5, -6), V(-1.5, 0.5), V(5, 0.5)]);
+    c.lane([V(-1.5, 0.5), V(-1.5, 3.5), V(-5, 3.5), V(-5, 6.5)]);
+    c.lane([V(-1.5, 3.5), V(3, 3.5), V(3, 6.5)]);
+    c.lane([V(3, 6.5), V(7.5, 6.5), V(7.5, 0.5), V(5, 0.5)]);
+    c.lane([V(-5, 6.5), V(-5, 3.5)]);
+    for (const x of vx) { const gx = x < 0 ? -5 : 3; c.lane([V(gx, 6.5), V(gx, 8.8), V(x, 8.8), V(x, 10.8)]); }
+    c.packet({ pts: [V(5, 10.8), V(5, 8.8), V(3, 8.8), V(3, 6.5)], t0: 0.2, t1: 1.0, kind: 'ask', from: vw[3], to: g2, label: 'watch s_91' });
+    c.packet({ pts: [V(3, 6.5), V(7.5, 6.5), V(7.5, 0.5), V(5, 0.5)], t0: 1.1, t1: 2.2, kind: 'span', color: P.ship, to: reg, label: 's_91 → gw 2' });
+    c.packet({ pts: [V(-13, -6), V(-7.5, -6)], t0: 2.5, t1: 3.4, kind: 'doc', from: cm, to: svc, label: '"What a goal!"' });
+    c.packet({ pts: [V(-7.5, -6), V(-1.5, -6)], t0: 3.8, t1: 4.6, kind: 'env', to: kf, label: 's_91' });
+    c.packet({ pts: [V(-1.5, -6), V(5, -6)], t0: 5.0, t1: 5.8, kind: 'env', to: cas, label: 'store' });
+    c.packet({ pts: [V(-1.5, -6), V(-1.5, 0.5)], t0: 5.0, t1: 5.8, kind: 'env', to: fo });
+    c.packet({ pts: [V(-1.5, 0.5), V(5, 0.5)], t0: 6.0, t1: 6.7, kind: 'span', to: reg, label: 'who has s_91?' });
+    c.packet({ pts: [V(5, 0.5), V(-1.5, 0.5)], t0: 6.8, t1: 7.5, kind: 'span', color: P.ship, to: fo, label: 'gw 1, gw 2' });
+    c.packet({ pts: [V(-1.5, 0.5), V(-1.5, 3.5), V(-5, 3.5), V(-5, 6.5)], t0: 7.9, t1: 9.0, kind: 'env', to: g1, label: '1 copy' });
+    c.packet({ pts: [V(-1.5, 0.5), V(-1.5, 3.5), V(3, 3.5), V(3, 6.5)], t0: 7.9, t1: 9.0, kind: 'env', to: g2, label: '1 copy' });
+    vx.forEach((x, i) => { const gx = x < 0 ? -5 : 3; c.packet({ pts: [V(gx, 6.5), V(gx, 8.8), V(x, 8.8), V(x, 10.8)], t0: 9.5, t1: 10.5, kind: 'env', s: 0.8, color: P.ship, to: vw[i] }); });
+    c.packet({ pts: [V(-3, 10.8), V(-3, 8.8), V(-5, 8.8), V(-5, 6.5)], t0: 12.0, t1: 12.8, kind: 'ask', color: P.bad, to: g1, label: 'unwatch' });
+    c.packet({ pts: [V(-7, 10.8), V(-7, 8.8), V(-5, 8.8), V(-5, 6.5)], t0: 12.1, t1: 12.9, kind: 'ask', color: P.bad, to: g1 });
+    c.packet({ pts: [V(-5, 6.5), V(-5, 3.5), V(3, 3.5), V(3, 6.5), V(7.5, 6.5), V(7.5, 0.5), V(5, 0.5)], t0: 13.0, t1: 15.2, kind: 'span', color: P.bad, to: reg, label: 'remove gw 1' });
+    c.note('write path · ~11k/s', -10.2, -3.8);
+    c.note('delivery · 50M connections', -1, 12.8);
+  },
+};
+D.hot3d = {
+  loop: 14,
+  view: { target: [0, 0, 0], w: 30, d: 15, el: 48 },
+  steps: [
+    { t: 0.0, text: 'A hot stream: hundreds of comments a second land on its Kafka partition.' },
+    { t: 2.2, text: 'Every comment is stored, so history and replays are complete.' },
+    { t: 3.6, text: 'A dedicated fan-out worker ranks them (friends, verified accounts, quality) and keeps about ten a second for live delivery.' },
+    { t: 6.0, text: 'Once a second it sends one batch to each gateway that has viewers of the stream.' },
+    { t: 8.0, text: 'Each gateway pushes the batch to its viewers. Work grows with the number of gateways, not with the number of comments.' },
+  ],
+  build(c) {
+    const { V, C, P } = c;
+    const cz = [-4, 0, 4];
+    const cms = cz.map((z, i) => c.obj('person', -13, z, i === 0 ? 'Commenters' : ''));
+    const kf = c.obj(c.SHAPES.topic({ parts: 1, len: 3, color: C.cross }), -6.5, 0, 'Partition', 's_91');
+    const fo = c.obj(c.SHAPES.server({ color: 0x8a6a2e, emi: C.serve, w: 1.6 }), -0.5, 0, 'Hot fan-out', 'rank · sample · batch');
+    const cas = c.obj(c.SHAPES.database(C.kb, { r: 0.9 }), -6.5, -5.5, 'Cassandra', 'all comments');
+    const gz = [-4.5, -1.5, 1.5, 4.5];
+    const gws = gz.map((z, i) => c.obj(c.SHAPES.server({ color: 0x8a6a2e, emi: C.serve, h: 1.1 }), 6, z, i === 0 ? 'Gateways' : ''));
+    const vws = gz.map((z, i) => c.obj('person', 11.5, z, i === 0 ? 'Viewers' : ''));
+    cz.forEach((z) => c.lane([V(-13, z), V(-10, z), V(-10, 0), V(-6.5, 0)]));
+    c.lane([V(-6.5, 0), V(-0.5, 0)]);
+    c.lane([V(-6.5, 0), V(-6.5, -5.5)]);
+    gz.forEach((z) => { c.lane([V(-0.5, 0), V(2.8, 0), V(2.8, z), V(6, z)]); c.lane([V(6, z), V(11.5, z)]); });
+    cz.forEach((z, i) => c.packet({ pts: [V(-13, z), V(-10, z), V(-10, 0), V(-6.5, 0)], t0: 0.2 + i * 0.1, t1: 1.6 + i * 0.1, n: 8, st: 0.12, kind: 'doc', s: 0.6, from: cms[i], to: kf }));
+    c.packet({ pts: [V(-6.5, 0), V(-6.5, -5.5)], t0: 2.3, t1: 3.3, n: 8, st: 0.1, kind: 'doc', s: 0.5, to: cas, label: 'store all' });
+    c.packet({ pts: [V(-6.5, 0), V(-0.5, 0)], t0: 3.6, t1: 4.6, n: 8, st: 0.1, kind: 'doc', s: 0.5, to: fo });
+    c.note('keep ~10/s · drop the rest from live', -0.5, 2.6);
+    gz.forEach((z, i) => c.packet({ pts: [V(-0.5, 0), V(2.8, 0), V(2.8, z), V(6, z)], t0: 6.1, t1: 7.4, kind: 'env', to: gws[i], label: i === 0 ? '1 batch/s' : '' }));
+    gz.forEach((z, i) => c.packet({ pts: [V(6, z), V(11.5, z)], t0: 8.1, t1: 9.0, n: 2, st: 0.2, kind: 'env', s: 0.7, color: P.ship, to: vws[i] }));
+    gz.forEach((z, i) => c.packet({ pts: [V(-0.5, 0), V(2.8, 0), V(2.8, z), V(6, z)], t0: 10.6, t1: 11.9, kind: 'env', to: gws[i] }));
+    gz.forEach((z, i) => c.packet({ pts: [V(6, z), V(11.5, z)], t0: 12.0, t1: 12.9, n: 2, st: 0.2, kind: 'env', s: 0.7, color: P.ship, to: vws[i] }));
+  },
+};
+
+boot(D);
+</script>
+</body>
+</html>

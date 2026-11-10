@@ -1,0 +1,668 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Nearby Places · Classic System Design</title>
+<meta name="description" content="Design a Yelp-style nearby search: fixed grids vs quadtrees vs geohash and S2, an in-memory geo index fed by change data capture, ranking and sharding.">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700&family=Instrument+Sans:ital,wght@0,400;0,500;0,600;1,400&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+  /* Layout: a slim site bar, then either a card grid (home), a sticky contents rail + reading column (articles), or a filterable term list (glossary). Light, single look. */
+  :root {
+    color-scheme: light;
+    --bg: #e9ecef; --paper: #f7f8f9; --ink: #1c2530; --muted: #586473; --line: #cdd4dc; --line-strong: #9aa5b1;
+    --accent: #4255d4; --accent-ink: #ffffff; --track: #d3d9e0; --code-bg: #eef1f4; --wire: #7d8996;
+    --c-ingest: #2a9d8f; --c-kb: #4d5fd8; --c-serve: #d7932a; --c-model: #e2674f; --c-gov: #b2456e; --c-cross: #4a5562; --c-dlq: #b23a3a; --c-ok: #2f8f5b;
+    --t-src: #e4e8ec; --t-ingest: #d8eeea; --t-kb: #dfe3fa; --t-serve: #f8ead2; --t-model: #fbe1da; --t-gov: #f3dde6; --t-cross: #dfe2e6; --t-dlq: #f6dddb;
+    --font-display: "Bricolage Grotesque", "Avenir Next", "Segoe UI", system-ui, sans-serif;
+    --font-body: "Instrument Sans", "Helvetica Neue", "Segoe UI", system-ui, sans-serif;
+    --font-mono: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  @media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
+  body { margin: 0; background: var(--bg); color: var(--ink); font-family: var(--font-body); font-size: 16px; line-height: 1.6; }
+  a { color: var(--accent); }
+  .wrap { max-width: 1240px; margin: 0 auto; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
+
+  .sitebar { border-bottom: 1px solid var(--line); background: var(--paper); }
+  .sitebar .wrap { display: flex; align-items: center; gap: 18px; flex-wrap: wrap; padding-block: 12px; }
+  .brand { font-family: var(--font-display); font-weight: 700; font-size: 17px; color: var(--ink); text-decoration: none; margin-right: auto; }
+  .sitebar nav { display: flex; gap: 16px; flex-wrap: wrap; font-size: 14px; }
+  .sitebar nav a { color: var(--muted); text-decoration: none; }
+  .sitebar nav a:hover, .sitebar nav a[aria-current="page"] { color: var(--ink); }
+  .sitebar nav a[aria-current="page"] { font-weight: 600; }
+
+  .intro { padding-block: 40px 8px; display: grid; gap: 10px; max-width: 820px; }
+  .eyebrow { margin: 0; font-family: var(--font-mono); font-size: 12px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+  h1 { margin: 0; font-family: var(--font-display); font-weight: 700; font-size: clamp(30px, 5vw, 46px); line-height: 1.05; text-wrap: balance; }
+  .intro .lead { font-size: 18px; margin: 0; }
+
+  .doc { display: grid; grid-template-columns: 220px minmax(0, 1fr); gap: 48px; padding-block: 36px 72px; }
+  .toc { position: sticky; top: calc(env(safe-area-inset-top, 0px) + 20px); align-self: start; }
+  .toc p { margin: 0 0 8px; font-family: var(--font-mono); font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+  .toc ol { margin: 0; padding: 0; list-style: none; display: grid; gap: 2px; counter-reset: toc; }
+  .toc li { counter-increment: toc; }
+  .toc a { display: flex; gap: 8px; padding: 3px 0; font-size: 14px; color: var(--muted); text-decoration: none; }
+  .toc a::before { content: counter(toc, decimal-leading-zero); font-family: var(--font-mono); font-size: 11.5px; padding-top: 2px; color: var(--line-strong); }
+  .toc a:hover { color: var(--ink); }
+  article { min-width: 0; max-width: 760px; }
+  section { padding-bottom: 36px; margin-bottom: 36px; border-bottom: 1px solid var(--line); scroll-margin-top: 20px; }
+  section:last-child { border-bottom: 0; }
+  h2 { margin: 0 0 10px; font-family: var(--font-display); font-weight: 700; font-size: 28px; line-height: 1.15; text-wrap: balance; }
+  h3 { margin: 26px 0 6px; font-family: var(--font-display); font-weight: 600; font-size: 19px; line-height: 1.25; }
+  p { margin: 0 0 14px; }
+  .lead { font-size: 18px; }
+  ul.plain, ol.plain { margin: 0 0 16px; padding-left: 22px; display: grid; gap: 6px; }
+  code { font-family: var(--font-mono); font-size: 0.88em; background: var(--code-bg); padding: 1px 5px; border-radius: 4px; }
+  pre { margin: 0 0 16px; padding: 14px 16px; background: var(--code-bg); border-radius: 10px; overflow-x: auto; font-size: 13px; line-height: 1.55; }
+  pre code { background: none; padding: 0; font-size: inherit; }
+  .table { overflow-x: auto; margin: 0 0 18px; }
+  table { width: 100%; border-collapse: collapse; font-size: 14.5px; line-height: 1.45; }
+  th, td { text-align: left; vertical-align: top; padding: 8px 10px; border-bottom: 1px solid var(--line); }
+  th { font-family: var(--font-mono); font-size: 11.5px; font-weight: 500; letter-spacing: .05em; text-transform: uppercase; color: var(--muted); }
+  td.num { font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .note { border-left: 3px solid var(--accent); background: var(--paper); padding: 12px 16px; border-radius: 0 10px 10px 0; margin: 0 0 18px; }
+  .note p:last-child { margin: 0; }
+  .formula { font-family: var(--font-mono); font-size: 14px; background: var(--paper); border: 1px solid var(--line); border-radius: 10px; padding: 12px 16px; margin: 0 0 16px; overflow-x: auto; white-space: nowrap; }
+  .related { display: flex; flex-wrap: wrap; gap: 8px; margin: 0; padding: 0; list-style: none; }
+  .related a { display: inline-block; padding: 4px 12px; border: 1px solid var(--line); border-radius: 999px; font-size: 14px; color: var(--ink); text-decoration: none; background: var(--paper); }
+  .related a:hover { border-color: var(--ink); }
+  .pager { display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; font-size: 14px; }
+  footer.site { border-top: 1px solid var(--line); padding-block: 20px 40px; font-size: 13px; color: var(--muted); }
+  a:focus-visible, input:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+  /* home */
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 16px; margin: 0 0 40px; padding: 0; list-style: none; }
+  .card { display: grid; gap: 8px; height: 100%; padding: 18px; background: var(--paper); border: 1px solid var(--line); border-radius: 14px; color: var(--ink); text-decoration: none; }
+  .card:hover { border-color: var(--ink); }
+  .card .k { font-family: var(--font-mono); font-size: 11px; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
+  .card h3 { margin: 0; font-size: 20px; }
+  .card p { margin: 0; font-size: 14.5px; color: var(--muted); }
+  .card svg { width: 100%; height: auto; display: block; }
+  .card.feature svg { max-width: 420px; justify-self: center; }
+  .card.feature { grid-column: 1 / -1; grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr); align-items: center; gap: 24px; }
+  .home-h { margin: 28px 0 12px; font-family: var(--font-display); font-size: 24px; }
+
+  /* glossary */
+  .gl-tools { position: sticky; top: 0; z-index: 2; background: var(--bg); padding-block: 12px; display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+  .gl-tools input { flex: 1 1 260px; min-width: 0; font: 15px var(--font-body); padding: 9px 12px; border-radius: 10px; border: 1px solid var(--line-strong); background: #fff; color: var(--ink); }
+  .gl-letters { display: flex; flex-wrap: wrap; gap: 4px; font-family: var(--font-mono); font-size: 13px; }
+  .gl-letters a { padding: 2px 6px; border-radius: 6px; text-decoration: none; color: var(--muted); }
+  .gl-letters a:hover { background: var(--paper); color: var(--ink); }
+  .gl { max-width: 860px; }
+  .gl-item { margin: 0; }
+  .gl-item { display: grid; grid-template-columns: 220px minmax(0, 1fr); gap: 16px; padding: 12px 0; border-bottom: 1px solid var(--line); scroll-margin-top: 70px; }
+  .gl-item dt { font-weight: 600; }
+  .gl-item dt small { display: block; font-weight: 400; font-family: var(--font-mono); font-size: 11px; color: var(--muted); letter-spacing: .04em; text-transform: uppercase; margin-top: 2px; }
+  .gl-item dd { margin: 0; }
+  .gl-item dd .see { font-size: 13.5px; }
+  .gl-letter { margin: 26px 0 4px; font-family: var(--font-display); font-size: 22px; scroll-margin-top: 70px; }
+
+  @media (max-width: 900px) {
+    .doc { grid-template-columns: minmax(0, 1fr); gap: 24px; padding-block: 28px 56px; }
+    .toc { position: static; }
+    .toc ol { grid-template-columns: repeat(2, minmax(0, 1fr)); column-gap: 12px; }
+    .card.feature { grid-template-columns: minmax(0, 1fr); }
+  }
+  @media (max-width: 640px) {
+    .gl-item { grid-template-columns: minmax(0, 1fr); gap: 4px; }
+    h2 { font-size: 24px; }
+    .intro .lead, .lead { font-size: 16.5px; }
+  }
+
+  /* diagrams */
+  .fig { margin: 6px 0 24px; overflow-x: auto; }
+  .fig svg { display: block; width: 100%; height: auto; min-width: 600px; }
+  .fig figcaption { margin-top: 8px; font-size: 13px; line-height: 1.45; color: var(--muted); }
+  .dg text { font-family: var(--font-body); font-size: 13px; fill: var(--ink); }
+  .dg .sm { font-size: 11.5px; fill: var(--muted); }
+  .dg .small { font-size: 12px; }
+  .dg .b { font-weight: 600; }
+  .dg .mono { font-family: var(--font-mono); }
+  .dg .it { font-style: italic; }
+  .dg .mute { fill: var(--muted); }
+  .dg .gov { fill: var(--c-gov); font-weight: 600; }
+  .dg .okt { fill: var(--c-ok); font-weight: 600; }
+  .dg .bad { fill: var(--c-dlq); font-weight: 600; }
+  .dg .cap { font-family: var(--font-mono); font-size: 11px; letter-spacing: .06em; fill: var(--muted); }
+  .dg .big { font-family: var(--font-display); font-size: 30px; font-weight: 700; fill: var(--ink); }
+  .dg .box { fill: var(--paper); stroke: var(--line-strong); stroke-width: 1.25; }
+  .dg .ghost { fill: none; stroke: var(--line-strong); stroke-width: 1.25; stroke-dasharray: 5 5; }
+  .dg .track { fill: var(--track); }
+  .dg .rule { stroke: var(--line); stroke-width: 1; }
+  .dg .axis { stroke: var(--line-strong); stroke-width: 1.25; }
+  .dg .wire { fill: none; stroke: var(--wire); stroke-width: 1.4; }
+  .dg .wire.dash { stroke-dasharray: 4 4; }
+  .dg .wire.hot { stroke: var(--accent); stroke-width: 2; }
+  .dg .wire.red { stroke: var(--c-dlq); }
+  .dg .ah { fill: var(--wire); }
+  .dg .xmark { stroke: var(--c-dlq); stroke-width: 1.8; fill: none; }
+  .dg .tick { stroke: var(--c-ok); stroke-width: 2; fill: none; }
+  .dg .k-src { fill: var(--t-src); stroke: #8795a3; stroke-width: 1.5; }
+  .dg .k-ingest { fill: var(--t-ingest); stroke: var(--c-ingest); stroke-width: 1.5; }
+  .dg .k-kb { fill: var(--t-kb); stroke: var(--c-kb); stroke-width: 1.5; }
+  .dg .k-serve { fill: var(--t-serve); stroke: var(--c-serve); stroke-width: 1.5; }
+  .dg .k-model { fill: var(--t-model); stroke: var(--c-model); stroke-width: 1.5; }
+  .dg .k-gov { fill: var(--t-gov); stroke: var(--c-gov); stroke-width: 1.5; }
+  .dg .k-cross { fill: var(--t-cross); stroke: var(--c-cross); stroke-width: 1.5; }
+  .dg .k-dlq { fill: var(--t-dlq); stroke: var(--c-dlq); stroke-width: 1.5; }
+  .dg .k-user { fill: #ffffff; stroke: var(--line-strong); stroke-width: 1.5; }
+  .dg .f-serve { fill: var(--c-serve); } .dg .f-kb { fill: var(--c-kb); } .dg .f-model { fill: var(--c-model); } .dg .f-gov { fill: var(--c-gov); } .dg .f-ingest { fill: var(--c-ingest); } .dg .f-cross { fill: #b8c0c9; } .dg .f-dlq { fill: var(--c-dlq); } .dg .f-ok { fill: var(--c-ok); }
+  .dg .cell { fill: var(--paper); stroke: var(--line-strong); stroke-width: 1; }
+  .dg .cell.hot { fill: var(--t-ingest); stroke: var(--c-ingest); stroke-width: 1.5; }
+  .dg .cell.old { fill: var(--t-kb); stroke: var(--c-kb); }
+  .dg .cell.new { fill: var(--t-ingest); stroke: var(--c-ingest); stroke-width: 1.5; }
+  .dg .cell.gone { fill: var(--paper); stroke: var(--line); }
+  .dg .dot-hr { fill: var(--c-gov); } .dg .dot-it { fill: var(--c-kb); } .dg .dot-eng { fill: var(--c-ingest); } .dg .dot-q { fill: var(--c-serve); stroke: var(--ink); stroke-width: 1.5; }
+  .dg .halo { fill: none; stroke: var(--c-serve); stroke-width: 1.5; stroke-dasharray: 4 4; }
+  .dg .zone { fill: var(--paper); stroke: var(--line); stroke-width: 1; }
+</style>
+
+<style>
+  .lab { margin: 6px 0 26px; padding: 14px 16px 16px; background: var(--paper); border: 1px solid var(--line); border-radius: 14px; }
+  .lab-row { display: flex; flex-wrap: wrap; gap: 10px 18px; align-items: center; margin: 0 0 12px; }
+  .lab-k { font-family: var(--font-mono); font-size: 11px; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
+  .lab label { display: inline-flex; gap: 8px; align-items: center; font-size: 14px; }
+  .lab input[type=range] { width: 150px; accent-color: var(--accent); }
+  .lab input[type=checkbox] { width: 16px; height: 16px; accent-color: var(--accent); }
+  .lab input[type=text] { flex: 1 1 260px; min-width: 0; font: 15px var(--font-body); padding: 8px 11px; border-radius: 9px; border: 1px solid var(--line-strong); background: #fff; color: var(--ink); }
+  .lab output { font-family: var(--font-mono); font-size: 12.5px; min-width: 6ch; font-variant-numeric: tabular-nums; }
+  .seg { display: inline-flex; flex-wrap: wrap; gap: 6px; }
+  .seg button, .chips button { font: 600 13px var(--font-body); color: var(--ink); background: #fff; border: 1px solid var(--line); border-radius: 8px; padding: 6px 12px; cursor: pointer; }
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; }
+  .chips button { font-weight: 500; border-radius: 999px; padding: 4px 11px; font-size: 13px; }
+  .seg button:hover, .chips button:hover { border-color: var(--ink); }
+  .seg button[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+  .seg button:focus-visible, .chips button:focus-visible, .lab input:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .lab-out { margin: 12px 0 0; padding: 10px 12px; background: #fff; border: 1px solid var(--line); border-radius: 10px; font-size: 14.5px; line-height: 1.5; font-variant-numeric: tabular-nums; }
+  .chunks { display: grid; gap: 8px; max-height: 470px; overflow: auto; padding-right: 4px; }
+  .chunk { min-width: 0; padding: 8px 11px; background: #fff; border: 1px solid var(--line); border-left: 4px solid var(--c-kb); border-radius: 8px; font-size: 14px; line-height: 1.5; overflow-wrap: anywhere; }
+  .chunk:nth-child(even) { border-left-color: var(--c-ingest); }
+  .chunk.ans { box-shadow: 0 0 0 2px var(--c-serve); }
+  .chunk .ch { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-bottom: 4px; font-family: var(--font-mono); font-size: 11px; color: var(--muted); }
+  .chunk .pfx { display: block; font-family: var(--font-mono); font-size: 11.5px; color: var(--c-kb); }
+  .chunk .ov { background: var(--track); border-radius: 3px; }
+  .chunk mark { background: #ffe9b3; border-radius: 3px; padding: 0 2px; }
+  .chunk table { width: auto; font-size: 13px; margin: 4px 0; }
+  .chunk td { padding: 2px 10px 2px 0; border-bottom: 1px solid var(--line); }
+  .badge { display: inline-block; padding: 0 7px; border-radius: 999px; border: 1px solid; font-family: var(--font-mono); font-size: 10.5px; line-height: 1.6; }
+  .badge.bad { color: var(--c-dlq); border-color: var(--c-dlq); background: var(--t-dlq); }
+  .badge.ok { color: var(--c-ok); border-color: var(--c-ok); background: #e3f3ea; }
+  .badge.info { color: var(--c-kb); border-color: var(--c-kb); background: var(--t-kb); }
+  .bars { display: grid; gap: 8px; margin: 4px 0 0; }
+  .bar-row { display: grid; grid-template-columns: minmax(0, 150px) minmax(0, 1fr) 46px; gap: 10px; align-items: center; font-size: 14px; }
+  .bar { position: relative; height: 14px; border-radius: 7px; background: var(--track); }
+  .bar i { position: absolute; inset: 0 auto 0 0; border-radius: 7px; background: var(--c-kb); transition: width .3s; }
+  .bar b { position: absolute; top: -4px; bottom: -4px; width: 2px; background: var(--c-dlq); }
+  .bar-row .v { font-family: var(--font-mono); font-size: 12.5px; text-align: right; }
+  .stages { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 10px; padding: 0; list-style: none; font-size: 13px; }
+  .stages li { padding: 2px 10px; border-radius: 999px; border: 1px solid var(--line); color: var(--muted); background: #fff; }
+  .stages li.hit { border-color: var(--accent); color: var(--accent-ink); background: var(--accent); }
+  .stages li.skip { text-decoration: line-through; }
+  .rlist { display: grid; gap: 6px; margin: 0; padding: 0; list-style: none; counter-reset: r; }
+  .rlist li { counter-increment: r; display: grid; grid-template-columns: 28px minmax(0, 1fr) auto; gap: 10px; align-items: center; padding: 6px 10px; background: #fff; border: 1px solid var(--line); border-radius: 8px; font-size: 14px; }
+  .rlist li::before { content: counter(r); font-family: var(--font-mono); font-size: 12px; color: var(--muted); }
+  .rlist li.rel { border-color: var(--c-ok); background: #f0f8f3; }
+  .rlist button { font: 600 12px var(--font-body); padding: 3px 10px; border-radius: 999px; border: 1px solid var(--line-strong); background: #fff; color: var(--ink); cursor: pointer; white-space: nowrap; }
+  .rlist li.rel button { background: var(--c-ok); border-color: var(--c-ok); color: #fff; }
+  .metrics { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 8px; margin: 12px 0 0; }
+  .metric { padding: 8px 10px; background: #fff; border: 1px solid var(--line); border-radius: 10px; }
+  .metric .n { display: block; font-family: var(--font-display); font-size: 24px; font-weight: 700; font-variant-numeric: tabular-nums; }
+  .metric .l { font-family: var(--font-mono); font-size: 11px; letter-spacing: .04em; text-transform: uppercase; color: var(--muted); }
+  .metric small { display: block; font-size: 12px; color: var(--muted); line-height: 1.35; margin-top: 2px; }
+  td.pass { color: var(--c-ok); font-weight: 600; } td.fail { color: var(--c-dlq); font-weight: 600; }
+  .say { border-left: 3px solid var(--c-serve); background: var(--paper); padding: 12px 16px; border-radius: 0 10px 10px 0; margin: 0 0 16px; font-size: 15.5px; }
+  .say p:last-child { margin: 0; }
+</style>
+
+<style>
+  .lab-chart { display: block; width: 100%; height: auto; margin: 4px 0 0; }
+  .lab-chart text { font-family: var(--font-body); font-size: 12px; fill: var(--muted); }
+  .grid-cells { display: grid; gap: 4px; }
+  .srv { display: grid; grid-template-columns: 92px minmax(0,1fr) 70px; gap: 10px; align-items: center; font-size: 14px; }
+  .muted { color: var(--muted); }
+  .lab select { font: 14px var(--font-body); padding: 6px 8px; border-radius: 8px; border: 1px solid var(--line-strong); background: #fff; color: var(--ink); }
+  .lab input[type=number] { width: 9ch; font: 14px var(--font-mono); padding: 6px 8px; border-radius: 8px; border: 1px solid var(--line-strong); background: #fff; color: var(--ink); }
+</style><style>
+  .prompt { margin: 0; font-size: 18px; line-height: 1.5; color: var(--ink); }
+  .prompt q { font-style: italic; }
+  .legend { display: flex; flex-wrap: wrap; gap: 6px 14px; margin: 4px 0 0; padding: 0; list-style: none; font-size: 13px; color: var(--muted); }
+  .legend li { display: flex; align-items: center; gap: 6px; }
+  .legend i { width: 11px; height: 11px; border-radius: 3px; display: inline-block; }
+  .tags { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 16px; padding: 0; list-style: none; }
+  .tags li { font-family: var(--font-mono); font-size: 11px; letter-spacing: .04em; padding: 2px 8px; border-radius: 6px; border: 1px solid var(--line); color: var(--muted); }
+  @media (max-width: 640px) { .prompt { font-size: 16.5px; } }
+</style>
+<link rel="stylesheet" href="assets/scene3d.css">
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs><marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" class="ah" style="fill:#7d8996"/></marker></defs></svg>
+<header class="sitebar"><div class="wrap"><a class="brand" href="index.html">Classic System Design</a><nav aria-label="Site"><a href="index.html">Home</a><a href="index.html#blocks">Building blocks</a><a href="index.html#designs" aria-current="page">Designs</a><a href="https://devlcodes.github.io/agentic-ai-notebook/system-design/index.html">Agentic designs ↗</a></nav></div></header>
+<main>
+<header class="wrap"><div class="intro"><p class="eyebrow">Classic system design walkthrough</p><h1>Nearby Places</h1><p class="prompt"><q>Design a service like Yelp: given where the user is, find restaurants, cafés and other places within a radius, filtered by category and ranked well, with reviews, ratings and photos. There are 500 million places, growing 20% a year, and 100,000 searches a second.</q></p><ul class="legend" aria-label="Colour key"><li><i style="background:var(--c-ingest)"></i>Place updates</li><li><i style="background:var(--c-serve)"></i>Search path</li><li><i style="background:var(--c-kb)"></i>Storage and index</li><li><i style="background:var(--c-cross)"></i>Async</li><li><i style="background:var(--c-gov)"></i>Trust and safety</li></ul></div></header>
+<div class="wrap"><figure class="fig3d hero" id="hero">
+  <div class="stage3d" role="img" aria-label="Animated 3D view: a business owner adds a place through the places API, which writes it to the database; a change event flows through Kafka to the index builder, which inserts it into the in-memory geo index. A user searches near their location: the search service asks the geo index for place ids in the cells around them, filters and ranks the candidates, fetches details and ratings from the cache, and returns the results."><p class="hint3">3D · drag to turn</p><button class="reset3 ghost" type="button" hidden>Reset view</button><p class="nogl">The 3D view needs WebGL and a connection, because Three.js loads from a CDN. The sections below cover the same ground.</p></div>
+  <div class="ctl3"><button class="pp" type="button">Pause</button><span class="k">Step</span><div class="steps3"></div><span class="meta3"></span></div>
+  <div class="track3"><div class="fill3"></div></div>
+  <p class="out3" aria-live="polite"></p>
+  <figcaption>Illustrative. The back row is the slow write path, the front row the fast search path; they meet only at the geo index.</figcaption>
+</figure></div>
+<div class="wrap doc">
+  <nav class="toc" aria-label="Sections"><p>The solution</p><ol><li><a href="#requirements">Requirements</a></li><li><a href="#success">Success metrics</a></li><li><a href="#estimates">Estimates</a></li><li><a href="#api">API</a></li><li><a href="#architecture">Architecture</a></li><li><a href="#index">Finding what's nearby</a></li><li><a href="#lab">Try it: a quadtree</a></li><li><a href="#ranking">Filtering and ranking</a></li><li><a href="#storage">Storage</a></li><li><a href="#sharding">Sharding and replicas</a></li><li><a href="#reviews">Reviews and trust</a></li><li><a href="#deployment">Deployment</a></li><li><a href="#observability">Observability</a></li><li><a href="#risks">Risks and v2</a></li><li><a href="#presenting">Presenting it in 45 minutes</a></li><li><a href="#numbers">Numbers to remember</a></li></ol></nav>
+  <article>
+
+<section id="requirements">
+  <h2>Requirements</h2>
+  <ul class="tags"><li>Clarify</li><li><a href="requirements.html">Non-functional requirements</a></li></ul>
+  <p class="lead">Places change rarely and searches are constant, so the design is a read-optimized spatial index kept close to the search servers, with a normal database behind it.</p>
+  <div class="table"><table>
+    <thead><tr><th>Question</th><th>Assumption</th><th>Why it matters</th></tr></thead>
+    <tbody>
+      <tr><td>Places</td><td class="num">500M, +20% a year</td><td>Index size and growth</td></tr>
+      <tr><td>Searches</td><td class="num">100k a second, +20% a year</td><td>Read capacity; peaks around meal times</td></tr>
+      <tr><td>Writes</td><td>Add, update, delete places; a few hundred a second</td><td>Index can lag by minutes</td></tr>
+      <tr><td>Query</td><td>Location + radius, optional category, open now, price, sort</td><td>Spatial lookup first, then filters and ranking</td></tr>
+      <tr><td>Latency</td><td class="num">p99 under 200 ms</td><td>Real-time feel as the user pans the map</td></tr>
+      <tr><td>Reviews</td><td>Text, rating, photos per place</td><td>A separate, larger store with its own trust problems</td></tr>
+      <tr><td>Freshness</td><td>New places searchable within minutes</td><td>Incremental index updates</td></tr>
+    </tbody>
+  </table></div>
+  <p>Out of scope: turn-by-turn directions, reservations and ads.</p>
+</section>
+
+<section id="success">
+  <h2>Success metrics</h2>
+  <ul class="tags"><li>Define success</li></ul>
+  <div class="table"><table>
+    <thead><tr><th>Kind</th><th>Metric</th><th>Target</th></tr></thead>
+    <tbody>
+      <tr><td>Product</td><td>Searches that lead to a place view, call or directions</td><td class="num">growing</td></tr>
+      <tr><td>Reliability</td><td>Search p99 latency; success rate</td><td class="num">&lt; 200 ms; 99.95%</td></tr>
+      <tr><td>Quality</td><td>Share of results that are closed or wrongly located (from reports)</td><td class="num">&lt; 0.5%</td></tr>
+      <tr><td>Guardrail</td><td>Fake reviews detected after publishing</td><td class="num">falling</td></tr>
+    </tbody>
+  </table></div>
+</section>
+
+<section id="estimates">
+  <h2>Estimates</h2>
+  <ul class="tags"><li>Back of the envelope</li><li><a href="numbers.html">Numbers</a></li></ul>
+  <figure class="fig"><svg viewBox="0 0 722 150" class="dg" role="img" aria-label="Key numbers: 100,000 searches a second, about 400 GB of place records, a geo index of about 12 GB that fits in memory, about 1.2 TB of reviews">
+    <rect x="10" y="10" width="134" height="92" rx="8" class="k-serve"/><text x="24" y="52" class="big">100k/s</text><text x="24" y="78" class="sm">searches</text><text x="24" y="94" class="sm">~3× at lunch and dinner</text>
+    <rect x="154" y="10" width="134" height="92" rx="8" class="k-kb"/><text x="168" y="52" class="big">400 GB</text><text x="168" y="78" class="sm">place records</text><text x="168" y="94" class="sm">500M × ~800 B</text>
+    <rect x="298" y="10" width="134" height="92" rx="8" class="k-kb"/><text x="312" y="52" class="big">~12 GB</text><text x="312" y="78" class="sm">geo index</text><text x="312" y="94" class="sm">id + lat + lng per place</text>
+    <rect x="442" y="10" width="134" height="92" rx="8" class="k-kb"/><text x="456" y="52" class="big">1.2 TB</text><text x="456" y="78" class="sm">review text</text><text x="456" y="94" class="sm">2B × ~600 B</text>
+    <rect x="586" y="10" width="126" height="92" rx="8" class="k-ingest"/><text x="600" y="52" class="big">~300/s</text><text x="600" y="78" class="sm">place writes</text><text x="600" y="94" class="sm">adds, edits, hours</text>
+    <text x="10" y="132" class="small">The index is small enough to hold in memory on every search server. Capacity is about CPU for 100k queries a second, not storage.</text>
+  </svg></figure>
+  <ul class="plain">
+    <li><strong>Place record:</strong> id (8 B), name (256 B), latitude and longitude (8 B each), description (512 B), category (1 B) ≈ 793 bytes. 500M × ~800 B ≈ 400 GB, growing 20% a year. Fine for a sharded relational database.</li>
+    <li><strong>Geo index:</strong> only id, latitude and longitude: 24 bytes × 500M = 12 GB, perhaps 20–30 GB with tree overhead. It fits in RAM on one machine, so every search server can hold a full copy.</li>
+    <li><strong>Search capacity:</strong> a lookup plus ranking costs a few ms of CPU. At ~2,000 searches a second per server, 100k a second at a 3× peak needs about 150 servers, spread across regions.</li>
+    <li><strong>Reviews:</strong> if places average 4 reviews, 2B reviews × ~600 B ≈ 1.2 TB of text. Photos are far larger and live in object storage behind a CDN.</li>
+  </ul>
+</section>
+
+<section id="api">
+  <h2>API</h2>
+  <ul class="tags"><li>Interface</li></ul>
+<pre><code>GET /api/search?lat=40.7411&amp;lng=-73.9897&amp;radius_m=1500
+               &amp;q=ramen&amp;category=restaurant&amp;open_now=true
+               &amp;sort=best&amp;limit=20&amp;page_token=…
+→ { "results": [ { "id": 9921, "name": "…", "distance_m": 340,
+                   "rating": 4.6, "review_count": 812, "open_now": true } ],
+    "next_page_token": "…" }
+
+POST   /api/places              { name, lat, lng, category, hours, … }
+PATCH  /api/places/{id}
+GET    /api/places/{id}         (details, top reviews, photo URLs)
+POST   /api/places/{id}/reviews { rating, text, photo_ids[] }</code></pre>
+  <p>Search is the one that matters. The page token encodes the query and the last result's score, so paging is stable even while the user scrolls. Clients round the location a little (to ~50 m) before searching, which makes nearby users' queries identical and cacheable for a few seconds.</p>
+</section>
+
+<section id="architecture">
+  <h2>Architecture</h2>
+  <ul class="tags"><li>Whole system</li></ul>
+  <figure class="fig"><svg viewBox="0 0 722 290" class="dg" role="img" aria-label="Architecture: place writes go through the places service to the database, then via change events on Kafka to the index builder, which updates the geo index on search servers; searches go through the gateway to the search service, which queries the geo index, ranks candidates, and hydrates details from the cache and database; reviews have their own service and store">
+    <text x="10" y="22" class="cap">WRITE PATH · ~300/S</text>
+    <rect x="10" y="34" width="90" height="40" rx="8" class="k-user"/><text x="55" y="58" class="small b" text-anchor="middle">Owner</text>
+    <path d="M100 54 L130 54" class="wire" marker-end="url(#ah)"/>
+    <rect x="132" y="34" width="120" height="40" rx="8" class="k-ingest"/><text x="192" y="52" class="small b" text-anchor="middle">Places service</text><text x="192" y="67" class="sm" text-anchor="middle">validate · geocode</text>
+    <path d="M252 54 L282 54" class="wire" marker-end="url(#ah)"/>
+    <rect x="284" y="36" width="110" height="36" rx="18" class="k-kb"/><text x="339" y="59" class="small b" text-anchor="middle">Places DB</text>
+    <path d="M394 54 L424 54" class="wire" marker-end="url(#ah)"/><text x="409" y="46" class="sm" text-anchor="middle">CDC</text>
+    <rect x="426" y="34" width="90" height="40" rx="20" class="k-cross"/><text x="471" y="58" class="small b" text-anchor="middle">Kafka</text>
+    <path d="M516 54 L546 54" class="wire" marker-end="url(#ah)"/>
+    <rect x="548" y="34" width="120" height="40" rx="8" class="k-cross"/><text x="608" y="52" class="small b" text-anchor="middle">Index builder</text><text x="608" y="67" class="sm" text-anchor="middle">deltas · nightly snapshot</text>
+    <path d="M608 74 L608 150" class="wire" marker-end="url(#ah)"/>
+    <text x="10" y="116" class="cap">SEARCH PATH · 100K/S</text>
+    <rect x="10" y="134" width="90" height="40" rx="8" class="k-user"/><text x="55" y="158" class="small b" text-anchor="middle">User</text>
+    <path d="M100 154 L130 154" class="wire hot" marker-end="url(#ah)"/>
+    <rect x="132" y="134" width="120" height="40" rx="8" class="k-serve"/><text x="192" y="152" class="small b" text-anchor="middle">Gateway</text><text x="192" y="167" class="sm" text-anchor="middle">rate limit · short cache</text>
+    <path d="M252 154 L282 154" class="wire hot" marker-end="url(#ah)"/>
+    <rect x="284" y="134" width="150" height="40" rx="8" class="k-serve"/><text x="359" y="152" class="small b" text-anchor="middle">Search service</text><text x="359" y="167" class="sm" text-anchor="middle">filter · rank · page</text>
+    <path d="M434 154 L546 154" class="wire hot" marker-end="url(#ah)"/><text x="490" y="148" class="sm" text-anchor="middle">ids near (lat, lng)</text>
+    <rect x="548" y="134" width="164" height="40" rx="8" class="k-kb"/><text x="630" y="152" class="small b" text-anchor="middle">Geo index (in memory)</text><text x="630" y="167" class="sm" text-anchor="middle">quadtree / S2 cells</text>
+    <path d="M359 174 L359 214" class="wire hot" marker-end="url(#ah)"/><text x="367" y="200" class="sm">hydrate top 20</text>
+    <rect x="284" y="216" width="150" height="40" rx="8" class="k-ingest"/><text x="359" y="234" class="small b" text-anchor="middle">Place cache</text><text x="359" y="249" class="sm" text-anchor="middle">Redis · details + rating</text>
+    <path d="M339 72 L339 110 L250 110 L250 236 L282 236" class="wire dash" marker-end="url(#ah)"/><text x="204" y="226" class="sm">on a miss</text>
+    <rect x="460" y="216" width="150" height="40" rx="8" class="k-gov"/><text x="535" y="234" class="small b" text-anchor="middle">Reviews service</text><text x="535" y="249" class="sm" text-anchor="middle">spam checks · ratings</text>
+    <path d="M535 256 L535 270 L359 270 L359 256" class="wire dash" marker-end="url(#ah)"/><text x="447" y="284" class="sm" text-anchor="middle">rating aggregates</text>
+  </svg><figcaption>The geo index answers only "which ids are near here?". Everything else (details, ratings, hours) comes from the cache, so the index stays small and fast.</figcaption></figure>
+</section>
+
+<section id="index">
+  <h2>Finding what's nearby</h2>
+  <ul class="tags"><li>Deep dive 1</li><li><a href="databases.html">Indexes</a></li></ul>
+  <p class="lead">A normal B-tree index sorts on one dimension. "Near here" is two-dimensional, so we need a way to turn locations into keys that keep nearby places close together.</p>
+  <div class="table"><table>
+    <thead><tr><th>Approach</th><th>How</th><th>Problem</th></tr></thead>
+    <tbody>
+      <tr><td>Plain SQL</td><td><code>WHERE lat BETWEEN x−d AND x+d AND lng BETWEEN y−d AND y+d</code></td><td>An index helps one column only; the database scans a huge strip of the world for the other</td></tr>
+      <tr><td>Fixed grid</td><td>Cut the world into equal cells (say 10 miles), store <code>grid_id</code> with each place, search the cell and its 8 neighbours</td><td>Cells in Manhattan hold thousands of places; cells in the ocean hold none. Fixed size fits nowhere well. The index is ~4 GB for 20M cells and 500M places</td></tr>
+      <tr><td><strong>Quadtree</strong></td><td>Start with one cell for the world; split any cell with more than ~500 places into four, recursively</td><td>Cells are small where places are dense and large where they're sparse. Built in memory; needs rebuilding or careful updates</td></tr>
+      <tr><td>Geohash</td><td>Interleave latitude and longitude bits into a string; a shared prefix means a shared cell (<code>dr5ru</code> ≈ 5 km)</td><td>Works in any database with a string index; neighbours across a prefix boundary need extra lookups</td></tr>
+      <tr><td>S2 or H3 cells</td><td>Hierarchical cells on a sphere (squares for S2, hexagons for H3) with 64-bit ids</td><td>Best general choice today; the libraries handle covering a circle with cells. See <a href="ride-matching.html">Ride matching</a></td></tr>
+      <tr><td>PostGIS, Elasticsearch geo</td><td>R-trees or BKD trees built into the database or search engine</td><td>Great up to a few hundred million points with filters and full text combined</td></tr>
+    </tbody>
+  </table></div>
+  <h3>How a quadtree search works</h3>
+  <ol class="plain">
+    <li>Walk from the root to the leaf containing the user's location (about log<sub>4</sub>(500M ÷ 500) ≈ 10 levels).</li>
+    <li>Collect every leaf whose box intersects the search circle: walk the tree, skipping any branch whose box misses the circle. Linking leaves or keeping parent pointers makes neighbours cheap to find.</li>
+    <li>Check each place in those leaves against the exact distance, and keep the ones inside the radius.</li>
+    <li>If there are too few results, widen the radius and repeat.</li>
+  </ol>
+</section>
+
+<section id="lab">
+  <h2>Try it: a quadtree</h2>
+  <ul class="tags"><li>Lab</li></ul>
+  <p>800 places in three dense neighbourhoods and some countryside. Click or tap the map to move the search, change the radius, and change how many places a cell may hold before it splits. Compare the work with a fixed grid.</p>
+  <div class="lab" id="qtlab">
+    <div id="qt-map" style="margin:0 0 10px;cursor:crosshair;touch-action:manipulation"></div>
+    <div class="lab-row"><label for="qt-r">Search radius <input type="range" id="qt-r" min="20" max="200" step="10" value="70"><output id="qt-r-o"></output></label><label for="qt-c">Split a cell above <input type="range" id="qt-c" min="4" max="64" step="4" value="16"><output id="qt-c-o"></output></label></div>
+    <div class="metrics" id="qt-m"></div>
+    <p class="lab-out" id="qt-out" aria-live="polite"></p>
+  </div>
+  <p class="muted" style="font-size:13.5px">The fixed grid uses equal cells of 100 × 100 units and checks every cell that overlaps the circle's bounding box. Map units are arbitrary; at city scale one unit is about 10 m.</p>
+</section>
+
+<section id="ranking">
+  <h2>Filtering and ranking</h2>
+  <ul class="tags"><li>Deep dive 2</li></ul>
+  <p>The spatial lookup returns candidates, typically a few hundred to a few thousand ids. The search service then:</p>
+  <ul class="plain">
+    <li><strong>Filters</strong> on attributes kept alongside the ids in memory: category, price level, a bitmap of opening hours, so "open now" needs no database call.</li>
+    <li><strong>Scores</strong> each candidate: distance, rating (smoothed, so 5 stars from 3 reviews doesn't beat 4.6 from 800), popularity, and text match if there is a query like "ramen".</li>
+    <li><strong>Takes the top 20</strong> and only then hydrates details from the cache.</li>
+  </ul>
+  <p>Text search and filters on many attributes are where Elasticsearch or OpenSearch shine: they combine a geo filter, full text and scoring in one query. A common design is exactly that, with the custom in-memory index reserved for the very hottest, simplest queries.</p>
+  <div class="note"><p><strong>Popular areas:</strong> results for "restaurants near Times Square" are the same for thousands of users a minute. Rounding locations and caching results per (cell, filters) for 30–60 seconds takes a large share of load off the index.</p></div>
+</section>
+
+<section id="storage">
+  <h2>Storage</h2>
+  <ul class="tags"><li><a href="databases.html">Databases</a></li><li><a href="caching.html">Caching</a></li></ul>
+<pre><code>places                        (MySQL/Postgres, sharded by place_id)
+  place_id  bigint PK   name  varchar(256)   lat, lng  double
+  category  smallint    description text     hours  json   status
+
+reviews                       (Cassandra, partitioned by place_id)
+  place_id  bigint      review_id timeuuid   user_id, rating, text, photo_ids
+
+place_stats                   (Redis + periodic rollup)
+  place_id → { rating_avg, review_count, popularity }</code></pre>
+  <p>Places are relational and modest in size: a sharded SQL database with read replicas. Reviews are append-heavy and read newest-first per place: a wide-column store. Rating averages are maintained incrementally and cached, never computed from raw reviews on a search.</p>
+</section>
+
+<section id="sharding">
+  <h2>Sharding and replicas</h2>
+  <ul class="tags"><li>Deep dive 3</li><li><a href="sharding.html">Sharding</a></li></ul>
+  <p>At 12–30 GB the index fits on one machine, so the simplest design is <strong>full replicas</strong>: every search server holds the whole index, and any server answers any query. That stops working when the index or its attributes outgrow memory, or rebuilds become too slow.</p>
+  <div class="table"><table>
+    <thead><tr><th>Shard by</th><th>Upside</th><th>Downside</th></tr></thead>
+    <tbody>
+      <tr><td>Region or city</td><td>A query touches one shard</td><td>Hot cities make hot shards; queries near a boundary need two</td></tr>
+      <tr><td>Place id (hash)</td><td>Even size and load</td><td>Every query fans out to every shard and the results are merged</td></tr>
+    </tbody>
+  </table></div>
+  <p>Hashing by place id with an aggregator is the usual choice once sharding is needed: each shard returns its own top-k for the area, and the aggregator merges them. Tail latency then depends on the slowest shard, so send a hedged request to a replica when one shard is slow.</p>
+  <figure class="fig3d" id="shard3d">
+    <div class="stage3d" role="img" aria-label="A search reaches the aggregator, which sends it to four index shards split by place id. Each shard returns its top 20 nearby places, and the aggregator merges them. Then one shard is slow; after a short wait the aggregator sends the same request to that shard's replica and uses whichever answer comes first."><p class="hint3">3D · drag to turn</p><button class="reset3 ghost" type="button" hidden>Reset view</button><p class="nogl">The 3D view needs WebGL and a connection.</p></div>
+    <div class="ctl3"><button class="pp" type="button">Pause</button><span class="k">Step</span><div class="steps3"></div><span class="meta3"></span></div>
+    <div class="track3"><div class="fill3"></div></div>
+    <p class="out3" aria-live="polite"></p>
+    <figcaption>Illustrative. Scatter, gather and merge, with a hedged request to cut tail latency.</figcaption>
+  </figure>
+  <h3>Keeping the index fresh</h3>
+  <p>Place changes are captured from the database (change data capture) onto Kafka. Each search server applies the deltas to its in-memory index, and a nightly snapshot lets new or restarted servers load a full index in minutes instead of rebuilding from the database. A crashed server restarts from the snapshot plus the Kafka log since.</p>
+</section>
+
+<section id="reviews">
+  <h2>Reviews and trust</h2>
+  <ul class="tags"><li>Governance</li><li><a href="rate-limiting.html">Rate limiting</a></li></ul>
+  <ul class="plain">
+    <li><strong>Fake reviews</strong> are the main abuse: businesses praising themselves or attacking rivals. Score reviews with signals (account age, location history, bursts of reviews for one place, text similarity) and hide suspicious ones from the rating.</li>
+    <li><strong>Photos</strong> go to object storage via presigned uploads, are scanned and resized asynchronously, and are served from a CDN.</li>
+    <li><strong>Wrong data</strong> (closed places, wrong pins) is reported by users and verified, then fed back through the normal write path.</li>
+  </ul>
+</section>
+
+<section id="deployment">
+  <h2>Deployment</h2>
+  <ul class="tags"><li>Production</li></ul>
+  <p>Search runs in several regions, with users routed to the nearest by latency-based DNS. Each region holds full index replicas, so a region failure only shifts traffic. The places database has one primary region with replicas elsewhere; writes are rare and can tolerate the extra distance. Search servers are stateless apart from the index they load at start, so they autoscale on CPU, with a warm-up step that loads the snapshot before taking traffic.</p>
+</section>
+
+<section id="observability">
+  <h2>Observability</h2>
+  <ul class="tags"><li>Production</li></ul>
+  <div class="table"><table>
+    <thead><tr><th>Signal</th><th>Why</th><th>Alert when</th></tr></thead>
+    <tbody>
+      <tr><td>Search p99 latency and error rate, per region</td><td>The core SLO</td><td>Burning error budget fast</td></tr>
+      <tr><td>Candidates scanned per query</td><td>An index that needs splitting, or radius widening loops</td><td>p99 rising steadily</td></tr>
+      <tr><td>Index lag (newest applied change vs now)</td><td>Freshness of new and edited places</td><td>Over 10 minutes</td></tr>
+      <tr><td>Result cache hit ratio</td><td>Load shedding at peaks</td><td>Falls during meal-time peaks</td></tr>
+      <tr><td>Zero-result rate by area</td><td>Data gaps or a broken shard</td><td>Spikes in one region</td></tr>
+    </tbody>
+  </table></div>
+</section>
+
+<section id="risks">
+  <h2>Risks and v2</h2>
+  <ul class="tags"><li>Wrap-up</li></ul>
+  <div class="table"><table>
+    <thead><tr><th>Risk</th><th>How you detect it</th><th>Mitigation</th></tr></thead>
+    <tbody>
+      <tr><td>Dense areas make huge candidate sets</td><td>Candidates per query</td><td>Smaller cells where dense (that's what the quadtree does), cap candidates, rank early</td></tr>
+      <tr><td>Index rebuild too slow as data grows</td><td>Snapshot load time</td><td>Incremental updates, shard by place id</td></tr>
+      <tr><td>Fake reviews distort ranking</td><td>Burst and similarity signals, reports</td><td>Trust scores, hide from averages, legal action against review farms</td></tr>
+      <tr><td>Stale data (closed places)</td><td>Reports, zero-visit signals</td><td>Owner verification, periodic checks</td></tr>
+    </tbody>
+  </table></div>
+  <p><strong>v2 ideas:</strong> personalized ranking, search along a route, reservations and ordering, and indoor or venue-level maps.</p>
+</section>
+
+<section id="presenting">
+  <h2>Presenting it in 45 minutes</h2>
+  <ul class="tags"><li>Interview script</li></ul>
+  <div class="table"><table>
+    <thead><tr><th>Step</th><th>Time</th><th>What to cover</th></tr></thead>
+    <tbody>
+      <tr><td>1. Clarify</td><td class="num">5 min</td><td>Places, searches, filters, latency, freshness, reviews</td></tr>
+      <tr><td>2. Estimate</td><td class="num">4 min</td><td>100k searches/s, 400 GB records, 12 GB index fits in memory</td></tr>
+      <tr><td>3. API</td><td class="num">3 min</td><td>Search with location, radius, filters, page token</td></tr>
+      <tr><td>4. Draw the whole system</td><td class="num">7 min</td><td>Places service and DB, CDC to index, search service, cache, reviews</td></tr>
+      <tr><td>5. Deep dive: spatial index</td><td class="num">12 min</td><td>SQL ranges, fixed grid, quadtree, geohash, S2/H3</td></tr>
+      <tr><td>6. Deep dive: ranking and scale</td><td class="num">9 min</td><td>Filters in memory, scoring, result caching, replicas vs shards</td></tr>
+      <tr><td>7. Risks and v2</td><td class="num">5 min</td><td>Dense areas, freshness, fake reviews</td></tr>
+    </tbody>
+  </table></div>
+  <div class="say"><p>"Searches outnumber writes by hundreds to one, so I'd build a read-optimized geo index next to the search servers. A plain SQL range query can't use an index on two dimensions, and fixed grids are wrong in both cities and countryside, so I'd use a quadtree that splits any cell above about 500 places, or S2 cells in production. The index only holds id, latitude, longitude and a few filter fields: about 12 GB, so every search server keeps a full copy in memory. A search walks to the cells overlapping the circle, filters and ranks a few hundred candidates, and hydrates the top 20 from Redis. Place edits flow from the database through CDC and Kafka into the index within minutes."</p></div>
+</section>
+
+<section id="numbers">
+  <h2>Numbers to remember</h2>
+  <ul class="tags"><li>Cheat sheet</li></ul>
+  <div class="table"><table><tbody>
+    <tr><td>Place record</td><td class="num">~800 bytes (500M → 400 GB)</td></tr>
+    <tr><td>Geo index entry</td><td class="num">24 bytes (500M → 12 GB)</td></tr>
+    <tr><td>Quadtree leaf limit</td><td class="num">~500 places; ~10 levels for 500M</td></tr>
+    <tr><td>Fixed 10-mile grid</td><td class="num">~20M cells, ~4 GB index</td></tr>
+    <tr><td>Geohash length 5 / 6 / 7</td><td class="num">~5 km / ~1.2 km / ~150 m cells</td></tr>
+    <tr><td>Searches per server</td><td class="num">~2,000/s with ranking</td></tr>
+  </tbody></table></div>
+</section>
+  </article>
+</div>
+</main>
+
+<footer class="site"><div class="wrap">Part of Classic System Design, a companion to the <a href="https://devlcodes.github.io/agentic-ai-notebook/system-design/index.html">agentic system designs</a>. The 3D views use Three.js loaded from a CDN, so they need a connection; the text and tables cover the same ground. Figures marked illustrative show the shape of a system, not measured numbers. Check vendor docs before relying on a specific product limit.</div></footer>
+<script>
+(function(){
+  var $ = function(id){ return document.getElementById(id); };
+  var W = 1000, H = 600, seed = 7;
+  function rnd(){ seed = (seed * 16807) % 2147483647; return (seed - 1) / 2147483646; }
+  function gauss(){ var u = rnd() || 1e-9, v = rnd(); return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v); }
+  var pts = [], C = [[260, 220, 55, 300], [640, 360, 80, 260], [820, 140, 40, 120]];
+  C.forEach(function(c){ for (var i = 0; i < c[3]; i++){ var x = c[0] + gauss() * c[2], y = c[1] + gauss() * c[2]; if (x > 2 && x < W - 2 && y > 2 && y < H - 2) pts.push([x, y]); } });
+  while (pts.length < 800) pts.push([2 + rnd() * (W - 4), 2 + rnd() * (H - 4)]);
+  var center = [300, 240];
+  function build(cap){
+    var leaves = [];
+    (function split(x, y, w, h, ps, d){
+      if (ps.length <= cap || d >= 9){ leaves.push({ x: x, y: y, w: w, h: h, ps: ps }); return; }
+      var hw = w / 2, hh = h / 2, q = [[], [], [], []];
+      ps.forEach(function(p){ q[(p[0] >= x + hw ? 1 : 0) + (p[1] >= y + hh ? 2 : 0)].push(p); });
+      split(x, y, hw, hh, q[0], d + 1); split(x + hw, y, hw, hh, q[1], d + 1); split(x, y + hh, hw, hh, q[2], d + 1); split(x + hw, y + hh, hw, hh, q[3], d + 1);
+    })(0, 0, W, H, pts, 0);
+    return leaves;
+  }
+  function hits(b, cx, cy, r){ var dx = Math.max(b.x - cx, 0, cx - (b.x + b.w)), dy = Math.max(b.y - cy, 0, cy - (b.y + b.h)); return dx * dx + dy * dy <= r * r; }
+  function run(){
+    var r = +$('qt-r').value, cap = +$('qt-c').value, cx = center[0], cy = center[1];
+    $('qt-r-o').textContent = r + ' units'; $('qt-c-o').textContent = cap + ' places';
+    var leaves = build(cap), vis = leaves.filter(function(l){ return hits(l, cx, cy, r); });
+    var checked = 0, found = 0, inside = {};
+    vis.forEach(function(l){ checked += l.ps.length; l.ps.forEach(function(p){ var dx = p[0] - cx, dy = p[1] - cy; if (dx * dx + dy * dy <= r * r){ found++; inside[p[0] + ',' + p[1]] = 1; } }); });
+    var G = 100, gx0 = Math.floor((cx - r) / G), gx1 = Math.floor((cx + r) / G), gy0 = Math.floor((cy - r) / G), gy1 = Math.floor((cy + r) / G), grid = 0;
+    pts.forEach(function(p){ var gx = Math.floor(p[0] / G), gy = Math.floor(p[1] / G); if (gx >= gx0 && gx <= gx1 && gy >= gy0 && gy <= gy1) grid++; });
+    var s = '<rect x="0" y="0" width="' + W + '" height="' + H + '" class="box"/>';
+    vis.forEach(function(l){ s += '<rect x="' + l.x + '" y="' + l.y + '" width="' + l.w + '" height="' + l.h + '" class="k-serve" style="stroke-width:1"/>'; });
+    leaves.forEach(function(l){ s += '<rect x="' + l.x + '" y="' + l.y + '" width="' + l.w + '" height="' + l.h + '" fill="none" stroke="var(--line-strong)" stroke-width="1"/>'; });
+    pts.forEach(function(p){ var k = inside[p[0] + ',' + p[1]]; s += '<circle cx="' + p[0].toFixed(1) + '" cy="' + p[1].toFixed(1) + '" r="' + (k ? 6 : 4.5) + '" fill="' + (k ? 'var(--c-ok)' : 'var(--muted)') + '" opacity="' + (k ? 1 : 0.55) + '"/>'; });
+    s += '<circle cx="' + cx + '" cy="' + cy + '" r="' + r + '" fill="none" stroke="var(--accent)" stroke-width="4"/><circle cx="' + cx + '" cy="' + cy + '" r="9" fill="var(--accent)"/>';
+    $('qt-map').innerHTML = '<svg viewBox="0 0 ' + W + ' ' + H + '" class="dg" style="width:100%;height:auto;display:block" role="img" aria-label="Map of 800 places divided into quadtree cells; the cells overlapping the search circle are highlighted and the places inside the circle are green">' + s + '</svg>';
+    $('qt-m').innerHTML = '<div class="metric"><span class="n">' + found + '</span><span class="l">places in radius</span></div>' +
+      '<div class="metric"><span class="n">' + vis.length + ' / ' + leaves.length + '</span><span class="l">cells visited</span></div>' +
+      '<div class="metric"><span class="n">' + checked + '</span><span class="l">places checked</span><small>quadtree</small></div>' +
+      '<div class="metric"><span class="n">' + grid + '</span><span class="l">places checked</span><small>fixed 100-unit grid</small></div>';
+    var msg = 'The quadtree checked ' + checked + ' places to find ' + found + ' (' + (checked ? Math.round(100 * found / checked) : 0) + '% useful), the fixed grid ' + grid + '. ';
+    if (cap <= 8) msg += 'Tiny cells mean little wasted checking but ' + leaves.length + ' cells to store and walk.';
+    else if (cap >= 48) msg += 'Big cells mean a small tree, but each overlapping cell drags in many places outside the circle.';
+    else if (grid > checked * 1.3) msg += 'In dense areas the quadtree\'s small cells fit the circle far better than equal grid cells.';
+    else msg += 'In sparse areas both do similar work; the quadtree\'s advantage shows in the dense neighbourhoods. Click one of them.';
+    $('qt-out').textContent = msg;
+  }
+  $('qt-map').addEventListener('click', function(e){ var svg = this.querySelector('svg'); if (!svg) return; var b = svg.getBoundingClientRect(); center = [Math.round((e.clientX - b.left) / b.width * W), Math.round((e.clientY - b.top) / b.height * H)]; run(); });
+  ['qt-r','qt-c'].forEach(function(id){ $(id).addEventListener('input', run); });
+  run();
+})();
+
+</script>
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+  }
+}
+</script>
+<script type="module">
+import { boot } from './assets/scene3d.js';
+const D = {};
+D.hero = {
+  hero: true,
+  loop: 16,
+  view: { target: [-0.5, 0, 0], w: 30, d: 20, el: 52 },
+  steps: [
+    { t: 0.0, text: 'A business owner adds a café. The places service validates it, turns the address into a latitude and longitude, and writes it to the places database.' },
+    { t: 2.4, text: 'Change data capture puts the new row onto Kafka. Nothing on the search path waits for this.' },
+    { t: 3.8, text: 'The index builder inserts the place into the in-memory geo index on every search server. It is searchable within minutes.' },
+    { t: 6.0, text: 'A user searches for coffee within 1.5 km. The gateway checks a short-lived cache of results for this cell and filter: a miss.' },
+    { t: 7.6, text: 'The search service asks the geo index for ids in the cells that overlap the circle, and gets a few hundred candidates.' },
+    { t: 9.4, text: 'It filters them by category and opening hours in memory, ranks by distance, rating and popularity, and keeps the top 20.' },
+    { t: 10.8, text: 'Only those 20 are hydrated with names, ratings and photos from the Redis place cache.' },
+    { t: 12.4, text: 'Results go back to the user in well under 200 ms, and are cached briefly for the next person searching nearby.' },
+  ],
+  build(c) {
+    const { V, C, P } = c;
+    const own = c.obj(c.SHAPES.browser(C.ingest), -13, -5.5, 'Owner', 'adds a café');
+    const ps = c.obj(c.SHAPES.server({ emi: C.ingest }), -7.5, -5.5, 'Places service', 'validate · geocode');
+    const db = c.obj(c.SHAPES.database(C.kb, { r: 1.0 }), -2, -5.5, 'Places DB');
+    const kf = c.obj(c.SHAPES.topic({ parts: 1, len: 3, color: C.cross }), 3.5, -5.5, 'Kafka', 'CDC');
+    const ib = c.obj(c.SHAPES.server({ emi: C.cross }), 9, -5.5, 'Index builder');
+    const geo = c.obj(c.SHAPES.database(C.kb, { r: 1.1, tiers: 2 }), 9, 1.5, 'Geo index', 'in memory · quadtree');
+    const usr = c.obj(c.SHAPES.browser(0xd7932a), -13, 1.5, 'User', 'coffee within 1.5 km');
+    const gw = c.obj(c.SHAPES.server({ color: 0x8a6a2e, emi: C.serve }), -7.5, 1.5, 'Gateway', 'short result cache');
+    const ss = c.obj(c.SHAPES.server({ color: 0x8a6a2e, emi: C.serve, w: 1.6 }), 0.5, 1.5, 'Search service', 'filter · rank');
+    const rc = c.obj(c.SHAPES.database(C.ingest, { r: 0.9, tiers: 2 }), 0.5, 7, 'Place cache', 'Redis');
+    c.lane([V(-13, -5.5), V(9, -5.5), V(9, 1.5)]);
+    c.lane([V(-13, 1.5), V(9, 1.5)]);
+    c.lane([V(0.5, 1.5), V(0.5, 7)]);
+    c.packet({ pts: [V(-13, -5.5), V(-7.5, -5.5)], t0: 0.2, t1: 1.0, kind: 'doc', from: own, to: ps, label: 'new café' });
+    c.packet({ pts: [V(-7.5, -5.5), V(-2, -5.5)], t0: 1.2, t1: 2.0, kind: 'env', to: db, label: 'lat, lng' });
+    c.packet({ pts: [V(-2, -5.5), V(3.5, -5.5)], t0: 2.5, t1: 3.3, kind: 'span', to: kf, label: 'row changed' });
+    c.packet({ pts: [V(3.5, -5.5), V(9, -5.5)], t0: 3.9, t1: 4.6, kind: 'span', to: ib });
+    c.packet({ pts: [V(9, -5.5), V(9, 1.5)], t0: 4.7, t1: 5.6, kind: 'span', color: P.ship, to: geo, label: 'insert' });
+    c.packet({ pts: [V(-13, 1.5), V(-7.5, 1.5)], t0: 6.1, t1: 6.9, kind: 'ask', from: usr, to: gw, label: 'search' });
+    c.packet({ pts: [V(-7.5, 1.5), V(0.5, 1.5)], t0: 7.0, t1: 7.6, kind: 'ask', to: ss });
+    c.packet({ pts: [V(0.5, 1.5), V(9, 1.5)], t0: 7.7, t1: 8.4, kind: 'span', to: geo, label: 'ids near here?' });
+    c.packet({ pts: [V(9, 1.5), V(0.5, 1.5)], t0: 8.5, t1: 9.3, n: 6, st: 0.06, kind: 'span', s: 1.2, color: P.vec, to: ss, label: '~400 candidates' });
+    c.pulse(ss, 9.6, 10.0);
+    c.packet({ pts: [V(0.5, 1.5), V(0.5, 7)], t0: 10.9, t1: 11.5, kind: 'span', to: rc, label: 'top 20' });
+    c.packet({ pts: [V(0.5, 7), V(0.5, 1.5)], t0: 11.6, t1: 12.2, kind: 'doc', color: P.ship, to: ss, label: 'names · ratings' });
+    c.packet({ pts: [V(0.5, 1.5), V(-7.5, 1.5), V(-13, 1.5)], t0: 12.5, t1: 13.8, kind: 'env', color: P.ship, to: usr, label: '20 results' });
+    c.note('write path · ~300/s', -10.2, -2.9);
+    c.note('search path · 100k/s', -9.5, 4.2);
+  },
+};
+D.shard3d = {
+  loop: 14,
+  view: { target: [-1.5, 0, 0.8], w: 30, d: 19, el: 50 },
+  steps: [
+    { t: 0.0, text: 'A search reaches the aggregator. The index is split by place id into four shards, so nearby places can be on any of them.' },
+    { t: 1.4, text: 'It sends the same query to all four shards at once.' },
+    { t: 3.0, text: 'Each shard returns its own top 20 for that area. The aggregator merges them into one top 20.' },
+    { t: 6.4, text: 'Next query: shard 3 is slow, perhaps in a garbage-collection pause.' },
+    { t: 8.2, text: 'After a short wait (about the p95 latency) the aggregator sends the same request to shard 3\'s replica, and uses whichever answers first.' },
+  ],
+  build(c) {
+    const { V, C, P } = c;
+    const usr = c.obj('person', -12.5, 0, 'User');
+    const ag = c.obj(c.SHAPES.server({ color: 0x8a6a2e, emi: C.serve, w: 1.6 }), -6, 0, 'Aggregator', 'scatter · gather · merge');
+    const zs = [-6, -2, 2, 6];
+    const sh = zs.map((z, i) => c.obj(c.SHAPES.database(C.kb, { r: 0.75, tiers: 2 }), 3, z, 'Shard ' + (i + 1)));
+    const rep = c.obj(c.SHAPES.database(C.kb, { r: 0.75, tiers: 2 }), 9, 2, 'Shard 3 replica');
+    c.lane([V(-12.5, 0), V(-6, 0)]);
+    zs.forEach((z) => c.lane([V(-6, 0), V(-1.5, 0), V(-1.5, z), V(3, z)]));
+    c.lane([V(-1.5, 6), V(-1.5, 9), V(9, 9), V(9, 2)]);
+    c.packet({ pts: [V(-12.5, 0), V(-6, 0)], t0: 0.2, t1: 1.0, kind: 'ask', from: usr, to: ag });
+    zs.forEach((z, i) => c.packet({ pts: [V(-6, 0), V(-1.5, 0), V(-1.5, z), V(3, z)], t0: 1.5, t1: 2.5, kind: 'ask', s: 0.8, to: sh[i] }));
+    zs.forEach((z, i) => c.packet({ pts: [V(3, z), V(-1.5, z), V(-1.5, 0), V(-6, 0)], t0: 3.0 + i * 0.15, t1: 4.1 + i * 0.15, kind: 'span', s: 1.3, color: P.vec, to: ag, label: i === 0 ? 'top 20 each' : '' }));
+    c.packet({ pts: [V(-6, 0), V(-12.5, 0)], t0: 4.9, t1: 5.8, kind: 'env', color: P.ship, to: usr, label: 'merged top 20' });
+    zs.forEach((z, i) => c.packet({ pts: [V(-6, 0), V(-1.5, 0), V(-1.5, z), V(3, z)], t0: 6.5, t1: 7.4, kind: 'ask', s: 0.8, color: i === 2 ? P.bad : undefined, to: sh[i], label: i === 2 ? 'slow' : '' }));
+    [0, 1, 3].forEach((i) => c.packet({ pts: [V(3, zs[i]), V(-1.5, zs[i]), V(-1.5, 0), V(-6, 0)], t0: 7.6, t1: 8.5, kind: 'span', s: 1.3, color: P.vec, to: ag }));
+    c.packet({ pts: [V(-6, 0), V(-1.5, 0), V(-1.5, 9), V(9, 9), V(9, 2)], t0: 8.4, t1: 9.8, kind: 'ask', s: 0.8, to: rep, label: 'hedged request' });
+    c.packet({ pts: [V(9, 2), V(9, 9), V(-1.5, 9), V(-1.5, 0), V(-6, 0)], t0: 9.9, t1: 11.3, kind: 'span', s: 1.3, color: P.ship, to: ag, label: 'first answer wins' });
+    c.packet({ pts: [V(-6, 0), V(-12.5, 0)], t0: 11.6, t1: 12.5, kind: 'env', color: P.ship, to: usr });
+  },
+};
+
+boot(D);
+</script>
+</body>
+</html>
