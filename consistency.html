@@ -248,7 +248,14 @@
 <rect x="470" y="126" width="236" height="40" rx="8" class="k-ingest"/><text x="588" y="142" class="small b" text-anchor="middle">answer "Priya" (AP)</text><text x="588" y="158" class="sm" text-anchor="middle">available, but possibly stale</text>
 </svg><figcaption>CAP only bites during a partition. You cannot be both fully consistent and fully available while replicas can't talk.</figcaption></figure>
 <p>The CAP theorem says: during a network <strong>partition</strong>, a replicated system must choose between <strong>consistency</strong> (every read sees the latest write, or gets an error) and <strong>availability</strong> (every request gets a non-error answer). Partitions happen in any real network, so "CA" is not a real option for a distributed system.</p>
-<p><strong>PACELC</strong> adds the more everyday part: <em>if Partitioned, choose Availability or Consistency; Else, choose Latency or Consistency.</em> Even with a healthy network, waiting for replicas in other regions to confirm a write costs tens to hundreds of milliseconds. Most of the time, the latency trade is the one you actually feel.</p></section>
+<p><strong>PACELC</strong> adds the more everyday part: <em>if Partitioned, choose Availability or Consistency; Else, choose Latency or Consistency.</em> Even with a healthy network, waiting for replicas in other regions to confirm a write costs tens to hundreds of milliseconds. Most of the time, the latency trade is the one you actually feel.</p>
+<div class="table"><table><thead><tr><th>Product</th><th>Choose</th><th>Why</th></tr></thead><tbody>
+<tr><td>Bank balance, payments, stock count at checkout</td><td>CP: refuse or wait rather than answer wrong</td><td>A wrong answer costs money and trust</td></tr>
+<tr><td>Comments, likes, view counts, feeds</td><td>AP: answer from a possibly stale replica</td><td>A count that is a few seconds behind harms nobody</td></tr>
+<tr><td>Seat booking</td><td>CP for the seat, AP for the seat map</td><td>Only the final reservation must be exact</td></tr>
+</tbody></table></div>
+<h3>ACID and BASE</h3>
+<p>The two acronyms name the two ends of the trade. <strong>ACID</strong> (atomic, consistent, isolated, durable) is what a relational database promises for a transaction; see <a href="databases.html#transactions">databases</a>. <strong>BASE</strong> describes many NoSQL stores: <em>basically available</em> (answers even when parts fail), <em>soft state</em> (replicas may differ and change without new input while they converge), and <em>eventually consistent</em> (with no new writes, all replicas end up the same). BASE is the AP side of CAP turned into a design stance. Most real systems mix both: ACID for the order, BASE for the order's view count.</p></section>
 
 <section id="models"><h2>Consistency models</h2>
 <div class="table"><table><thead><tr><th>Model</th><th>A reader sees</th><th>Typical use</th></tr></thead><tbody>
@@ -277,7 +284,9 @@
 
 <section id="practice"><h2>In practice</h2>
 <h3>Leaders make strong consistency easier</h3>
-<p>With a single leader per piece of data (Postgres, or each range in Spanner and CockroachDB), reading from the leader is strongly consistent. Consensus protocols like <strong>Raft</strong> and <strong>Paxos</strong> keep a majority of replicas agreed on the log, so a leader can fail without losing committed writes. etcd and ZooKeeper use them to store small, critical state such as config and locks.</p>
+<p>With a single leader per piece of data (Postgres, or each range in Spanner and CockroachDB), reading from the leader is strongly consistent. Consensus protocols like <strong>Raft</strong> and <strong>Paxos</strong> keep a majority of replicas agreed on the log, so a leader can fail without losing committed writes. etcd and ZooKeeper use them to store small, critical state such as config and locks. <a href="raft.html">Raft</a> has its own page, with a lab.</p>
+<h3 id="repair">Repairing replicas</h3>
+<p>Leaderless stores let replicas drift (a node was down, a write reached two of three). They converge three ways: <strong>read repair</strong> fixes a stale replica noticed during a quorum read, <strong>hinted handoff</strong> holds writes for a down node and replays them, and <strong>anti-entropy</strong> compares replicas in the background using <a href="merkle-trees.html">Merkle trees</a> so only the differing ranges are sent.</p>
 <h3>Conflicts</h3>
 <p>When two replicas accept different writes to the same item, something must pick. <em>Last write wins</em> by timestamp is simple but silently drops one write, and clocks drift. Alternatives: version numbers with compare-and-set, keep both versions and let the app merge, or <strong>CRDTs</strong>, data types such as counters and sets that merge automatically.</p>
 <h3>Across services</h3>
@@ -296,7 +305,7 @@
 </tbody></table></div>
 <p class="muted" style="font-size:13.5px;color:var(--muted)">Products change quickly; names here are examples, not endorsements. Check current docs before choosing.</p></section>
 
-<section id="related"><h2>Related</h2><ul class="related"><li><a href="databases.html#replication">Replication</a></li><li><a href="sharding.html">Sharding</a></li><li><a href="caching.html">Caching</a></li><li><a href="queues.html">Message queues</a></li></ul></section>
+<section id="related"><h2>Related</h2><ul class="related"><li><a href="databases.html#replication">Replication</a></li><li><a href="sharding.html">Sharding</a></li><li><a href="caching.html">Caching</a></li><li><a href="queues.html">Message queues</a></li><li><a href="raft.html">Consensus with Raft</a></li><li><a href="merkle-trees.html">Merkle trees</a></li></ul></section>
   </article>
 </div>
 </main>

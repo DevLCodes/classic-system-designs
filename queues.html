@@ -266,7 +266,38 @@
 </tbody></table></div>
 <p>A third pattern, <strong>publish/subscribe</strong> (Amazon SNS, Google Pub/Sub), fans one message out to many subscribers, each often with its own queue.</p>
 <h3>Partitions and ordering</h3>
-<p>Kafka splits a topic into partitions. Messages with the same key (say <code>order_id</code>) go to the same partition and stay in order; different partitions are processed in parallel. You can run at most one consumer per partition in a group, so the partition count caps parallelism. Choose it with growth in mind.</p></section>
+<p>Kafka splits a topic into partitions. Messages with the same key (say <code>order_id</code>) go to the same partition and stay in order; different partitions are processed in parallel. You can run at most one consumer per partition in a group, so the partition count caps parallelism. Choose it with growth in mind.</p>
+<h3>Inside a Kafka cluster</h3>
+<figure class="fig"><svg viewBox="0 0 722 262" class="dg" role="img" aria-label="A topic with three partitions spread over three brokers, each partition with a leader and two followers; two consumer groups read the same partitions independently">
+<text x="20" y="20" class="cap">TOPIC "orders" · 3 PARTITIONS · REPLICATION FACTOR 3</text>
+<rect x="20" y="34" width="200" height="118" rx="10" class="zone"/><text x="120" y="52" class="small b" text-anchor="middle">Broker 1</text>
+<rect x="260" y="34" width="200" height="118" rx="10" class="zone"/><text x="360" y="52" class="small b" text-anchor="middle">Broker 2</text>
+<rect x="500" y="34" width="200" height="118" rx="10" class="zone"/><text x="600" y="52" class="small b" text-anchor="middle">Broker 3</text>
+<rect x="36" y="64" width="168" height="24" rx="5" class="k-ingest"/><text x="120" y="81" class="sm b" text-anchor="middle">P0 leader</text>
+<rect x="36" y="94" width="168" height="24" rx="5" class="box"/><text x="120" y="111" class="sm" text-anchor="middle">P1 follower</text>
+<rect x="36" y="124" width="168" height="24" rx="5" class="box"/><text x="120" y="141" class="sm" text-anchor="middle">P2 follower</text>
+<rect x="276" y="64" width="168" height="24" rx="5" class="box"/><text x="360" y="81" class="sm" text-anchor="middle">P0 follower</text>
+<rect x="276" y="94" width="168" height="24" rx="5" class="k-ingest"/><text x="360" y="111" class="sm b" text-anchor="middle">P1 leader</text>
+<rect x="276" y="124" width="168" height="24" rx="5" class="box"/><text x="360" y="141" class="sm" text-anchor="middle">P2 follower</text>
+<rect x="516" y="64" width="168" height="24" rx="5" class="box"/><text x="600" y="81" class="sm" text-anchor="middle">P0 follower</text>
+<rect x="516" y="94" width="168" height="24" rx="5" class="box"/><text x="600" y="111" class="sm" text-anchor="middle">P1 follower</text>
+<rect x="516" y="124" width="168" height="24" rx="5" class="k-ingest"/><text x="600" y="141" class="sm b" text-anchor="middle">P2 leader</text>
+<rect x="60" y="196" width="270" height="52" rx="10" class="k-serve"/><text x="195" y="216" class="small b" text-anchor="middle">Group "billing": 2 consumers</text><text x="195" y="234" class="sm" text-anchor="middle">C1 reads P0 + P1 · C2 reads P2</text>
+<rect x="392" y="196" width="270" height="52" rx="10" class="k-kb"/><text x="527" y="216" class="small b" text-anchor="middle">Group "search": 3 consumers</text><text x="527" y="234" class="sm" text-anchor="middle">one partition each, own offsets</text>
+<path d="M120 152 L170 194" class="wire" marker-end="url(#ah)"/><path d="M360 152 L230 194" class="wire" marker-end="url(#ah)"/><path d="M600 152 L300 194" class="wire" marker-end="url(#ah)"/>
+<path d="M120 152 L450 194" class="wire dash" marker-end="url(#ah)"/><path d="M360 152 L527 194" class="wire dash" marker-end="url(#ah)"/><path d="M600 152 L610 194" class="wire dash" marker-end="url(#ah)"/>
+</svg><figcaption>Each partition has one leader that takes all reads and writes and followers that copy it. Two consumer groups read the same data independently; within a group, each partition goes to one consumer.</figcaption></figure>
+<div class="table"><table><thead><tr><th>Piece</th><th>What it does</th><th>Design consequence</th></tr></thead><tbody>
+<tr><td>Broker</td><td>A Kafka server storing partitions on disk</td><td>Spread partition leaders evenly, or one broker becomes the hot spot</td></tr>
+<tr><td>In-sync replicas (ISR)</td><td>Followers caught up with the leader</td><td>With <code>acks=all</code> and <code>min.insync.replicas=2</code>, a write is acknowledged only once two copies have it, so losing a broker loses nothing</td></tr>
+<tr><td>Offsets</td><td>Each consumer group's position in each partition</td><td>Commit after processing for at-least-once; commit before for at-most-once</td></tr>
+<tr><td>Rebalance</td><td>Partitions are reassigned when a consumer joins, leaves or stalls</td><td>3 partitions and 2 consumers: one gets 2. A 4th consumer in a 3-partition group sits idle</td></tr>
+<tr><td>Retention</td><td>Data is kept by time or size (7 days is the default), whether or not it was read</td><td>Consumers can replay; size disks for throughput × retention × replication</td></tr>
+<tr><td>Pull model</td><td>Consumers fetch at their own pace</td><td>A slow consumer builds lag instead of overloading itself; alert on lag</td></tr>
+</tbody></table></div>
+<p>Kafka is built for small messages: the default maximum is about 1 MB. Put large payloads in object storage and send a pointer. Amazon SQS caps a message at 256 KB.</p>
+<h3>Queue or pub/sub</h3>
+<p>A queue gives each message to <strong>one</strong> worker; pub/sub gives each message to <strong>every</strong> subscriber. Use a queue for work that must be done once (send this email, resize this image). Use pub/sub or a log when several independent systems react to the same event: an "order placed" event feeds billing, search, analytics and notifications, and a new consumer can be added later without touching the producer. Typical pub/sub uses: log and click ingestion, real-time monitoring, replicating data into caches and search indexes, and decoupling services.</p></section>
 
 <section id="delivery"><h2>Delivery guarantees</h2>
 <div class="table"><table><thead><tr><th>Guarantee</th><th>Means</th><th>When</th></tr></thead><tbody>
