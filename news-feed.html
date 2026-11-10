@@ -423,6 +423,20 @@ timeline:{user_id}  -- Redis sorted set: member = post_id, score = post_id</code
     <li><strong>The follow graph is stored twice</strong>, once per direction, because fan-out asks "who follows X?" and pull asks "who does Y follow?". Both are a single partition read. A celebrity's follower list is huge, so page through it in chunks.</li>
     <li><strong>Counts live elsewhere.</strong> Like and reply counts change constantly. Keep them in a separate counter service (sharded counters in Redis, flushed to a store) so hot posts don't hammer the posts table.</li>
   </ul>
+  <h3>How Twitter actually did it</h3>
+  <p>The public engineering write-ups match this shape closely, and they are good to quote in an interview:</p>
+  <div class="table"><table>
+    <thead><tr><th>Need</th><th>What Twitter used</th><th>Lesson</th></tr></thead>
+    <tbody>
+      <tr><td>Tweets, timelines, graph</td><td>Manhattan, an in-house key-value store on RocksDB, which replaced most Cassandra use from 2014</td><td>At very large scale, teams build a store tuned to their exact access patterns</td></tr>
+      <tr><td>Home timelines</td><td>Redis clusters holding a list of tweet IDs per user, filled by fan-out on write</td><td>Store IDs, not tweets; hydrate at read time</td></tr>
+      <tr><td>Photos and video</td><td>Blobstore, an internal object store, behind a CDN</td><td>Media never goes through the timeline path</td></tr>
+      <tr><td>Ads, billing, users</td><td>Sharded MySQL (and some Postgres)</td><td>Relational data stays relational</td></tr>
+      <tr><td>Event stream</td><td>Kafka, on the order of 400 billion events a day</td><td>Everything downstream (counts, search, analytics) is a consumer</td></tr>
+      <tr><td>Real-time search</td><td>Earlybird, built on Lucene, indexing a tweet within about 15 seconds and keeping the last week in RAM</td><td>Recent data hot in memory, older data on disk</td></tr>
+    </tbody>
+  </table></div>
+  <p>The ratio Twitter quoted for timelines was roughly 1 write for every 1,000 reads, which is why paying at write time (fan-out) to make reads cheap was worth it.</p>
 </section>
 
 <section id="read">

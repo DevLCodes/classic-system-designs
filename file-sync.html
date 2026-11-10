@@ -1,0 +1,628 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>File Sync · Classic System Design</title>
+<meta name="description" content="Design a Dropbox or Google Drive style service: content-addressed blocks, dedupe and resumable uploads, a change journal with cursors, and conflict handling.">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700&family=Instrument+Sans:ital,wght@0,400;0,500;0,600;1,400&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+  /* Layout: a slim site bar, then either a card grid (home), a sticky contents rail + reading column (articles), or a filterable term list (glossary). Light, single look. */
+  :root {
+    color-scheme: light;
+    --bg: #e9ecef; --paper: #f7f8f9; --ink: #1c2530; --muted: #586473; --line: #cdd4dc; --line-strong: #9aa5b1;
+    --accent: #4255d4; --accent-ink: #ffffff; --track: #d3d9e0; --code-bg: #eef1f4; --wire: #7d8996;
+    --c-ingest: #2a9d8f; --c-kb: #4d5fd8; --c-serve: #d7932a; --c-model: #e2674f; --c-gov: #b2456e; --c-cross: #4a5562; --c-dlq: #b23a3a; --c-ok: #2f8f5b;
+    --t-src: #e4e8ec; --t-ingest: #d8eeea; --t-kb: #dfe3fa; --t-serve: #f8ead2; --t-model: #fbe1da; --t-gov: #f3dde6; --t-cross: #dfe2e6; --t-dlq: #f6dddb;
+    --font-display: "Bricolage Grotesque", "Avenir Next", "Segoe UI", system-ui, sans-serif;
+    --font-body: "Instrument Sans", "Helvetica Neue", "Segoe UI", system-ui, sans-serif;
+    --font-mono: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  @media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
+  body { margin: 0; background: var(--bg); color: var(--ink); font-family: var(--font-body); font-size: 16px; line-height: 1.6; }
+  a { color: var(--accent); }
+  .wrap { max-width: 1240px; margin: 0 auto; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
+
+  .sitebar { border-bottom: 1px solid var(--line); background: var(--paper); }
+  .sitebar .wrap { display: flex; align-items: center; gap: 18px; flex-wrap: wrap; padding-block: 12px; }
+  .brand { font-family: var(--font-display); font-weight: 700; font-size: 17px; color: var(--ink); text-decoration: none; margin-right: auto; }
+  .sitebar nav { display: flex; gap: 16px; flex-wrap: wrap; font-size: 14px; }
+  .sitebar nav a { color: var(--muted); text-decoration: none; }
+  .sitebar nav a:hover, .sitebar nav a[aria-current="page"] { color: var(--ink); }
+  .sitebar nav a[aria-current="page"] { font-weight: 600; }
+
+  .intro { padding-block: 40px 8px; display: grid; gap: 10px; max-width: 820px; }
+  .eyebrow { margin: 0; font-family: var(--font-mono); font-size: 12px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+  h1 { margin: 0; font-family: var(--font-display); font-weight: 700; font-size: clamp(30px, 5vw, 46px); line-height: 1.05; text-wrap: balance; }
+  .intro .lead { font-size: 18px; margin: 0; }
+
+  .doc { display: grid; grid-template-columns: 220px minmax(0, 1fr); gap: 48px; padding-block: 36px 72px; }
+  .toc { position: sticky; top: calc(env(safe-area-inset-top, 0px) + 20px); align-self: start; }
+  .toc p { margin: 0 0 8px; font-family: var(--font-mono); font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+  .toc ol { margin: 0; padding: 0; list-style: none; display: grid; gap: 2px; counter-reset: toc; }
+  .toc li { counter-increment: toc; }
+  .toc a { display: flex; gap: 8px; padding: 3px 0; font-size: 14px; color: var(--muted); text-decoration: none; }
+  .toc a::before { content: counter(toc, decimal-leading-zero); font-family: var(--font-mono); font-size: 11.5px; padding-top: 2px; color: var(--line-strong); }
+  .toc a:hover { color: var(--ink); }
+  article { min-width: 0; max-width: 760px; }
+  section { padding-bottom: 36px; margin-bottom: 36px; border-bottom: 1px solid var(--line); scroll-margin-top: 20px; }
+  section:last-child { border-bottom: 0; }
+  h2 { margin: 0 0 10px; font-family: var(--font-display); font-weight: 700; font-size: 28px; line-height: 1.15; text-wrap: balance; }
+  h3 { margin: 26px 0 6px; font-family: var(--font-display); font-weight: 600; font-size: 19px; line-height: 1.25; }
+  p { margin: 0 0 14px; }
+  .lead { font-size: 18px; }
+  ul.plain, ol.plain { margin: 0 0 16px; padding-left: 22px; display: grid; gap: 6px; }
+  code { font-family: var(--font-mono); font-size: 0.88em; background: var(--code-bg); padding: 1px 5px; border-radius: 4px; }
+  pre { margin: 0 0 16px; padding: 14px 16px; background: var(--code-bg); border-radius: 10px; overflow-x: auto; font-size: 13px; line-height: 1.55; }
+  pre code { background: none; padding: 0; font-size: inherit; }
+  .table { overflow-x: auto; margin: 0 0 18px; }
+  table { width: 100%; border-collapse: collapse; font-size: 14.5px; line-height: 1.45; }
+  th, td { text-align: left; vertical-align: top; padding: 8px 10px; border-bottom: 1px solid var(--line); }
+  th { font-family: var(--font-mono); font-size: 11.5px; font-weight: 500; letter-spacing: .05em; text-transform: uppercase; color: var(--muted); }
+  td.num { font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .note { border-left: 3px solid var(--accent); background: var(--paper); padding: 12px 16px; border-radius: 0 10px 10px 0; margin: 0 0 18px; }
+  .note p:last-child { margin: 0; }
+  .formula { font-family: var(--font-mono); font-size: 14px; background: var(--paper); border: 1px solid var(--line); border-radius: 10px; padding: 12px 16px; margin: 0 0 16px; overflow-x: auto; white-space: nowrap; }
+  .related { display: flex; flex-wrap: wrap; gap: 8px; margin: 0; padding: 0; list-style: none; }
+  .related a { display: inline-block; padding: 4px 12px; border: 1px solid var(--line); border-radius: 999px; font-size: 14px; color: var(--ink); text-decoration: none; background: var(--paper); }
+  .related a:hover { border-color: var(--ink); }
+  .pager { display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; font-size: 14px; }
+  footer.site { border-top: 1px solid var(--line); padding-block: 20px 40px; font-size: 13px; color: var(--muted); }
+  a:focus-visible, input:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+  /* home */
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 16px; margin: 0 0 40px; padding: 0; list-style: none; }
+  .card { display: grid; gap: 8px; height: 100%; padding: 18px; background: var(--paper); border: 1px solid var(--line); border-radius: 14px; color: var(--ink); text-decoration: none; }
+  .card:hover { border-color: var(--ink); }
+  .card .k { font-family: var(--font-mono); font-size: 11px; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
+  .card h3 { margin: 0; font-size: 20px; }
+  .card p { margin: 0; font-size: 14.5px; color: var(--muted); }
+  .card svg { width: 100%; height: auto; display: block; }
+  .card.feature svg { max-width: 420px; justify-self: center; }
+  .card.feature { grid-column: 1 / -1; grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr); align-items: center; gap: 24px; }
+  .home-h { margin: 28px 0 12px; font-family: var(--font-display); font-size: 24px; }
+
+  /* glossary */
+  .gl-tools { position: sticky; top: 0; z-index: 2; background: var(--bg); padding-block: 12px; display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+  .gl-tools input { flex: 1 1 260px; min-width: 0; font: 15px var(--font-body); padding: 9px 12px; border-radius: 10px; border: 1px solid var(--line-strong); background: #fff; color: var(--ink); }
+  .gl-letters { display: flex; flex-wrap: wrap; gap: 4px; font-family: var(--font-mono); font-size: 13px; }
+  .gl-letters a { padding: 2px 6px; border-radius: 6px; text-decoration: none; color: var(--muted); }
+  .gl-letters a:hover { background: var(--paper); color: var(--ink); }
+  .gl { max-width: 860px; }
+  .gl-item { margin: 0; }
+  .gl-item { display: grid; grid-template-columns: 220px minmax(0, 1fr); gap: 16px; padding: 12px 0; border-bottom: 1px solid var(--line); scroll-margin-top: 70px; }
+  .gl-item dt { font-weight: 600; }
+  .gl-item dt small { display: block; font-weight: 400; font-family: var(--font-mono); font-size: 11px; color: var(--muted); letter-spacing: .04em; text-transform: uppercase; margin-top: 2px; }
+  .gl-item dd { margin: 0; }
+  .gl-item dd .see { font-size: 13.5px; }
+  .gl-letter { margin: 26px 0 4px; font-family: var(--font-display); font-size: 22px; scroll-margin-top: 70px; }
+
+  @media (max-width: 900px) {
+    .doc { grid-template-columns: minmax(0, 1fr); gap: 24px; padding-block: 28px 56px; }
+    .toc { position: static; }
+    .toc ol { grid-template-columns: repeat(2, minmax(0, 1fr)); column-gap: 12px; }
+    .card.feature { grid-template-columns: minmax(0, 1fr); }
+  }
+  @media (max-width: 640px) {
+    .gl-item { grid-template-columns: minmax(0, 1fr); gap: 4px; }
+    h2 { font-size: 24px; }
+    .intro .lead, .lead { font-size: 16.5px; }
+  }
+
+  /* diagrams */
+  .fig { margin: 6px 0 24px; overflow-x: auto; }
+  .fig svg { display: block; width: 100%; height: auto; min-width: 600px; }
+  .fig figcaption { margin-top: 8px; font-size: 13px; line-height: 1.45; color: var(--muted); }
+  .dg text { font-family: var(--font-body); font-size: 13px; fill: var(--ink); }
+  .dg .sm { font-size: 11.5px; fill: var(--muted); }
+  .dg .small { font-size: 12px; }
+  .dg .b { font-weight: 600; }
+  .dg .mono { font-family: var(--font-mono); }
+  .dg .it { font-style: italic; }
+  .dg .mute { fill: var(--muted); }
+  .dg .gov { fill: var(--c-gov); font-weight: 600; }
+  .dg .okt { fill: var(--c-ok); font-weight: 600; }
+  .dg .bad { fill: var(--c-dlq); font-weight: 600; }
+  .dg .cap { font-family: var(--font-mono); font-size: 11px; letter-spacing: .06em; fill: var(--muted); }
+  .dg .big { font-family: var(--font-display); font-size: 30px; font-weight: 700; fill: var(--ink); }
+  .dg .box { fill: var(--paper); stroke: var(--line-strong); stroke-width: 1.25; }
+  .dg .ghost { fill: none; stroke: var(--line-strong); stroke-width: 1.25; stroke-dasharray: 5 5; }
+  .dg .track { fill: var(--track); }
+  .dg .rule { stroke: var(--line); stroke-width: 1; }
+  .dg .axis { stroke: var(--line-strong); stroke-width: 1.25; }
+  .dg .wire { fill: none; stroke: var(--wire); stroke-width: 1.4; }
+  .dg .wire.dash { stroke-dasharray: 4 4; }
+  .dg .wire.hot { stroke: var(--accent); stroke-width: 2; }
+  .dg .wire.red { stroke: var(--c-dlq); }
+  .dg .ah { fill: var(--wire); }
+  .dg .xmark { stroke: var(--c-dlq); stroke-width: 1.8; fill: none; }
+  .dg .tick { stroke: var(--c-ok); stroke-width: 2; fill: none; }
+  .dg .k-src { fill: var(--t-src); stroke: #8795a3; stroke-width: 1.5; }
+  .dg .k-ingest { fill: var(--t-ingest); stroke: var(--c-ingest); stroke-width: 1.5; }
+  .dg .k-kb { fill: var(--t-kb); stroke: var(--c-kb); stroke-width: 1.5; }
+  .dg .k-serve { fill: var(--t-serve); stroke: var(--c-serve); stroke-width: 1.5; }
+  .dg .k-model { fill: var(--t-model); stroke: var(--c-model); stroke-width: 1.5; }
+  .dg .k-gov { fill: var(--t-gov); stroke: var(--c-gov); stroke-width: 1.5; }
+  .dg .k-cross { fill: var(--t-cross); stroke: var(--c-cross); stroke-width: 1.5; }
+  .dg .k-dlq { fill: var(--t-dlq); stroke: var(--c-dlq); stroke-width: 1.5; }
+  .dg .k-user { fill: #ffffff; stroke: var(--line-strong); stroke-width: 1.5; }
+  .dg .f-serve { fill: var(--c-serve); } .dg .f-kb { fill: var(--c-kb); } .dg .f-model { fill: var(--c-model); } .dg .f-gov { fill: var(--c-gov); } .dg .f-ingest { fill: var(--c-ingest); } .dg .f-cross { fill: #b8c0c9; } .dg .f-dlq { fill: var(--c-dlq); } .dg .f-ok { fill: var(--c-ok); }
+  .dg .cell { fill: var(--paper); stroke: var(--line-strong); stroke-width: 1; }
+  .dg .cell.hot { fill: var(--t-ingest); stroke: var(--c-ingest); stroke-width: 1.5; }
+  .dg .cell.old { fill: var(--t-kb); stroke: var(--c-kb); }
+  .dg .cell.new { fill: var(--t-ingest); stroke: var(--c-ingest); stroke-width: 1.5; }
+  .dg .cell.gone { fill: var(--paper); stroke: var(--line); }
+  .dg .dot-hr { fill: var(--c-gov); } .dg .dot-it { fill: var(--c-kb); } .dg .dot-eng { fill: var(--c-ingest); } .dg .dot-q { fill: var(--c-serve); stroke: var(--ink); stroke-width: 1.5; }
+  .dg .halo { fill: none; stroke: var(--c-serve); stroke-width: 1.5; stroke-dasharray: 4 4; }
+  .dg .zone { fill: var(--paper); stroke: var(--line); stroke-width: 1; }
+</style>
+
+<style>
+  .lab { margin: 6px 0 26px; padding: 14px 16px 16px; background: var(--paper); border: 1px solid var(--line); border-radius: 14px; }
+  .lab-row { display: flex; flex-wrap: wrap; gap: 10px 18px; align-items: center; margin: 0 0 12px; }
+  .lab-k { font-family: var(--font-mono); font-size: 11px; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
+  .lab label { display: inline-flex; gap: 8px; align-items: center; font-size: 14px; }
+  .lab input[type=range] { width: 150px; accent-color: var(--accent); }
+  .lab input[type=checkbox] { width: 16px; height: 16px; accent-color: var(--accent); }
+  .lab input[type=text] { flex: 1 1 260px; min-width: 0; font: 15px var(--font-body); padding: 8px 11px; border-radius: 9px; border: 1px solid var(--line-strong); background: #fff; color: var(--ink); }
+  .lab output { font-family: var(--font-mono); font-size: 12.5px; min-width: 6ch; font-variant-numeric: tabular-nums; }
+  .seg { display: inline-flex; flex-wrap: wrap; gap: 6px; }
+  .seg button, .chips button { font: 600 13px var(--font-body); color: var(--ink); background: #fff; border: 1px solid var(--line); border-radius: 8px; padding: 6px 12px; cursor: pointer; }
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; }
+  .chips button { font-weight: 500; border-radius: 999px; padding: 4px 11px; font-size: 13px; }
+  .seg button:hover, .chips button:hover { border-color: var(--ink); }
+  .seg button[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+  .seg button:focus-visible, .chips button:focus-visible, .lab input:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .lab-out { margin: 12px 0 0; padding: 10px 12px; background: #fff; border: 1px solid var(--line); border-radius: 10px; font-size: 14.5px; line-height: 1.5; font-variant-numeric: tabular-nums; }
+  .chunks { display: grid; gap: 8px; max-height: 470px; overflow: auto; padding-right: 4px; }
+  .chunk { min-width: 0; padding: 8px 11px; background: #fff; border: 1px solid var(--line); border-left: 4px solid var(--c-kb); border-radius: 8px; font-size: 14px; line-height: 1.5; overflow-wrap: anywhere; }
+  .chunk:nth-child(even) { border-left-color: var(--c-ingest); }
+  .chunk.ans { box-shadow: 0 0 0 2px var(--c-serve); }
+  .chunk .ch { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-bottom: 4px; font-family: var(--font-mono); font-size: 11px; color: var(--muted); }
+  .chunk .pfx { display: block; font-family: var(--font-mono); font-size: 11.5px; color: var(--c-kb); }
+  .chunk .ov { background: var(--track); border-radius: 3px; }
+  .chunk mark { background: #ffe9b3; border-radius: 3px; padding: 0 2px; }
+  .chunk table { width: auto; font-size: 13px; margin: 4px 0; }
+  .chunk td { padding: 2px 10px 2px 0; border-bottom: 1px solid var(--line); }
+  .badge { display: inline-block; padding: 0 7px; border-radius: 999px; border: 1px solid; font-family: var(--font-mono); font-size: 10.5px; line-height: 1.6; }
+  .badge.bad { color: var(--c-dlq); border-color: var(--c-dlq); background: var(--t-dlq); }
+  .badge.ok { color: var(--c-ok); border-color: var(--c-ok); background: #e3f3ea; }
+  .badge.info { color: var(--c-kb); border-color: var(--c-kb); background: var(--t-kb); }
+  .bars { display: grid; gap: 8px; margin: 4px 0 0; }
+  .bar-row { display: grid; grid-template-columns: minmax(0, 150px) minmax(0, 1fr) 46px; gap: 10px; align-items: center; font-size: 14px; }
+  .bar { position: relative; height: 14px; border-radius: 7px; background: var(--track); }
+  .bar i { position: absolute; inset: 0 auto 0 0; border-radius: 7px; background: var(--c-kb); transition: width .3s; }
+  .bar b { position: absolute; top: -4px; bottom: -4px; width: 2px; background: var(--c-dlq); }
+  .bar-row .v { font-family: var(--font-mono); font-size: 12.5px; text-align: right; }
+  .stages { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 10px; padding: 0; list-style: none; font-size: 13px; }
+  .stages li { padding: 2px 10px; border-radius: 999px; border: 1px solid var(--line); color: var(--muted); background: #fff; }
+  .stages li.hit { border-color: var(--accent); color: var(--accent-ink); background: var(--accent); }
+  .stages li.skip { text-decoration: line-through; }
+  .rlist { display: grid; gap: 6px; margin: 0; padding: 0; list-style: none; counter-reset: r; }
+  .rlist li { counter-increment: r; display: grid; grid-template-columns: 28px minmax(0, 1fr) auto; gap: 10px; align-items: center; padding: 6px 10px; background: #fff; border: 1px solid var(--line); border-radius: 8px; font-size: 14px; }
+  .rlist li::before { content: counter(r); font-family: var(--font-mono); font-size: 12px; color: var(--muted); }
+  .rlist li.rel { border-color: var(--c-ok); background: #f0f8f3; }
+  .rlist button { font: 600 12px var(--font-body); padding: 3px 10px; border-radius: 999px; border: 1px solid var(--line-strong); background: #fff; color: var(--ink); cursor: pointer; white-space: nowrap; }
+  .rlist li.rel button { background: var(--c-ok); border-color: var(--c-ok); color: #fff; }
+  .metrics { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 8px; margin: 12px 0 0; }
+  .metric { padding: 8px 10px; background: #fff; border: 1px solid var(--line); border-radius: 10px; }
+  .metric .n { display: block; font-family: var(--font-display); font-size: 24px; font-weight: 700; font-variant-numeric: tabular-nums; }
+  .metric .l { font-family: var(--font-mono); font-size: 11px; letter-spacing: .04em; text-transform: uppercase; color: var(--muted); }
+  .metric small { display: block; font-size: 12px; color: var(--muted); line-height: 1.35; margin-top: 2px; }
+  td.pass { color: var(--c-ok); font-weight: 600; } td.fail { color: var(--c-dlq); font-weight: 600; }
+  .say { border-left: 3px solid var(--c-serve); background: var(--paper); padding: 12px 16px; border-radius: 0 10px 10px 0; margin: 0 0 16px; font-size: 15.5px; }
+  .say p:last-child { margin: 0; }
+</style>
+
+<style>
+  .lab-chart { display: block; width: 100%; height: auto; margin: 4px 0 0; }
+  .lab-chart text { font-family: var(--font-body); font-size: 12px; fill: var(--muted); }
+  .grid-cells { display: grid; gap: 4px; }
+  .srv { display: grid; grid-template-columns: 92px minmax(0,1fr) 70px; gap: 10px; align-items: center; font-size: 14px; }
+  .muted { color: var(--muted); }
+  .lab select { font: 14px var(--font-body); padding: 6px 8px; border-radius: 8px; border: 1px solid var(--line-strong); background: #fff; color: var(--ink); }
+  .lab input[type=number] { width: 9ch; font: 14px var(--font-mono); padding: 6px 8px; border-radius: 8px; border: 1px solid var(--line-strong); background: #fff; color: var(--ink); }
+</style><style>
+  .prompt { margin: 0; font-size: 18px; line-height: 1.5; color: var(--ink); }
+  .prompt q { font-style: italic; }
+  .legend { display: flex; flex-wrap: wrap; gap: 6px 14px; margin: 4px 0 0; padding: 0; list-style: none; font-size: 13px; color: var(--muted); }
+  .legend li { display: flex; align-items: center; gap: 6px; }
+  .legend i { width: 11px; height: 11px; border-radius: 3px; display: inline-block; }
+  .tags { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 16px; padding: 0; list-style: none; }
+  .tags li { font-family: var(--font-mono); font-size: 11px; letter-spacing: .04em; padding: 2px 8px; border-radius: 6px; border: 1px solid var(--line); color: var(--muted); }
+  @media (max-width: 640px) { .prompt { font-size: 16.5px; } }
+</style>
+<link rel="stylesheet" href="assets/scene3d.css">
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs><marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" class="ah" style="fill:#7d8996"/></marker></defs></svg>
+<header class="sitebar"><div class="wrap"><a class="brand" href="index.html">Classic System Design</a><nav aria-label="Site"><a href="index.html">Home</a><a href="index.html#blocks">Building blocks</a><a href="index.html#designs" aria-current="page">Designs</a><a href="https://devlcodes.github.io/agentic-ai-notebook/system-design/index.html">Agentic designs ↗</a></nav></div></header>
+<main>
+<header class="wrap"><div class="intro"><p class="eyebrow">Classic system design walkthrough</p><h1>File Sync</h1><p class="prompt"><q>Design a file storage and sync service like Dropbox or Google Drive. Users upload and download files from any device, and changes made on one device appear on their other devices automatically. Files can be as large as 50 GB, uploads must survive dropped connections, and files must never be corrupted or lost.</q></p><ul class="legend" aria-label="Colour key"><li><i style="background:var(--c-ingest)"></i>Upload path</li><li><i style="background:var(--c-serve)"></i>Sync and download</li><li><i style="background:var(--c-kb)"></i>Storage</li><li><i style="background:var(--c-cross)"></i>Notifications and async</li><li><i style="background:var(--c-gov)"></i>Sharing and security</li></ul></div></header>
+<div class="wrap"><figure class="fig3d hero" id="hero">
+  <div class="stage3d" role="img" aria-label="Animated 3D view: a laptop edits a file. The desktop client splits it into blocks and hashes them, asks the metadata service which blocks the server lacks, and uploads only those blocks straight to the block store with presigned URLs. It then commits a new version listing the block hashes. The notification service tells the user's phone that something changed; the phone asks for changes since its cursor and downloads only the new block."><p class="hint3">3D · drag to turn</p><button class="reset3 ghost" type="button" hidden>Reset view</button><p class="nogl">The 3D view needs WebGL and a connection, because Three.js loads from a CDN. The sections below cover the same ground.</p></div>
+  <div class="ctl3"><button class="pp" type="button">Pause</button><span class="k">Step</span><div class="steps3"></div><span class="meta3"></span></div>
+  <div class="track3"><div class="fill3"></div></div>
+  <p class="out3" aria-live="polite"></p>
+  <figcaption>Illustrative. Metadata and bytes travel separately: small metadata calls go through our services, file blocks go straight to the block store.</figcaption>
+</figure></div>
+<div class="wrap doc">
+  <nav class="toc" aria-label="Sections"><p>The solution</p><ol><li><a href="#requirements">Requirements</a></li><li><a href="#success">Success metrics</a></li><li><a href="#estimates">Estimates</a></li><li><a href="#api">API</a></li><li><a href="#architecture">Architecture</a></li><li><a href="#chunking">Blocks, hashes and dedupe</a></li><li><a href="#lab">Try it: what does an edit upload?</a></li><li><a href="#sync">Keeping devices in sync</a></li><li><a href="#conflicts">Conflicts</a></li><li><a href="#storage">Storage</a></li><li><a href="#sharing">Sharing and security</a></li><li><a href="#deployment">Deployment and durability</a></li><li><a href="#observability">Observability</a></li><li><a href="#risks">Risks and v2</a></li><li><a href="#presenting">Presenting it in 45 minutes</a></li><li><a href="#numbers">Numbers to remember</a></li></ol></nav>
+  <article>
+
+<section id="requirements">
+  <h2>Requirements</h2>
+  <ul class="tags"><li>Clarify</li><li><a href="requirements.html">Non-functional requirements</a></li></ul>
+  <p class="lead">The core entities are just files (raw bytes), file metadata and users. The difficulty is moving as few bytes as possible, keeping many devices in step, and never losing or corrupting anything.</p>
+  <div class="table"><table>
+    <thead><tr><th>Question</th><th>Assumption</th><th>Why it matters</th></tr></thead>
+    <tbody>
+      <tr><td>Core features</td><td>Upload, download, automatic sync across devices, share with others</td><td>Sync is the hard one</td></tr>
+      <tr><td>Users</td><td class="num">500M accounts, 100M daily</td><td>Sets metadata volume and notification connections</td></tr>
+      <tr><td>File size</td><td class="num">up to 50 GB</td><td>Uploads must be chunked and resumable</td></tr>
+      <tr><td>Consistency</td><td>Availability over consistency across devices; a device may be seconds behind</td><td>But a file's own history must never be corrupted</td></tr>
+      <tr><td>Latency</td><td>A small edit appears on other devices within seconds</td><td>Push notifications, small deltas</td></tr>
+      <tr><td>Integrity</td><td>Every byte verified end to end</td><td>Silent corruption is the worst possible bug</td></tr>
+      <tr><td>Durability</td><td class="num">11 nines for stored data</td><td>Replication across zones and regions, or erasure coding</td></tr>
+    </tbody>
+  </table></div>
+  <p>Out of scope: building our own blob storage (we use S3 or similar), real-time collaborative editing (that's Google Docs, a different design) and full-text search inside files.</p>
+</section>
+
+<section id="success">
+  <h2>Success metrics</h2>
+  <ul class="tags"><li>Define success</li></ul>
+  <div class="table"><table>
+    <thead><tr><th>Kind</th><th>Metric</th><th>Target</th></tr></thead>
+    <tbody>
+      <tr><td>Product</td><td>Daily active devices; files shared per user</td><td class="num">growing</td></tr>
+      <tr><td>Reliability</td><td>Time for a change to reach another online device, p95; upload success rate</td><td class="num">&lt; 5 s; &gt; 99.9%</td></tr>
+      <tr><td>Efficiency</td><td>Bytes uploaded per byte changed by users</td><td class="num">close to 1 (dedupe works)</td></tr>
+      <tr><td>Guardrail</td><td>Files with integrity check failures; conflicted copies per 1k edits</td><td class="num">0; low</td></tr>
+    </tbody>
+  </table></div>
+</section>
+
+<section id="estimates">
+  <h2>Estimates</h2>
+  <ul class="tags"><li>Back of the envelope</li><li><a href="numbers.html">Numbers</a></li></ul>
+  <figure class="fig"><svg viewBox="0 0 722 150" class="dg" role="img" aria-label="Key numbers: about 1 exabyte stored, 12,000 file changes a second, about 100 terabytes of new blocks a day, about 50 billion block hashes in the metadata">
+    <rect x="10" y="10" width="134" height="92" rx="8" class="k-kb"/><text x="24" y="52" class="big">~1 EB</text><text x="24" y="78" class="sm">stored</text><text x="24" y="94" class="sm">500M × ~2 GB</text>
+    <rect x="154" y="10" width="134" height="92" rx="8" class="k-ingest"/><text x="168" y="52" class="big">12k/s</text><text x="168" y="78" class="sm">file changes</text><text x="168" y="94" class="sm">1B a day</text>
+    <rect x="298" y="10" width="134" height="92" rx="8" class="k-ingest"/><text x="312" y="52" class="big">100 TB</text><text x="312" y="78" class="sm">new blocks a day</text><text x="312" y="94" class="sm">after dedupe</text>
+    <rect x="442" y="10" width="134" height="92" rx="8" class="k-kb"/><text x="456" y="52" class="big">250B</text><text x="456" y="78" class="sm">4 MB blocks</text><text x="456" y="94" class="sm">metadata rows</text>
+    <rect x="586" y="10" width="126" height="92" rx="8" class="k-cross"/><text x="600" y="52" class="big">~200M</text><text x="600" y="78" class="sm">connected devices</text><text x="600" y="94" class="sm">waiting for changes</text>
+    <text x="10" y="132" class="small">Storage is huge but simple; it is bought, not built. The design effort goes into metadata, dedupe and sync.</text>
+  </svg></figure>
+  <ul class="plain">
+    <li><strong>Storage:</strong> 500M accounts averaging ~2 GB is about 1 EB before dedupe. Identical blocks across users (the same installer, the same PDF) are stored once, which saves a meaningful share.</li>
+    <li><strong>Changes:</strong> 100M daily users × ~10 file changes ≈ 1B a day ≈ 12k a second, peaking around 3× during working hours.</li>
+    <li><strong>Bytes:</strong> most changes are small edits to existing files. If each uploads ~100 KB of new blocks on average, that is 100 TB a day of new data, about 10 Gb/s.</li>
+    <li><strong>Metadata:</strong> 1 EB in 4 MB blocks is 250 billion block references. Each is a 32-byte hash plus a little bookkeeping: tens of TB of metadata, which must be sharded.</li>
+  </ul>
+</section>
+
+<section id="api">
+  <h2>API</h2>
+  <ul class="tags"><li>Interface</li></ul>
+<pre><code>POST /files/commit/check  { path, block_hashes[] }
+  → { missing: ["9f2c…", "a71e…"], upload_urls: { "9f2c…": "https://blocks…?sig=…" } }
+PUT  {upload_url}          (one 4 MB block, straight to the block store)
+POST /files/commit         { path, parent_rev: 41, block_hashes[], size, mtime }
+  → 200 { rev: 42 } | 409 { conflict: true, latest_rev: 43 }
+
+GET  /files/{file_id}      → { rev, block_hashes[], download_urls{} }
+GET  /changes?cursor=…     → { entries: [...], cursor: "…", has_more }
+GET  /changes/wait?cursor=…  (long poll, or a WebSocket push)
+POST /shares               { path, with: "email", role: "editor" }</code></pre>
+  <p>Uploading is a two-step handshake: ask which blocks are missing, upload just those, then commit the new list of hashes with the revision the client started from. Downloads work the same way in reverse. Presigned URLs keep file bytes off our API servers, and a 50 GB upload is just 12,500 independent, retryable block uploads.</p>
+</section>
+
+<section id="architecture">
+  <h2>Architecture</h2>
+  <ul class="tags"><li>Whole system</li></ul>
+  <figure class="fig"><svg viewBox="0 0 722 290" class="dg" role="img" aria-label="Architecture: the desktop client chunks and hashes files, asks the metadata service which blocks are missing, uploads them directly to the block store, and commits a new version; the metadata database records files, revisions and block lists and appends to a per-account change journal; the notification service tells other devices, which fetch changes and download missing blocks">
+    <text x="10" y="22" class="cap">CLIENT</text>
+    <rect x="10" y="34" width="150" height="70" rx="8" class="k-user"/><text x="85" y="54" class="small b" text-anchor="middle">Desktop client</text><text x="85" y="72" class="sm" text-anchor="middle">watcher · chunker</text><text x="85" y="88" class="sm" text-anchor="middle">local index (SQLite)</text>
+    <path d="M160 52 L246 52" class="wire" marker-end="url(#ah)"/><text x="203" y="44" class="sm" text-anchor="middle">check · commit</text>
+    <path d="M160 88 L232 88 L232 232 L270 232" class="wire hot" marker-end="url(#ah)"/><text x="240" y="160" class="sm">missing blocks</text>
+    <text x="250" y="22" class="cap">METADATA · ~12K CHANGES/S</text>
+    <rect x="248" y="34" width="150" height="40" rx="8" class="k-serve"/><text x="323" y="52" class="small b" text-anchor="middle">Metadata service</text><text x="323" y="67" class="sm" text-anchor="middle">auth · dedupe · commit</text>
+    <path d="M398 54 L444 54" class="wire" marker-end="url(#ah)"/>
+    <rect x="446" y="34" width="150" height="40" rx="18" class="k-kb"/><text x="521" y="52" class="small b" text-anchor="middle">Metadata DB</text><text x="521" y="67" class="sm" text-anchor="middle">sharded by account</text>
+    <path d="M521 74 L521 120" class="wire" marker-end="url(#ah)"/><text x="528" y="102" class="sm">append to journal</text>
+    <rect x="446" y="122" width="150" height="40" rx="20" class="k-cross"/><text x="521" y="146" class="small b" text-anchor="middle">Change journal</text>
+    <path d="M446 142 L400 142" class="wire" marker-end="url(#ah)"/>
+    <rect x="248" y="122" width="150" height="40" rx="8" class="k-cross"/><text x="323" y="140" class="small b" text-anchor="middle">Notification service</text><text x="323" y="155" class="sm" text-anchor="middle">long poll · WebSocket</text>
+    <path d="M323 162 L323 188 L120 188 L120 214" class="wire dash" marker-end="url(#ah)"/><text x="220" y="182" class="sm" text-anchor="middle">"something changed"</text>
+    <text x="10" y="206" class="cap">OTHER DEVICES</text>
+    <rect x="10" y="216" width="150" height="44" rx="8" class="k-user"/><text x="85" y="236" class="small b" text-anchor="middle">Phone, laptop 2</text><text x="85" y="251" class="sm" text-anchor="middle">GET /changes?cursor</text>
+    <rect x="272" y="214" width="150" height="40" rx="18" class="k-kb"/><text x="347" y="232" class="small b" text-anchor="middle">Block store</text><text x="347" y="247" class="sm" text-anchor="middle">S3 · key = SHA-256</text>
+    <path d="M272 244 L162 244" class="wire hot" marker-end="url(#ah)"/><text x="216" y="270" class="sm" text-anchor="middle">download new blocks</text>
+    <rect x="460" y="214" width="252" height="40" rx="8" class="k-gov"/><text x="586" y="232" class="small b" text-anchor="middle">Sharing and permissions</text><text x="586" y="247" class="sm" text-anchor="middle">namespaces · ACLs · links</text>
+  </svg><figcaption>Three separate flows: small metadata calls, large block transfers, and change notifications. Each scales on its own.</figcaption></figure>
+  <ul class="plain">
+    <li><strong>Client:</strong> watches the sync folder, splits changed files into blocks, hashes them, and keeps a local database of what it believes the server has. Most of the cleverness lives here.</li>
+    <li><strong>Metadata service:</strong> the source of truth for files, folders, revisions and which blocks make up each revision.</li>
+    <li><strong>Block store:</strong> immutable blocks keyed by their hash, in object storage.</li>
+    <li><strong>Notification service:</strong> holds a connection per online device and nudges it when its account's journal moves.</li>
+  </ul>
+</section>
+
+<section id="chunking">
+  <h2>Blocks, hashes and dedupe</h2>
+  <ul class="tags"><li>Deep dive 1</li><li><a href="merkle-trees.html">Hashing</a></li></ul>
+  <p class="lead">Never upload a whole file twice. Split it into blocks, name each block by the hash of its content, and only send blocks the server doesn't have.</p>
+  <ol class="plain">
+    <li><strong>Split</strong> each file into blocks (Dropbox uses 4 MB).</li>
+    <li><strong>Hash</strong> each block with SHA-256. The hash is the block's name, its dedupe key and its integrity check.</li>
+    <li><strong>Ask</strong> the server which hashes are missing. A small edit to a large file usually changes one block; copying a file the server already has (even from another user) uploads nothing.</li>
+    <li><strong>Upload</strong> the missing blocks in parallel; each is retried independently, so a 50 GB upload resumes where it stopped.</li>
+    <li><strong>Commit</strong> the new revision as an ordered list of hashes. The server verifies every block exists and matches its hash before accepting.</li>
+  </ol>
+  <h3>Fixed or content-defined blocks?</h3>
+  <p>Fixed 4 MB blocks have a weakness: insert one byte near the start of a file and every block boundary after it shifts, so every block hash changes. <strong>Content-defined chunking</strong> places boundaries where a rolling hash of the content hits a pattern, so boundaries move with the content and an insert changes only the block it lands in. rsync-style tools and backup systems use this; the lab shows the difference.</p>
+  <div class="note"><p><strong>Cross-user dedupe leaks information.</strong> If uploading a file finishes instantly, the uploader learns someone already has it. Services often limit dedupe to within an account or a team, or always accept the upload for blocks they could otherwise skip.</p></div>
+</section>
+
+<section id="lab">
+  <h2>Try it: what does an edit upload?</h2>
+  <ul class="tags"><li>Lab</li></ul>
+  <p>Pick a file size, a block size, an edit and a chunking method, and see how many bytes the client actually sends.</p>
+  <div class="lab" id="fslab">
+    <div class="lab-row"><label for="fs-s">File size <input type="range" id="fs-s" min="0" max="5" step="1" value="3"><output id="fs-s-o"></output></label><label for="fs-b">Block size <input type="range" id="fs-b" min="0" max="3" step="1" value="2"><output id="fs-b-o"></output></label></div>
+    <div class="lab-row"><span class="lab-k">Edit</span><span class="seg" role="group" aria-label="Edit" id="fs-e"><button type="button" data-v="tweak" aria-pressed="true">Change a few bytes</button><button type="button" data-v="append" aria-pressed="false">Append 1 MB</button><button type="button" data-v="insert" aria-pressed="false">Insert 1 KB near the start</button></span></div>
+    <div class="lab-row"><span class="lab-k">Chunking</span><span class="seg" role="group" aria-label="Chunking" id="fs-c"><button type="button" data-v="fixed" aria-pressed="true">Fixed-size blocks</button><button type="button" data-v="cdc" aria-pressed="false">Content-defined</button><button type="button" data-v="none" aria-pressed="false">Whole file</button></span></div>
+    <div class="metrics" id="fs-m"></div>
+    <p class="lab-out" id="fs-out" aria-live="polite"></p>
+  </div>
+  <p class="muted" style="font-size:13.5px">Content-defined chunks average the chosen block size; an edit touches about one or two of them. Each block costs a 32-byte hash in metadata.</p>
+</section>
+
+<section id="sync">
+  <h2>Keeping devices in sync</h2>
+  <ul class="tags"><li>Deep dive 2</li><li><a href="protocols.html#push">Long polling</a></li><li><a href="queues.html">Logs</a></li></ul>
+  <p class="lead">Each account (or shared folder) has an append-only <strong>journal</strong> of changes with increasing sequence numbers. A device only needs to remember the last number it has applied: its <strong>cursor</strong>.</p>
+  <ol class="plain">
+    <li>A commit writes the new revision and appends <code>(seq 1042, path, rev 42, block_hashes)</code> to the account's journal in the same transaction.</li>
+    <li>The notification service sees the journal move and tells every online device of that account: "there are changes", nothing more.</li>
+    <li>Each device calls <code>GET /changes?cursor=1037</code>, gets entries 1038–1042, downloads any blocks it lacks, applies them, and stores cursor 1042.</li>
+    <li>An offline device does exactly the same when it comes back, however long it was away. If the journal was compacted past its cursor, it falls back to a full listing and compares.</li>
+  </ol>
+  <p>Dropbox's desktop client used long polling for years: a request that hangs for up to a minute and returns as soon as something changes. WebSockets work too. Either way the notification carries no data, so a lost notification only delays sync until the next poll; the journal is what guarantees nothing is missed.</p>
+  <p><strong>Client-side state</strong> is what makes this robust: the client keeps a local database of the server's view (path, rev, hashes) and its own view of the disk, and reconciles them. Most sync bugs are disagreements between those two views, which is why Dropbox rewrote its sync engine around a strict three-tree model (local, remote, synced base).</p>
+</section>
+
+<section id="conflicts">
+  <h2>Conflicts</h2>
+  <ul class="tags"><li>Deep dive 3</li><li><a href="consistency.html">Consistency</a></li></ul>
+  <figure class="fig3d" id="conflict3d">
+    <div class="stage3d" role="img" aria-label="Two laptops edit the same file at revision 41 while one is offline. The first commits revision 42 with parent 41 and succeeds. The second comes online and commits with parent 41 too; the server rejects it because the latest revision is now 42. The second client saves its version as a conflicted copy next to the original, and both files sync to every device."><p class="hint3">3D · drag to turn</p><button class="reset3 ghost" type="button" hidden>Reset view</button><p class="nogl">The 3D view needs WebGL and a connection.</p></div>
+    <div class="ctl3"><button class="pp" type="button">Pause</button><span class="k">Step</span><div class="steps3"></div><span class="meta3"></span></div>
+    <div class="track3"><div class="fill3"></div></div>
+    <p class="out3" aria-live="polite"></p>
+    <figcaption>Illustrative. A conditional commit on the parent revision detects the conflict; keeping both versions means no edit is ever silently lost.</figcaption>
+  </figure>
+  <p>Every commit says which revision it was based on (<code>parent_rev</code>). The metadata service accepts it only if that is still the latest revision: a compare-and-set. If not, two devices edited the same file concurrently and the server returns a conflict.</p>
+  <p>For arbitrary files we can't merge automatically (what does merging two Photoshop files mean?), so the losing client saves its version as <code>report (Asha's conflicted copy 2026-11-10).docx</code> next to the winner. No data is lost and the user decides. Last-writer-wins would be simpler and would silently throw away someone's work, which is unacceptable for a storage product.</p>
+</section>
+
+<section id="storage">
+  <h2>Storage</h2>
+  <ul class="tags"><li><a href="databases.html">Databases</a></li><li><a href="sharding.html">Sharding</a></li></ul>
+<pre><code>namespaces   (ns_id, owner_id, type: user | shared_folder)
+files        (ns_id, file_id, path, latest_rev, is_deleted)          PK (ns_id, file_id)
+revisions    (ns_id, file_id, rev, parent_rev, size, mtime, block_hashes[], author)
+journal      (ns_id, seq, file_id, rev, op)                          PK (ns_id, seq)
+blocks       (hash PK, size, storage_key, ref_count)</code></pre>
+  <ul class="plain">
+    <li><strong>Metadata</strong> needs transactions (commit a revision and append to the journal together, compare-and-set on <code>latest_rev</code>), so it lives in a relational database, sharded by namespace id. Dropbox ran this on sharded MySQL (its Edgestore layer) for years.</li>
+    <li><strong>Blocks</strong> are immutable and content-addressed, so they are trivially cacheable and replicable. Dropbox moved from S3 to its own system, Magic Pocket, at exabyte scale; for us, S3 or another object store is right.</li>
+    <li><strong>Garbage collection:</strong> deleting a file doesn't delete blocks, which may be shared. Keep a reference count (or periodically mark blocks reachable from live revisions) and delete unreferenced blocks after the version-history window, often 30 days or more.</li>
+  </ul>
+</section>
+
+<section id="sharing">
+  <h2>Sharing and security</h2>
+  <ul class="tags"><li>Governance</li></ul>
+  <ul class="plain">
+    <li><strong>Shared folders are namespaces.</strong> Each member's tree mounts the shared namespace at some path. Commits go to the shared namespace's journal, and every member's devices follow it.</li>
+    <li><strong>Permissions</strong> are checked by the metadata service on every call; presigned block URLs expire in minutes and are only issued after the check.</li>
+    <li><strong>Links</strong> ("anyone with the link") are random tokens with optional expiry and passwords, revocable at any time.</li>
+    <li><strong>Encryption:</strong> TLS in transit, encryption at rest per block. End-to-end encryption is possible but breaks server-side previews, search and cross-user dedupe.</li>
+  </ul>
+</section>
+
+<section id="deployment">
+  <h2>Deployment and durability</h2>
+  <ul class="tags"><li>Production</li></ul>
+  <p>Blocks are stored with replication or erasure coding across availability zones, plus asynchronous copies to a second region. Metadata shards run with synchronous replicas in another zone and asynchronous replicas in another region, and point-in-time backups. The API and notification tiers are stateless and run in several regions; block uploads go to the nearest region's endpoint.</p>
+  <div class="note"><p><strong>Verify everything, always.</strong> Hash blocks on the client before upload, verify on the server after upload, store the hash with the block, re-verify on download, and scrub stored blocks in the background. A storage service is judged on the bug it never has.</p></div>
+</section>
+
+<section id="observability">
+  <h2>Observability</h2>
+  <ul class="tags"><li>Production</li></ul>
+  <div class="table"><table>
+    <thead><tr><th>Signal</th><th>Why</th><th>Alert when</th></tr></thead>
+    <tbody>
+      <tr><td>Commit latency and 409 rate</td><td>Metadata health, conflict frequency</td><td>Latency or conflicts jump after a client release</td></tr>
+      <tr><td>Time from commit to other device applied (synthetic devices)</td><td>The sync promise</td><td>p95 over 10 s</td></tr>
+      <tr><td>Block upload failures and retries by region</td><td>Network or storage trouble</td><td>Retry rate several times normal</td></tr>
+      <tr><td>Hash mismatches anywhere</td><td>Corruption</td><td>Any, immediately</td></tr>
+      <tr><td>Clients stuck in a sync loop (same file uploaded repeatedly)</td><td>Client bugs that burn bandwidth</td><td>Above a small baseline</td></tr>
+    </tbody>
+  </table></div>
+</section>
+
+<section id="risks">
+  <h2>Risks and v2</h2>
+  <ul class="tags"><li>Wrap-up</li></ul>
+  <div class="table"><table>
+    <thead><tr><th>Risk</th><th>How you detect it</th><th>Mitigation</th></tr></thead>
+    <tbody>
+      <tr><td>Silent data corruption</td><td>End-to-end hashes, background scrubbing</td><td>Verify at every hop; repair from replicas</td></tr>
+      <tr><td>A client bug deletes files on every device</td><td>Spike in deletes per account</td><td>Version history, bulk-delete confirmation, server-side rate limits on deletes</td></tr>
+      <tr><td>Huge shared folder makes a hot namespace</td><td>Commits per shard</td><td>Split large namespaces, batch journal reads</td></tr>
+      <tr><td>Thundering herd after an outage</td><td>Reconnects per second</td><td>Jittered reconnects; cursors make catch-up cheap</td></tr>
+    </tbody>
+  </table></div>
+  <p><strong>v2 ideas:</strong> LAN sync (devices on the same network exchange blocks directly), smart sync (files listed locally but downloaded on demand), previews and search, and real-time co-editing for documents.</p>
+</section>
+
+<section id="presenting">
+  <h2>Presenting it in 45 minutes</h2>
+  <ul class="tags"><li>Interview script</li></ul>
+  <div class="table"><table>
+    <thead><tr><th>Step</th><th>Time</th><th>What to cover</th></tr></thead>
+    <tbody>
+      <tr><td>1. Clarify</td><td class="num">5 min</td><td>Upload, download, sync; 50 GB files; availability vs consistency; integrity</td></tr>
+      <tr><td>2. Estimate</td><td class="num">4 min</td><td>~1 EB, 12k changes/s, 100 TB/day of new blocks</td></tr>
+      <tr><td>3. API</td><td class="num">4 min</td><td>Check missing blocks, presigned upload, commit with parent revision, changes with cursor</td></tr>
+      <tr><td>4. Draw the whole system</td><td class="num">7 min</td><td>Client, metadata service and DB, block store, journal, notifications</td></tr>
+      <tr><td>5. Deep dive: blocks</td><td class="num">9 min</td><td>4 MB blocks, SHA-256 names, dedupe, resumable uploads, content-defined chunking</td></tr>
+      <tr><td>6. Deep dive: sync and conflicts</td><td class="num">11 min</td><td>Journal and cursors, long poll, compare-and-set commits, conflicted copies</td></tr>
+      <tr><td>7. Durability and risks</td><td class="num">5 min</td><td>Verification everywhere, versions, garbage collection</td></tr>
+    </tbody>
+  </table></div>
+  <div class="say"><p>"I'd separate metadata from bytes. The client splits files into 4 MB blocks named by their SHA-256, asks the metadata service which ones are missing, uploads only those straight to S3 with presigned URLs, and commits a new revision as a list of hashes with the revision it started from. That makes uploads resumable, dedupes identical content and makes small edits cheap. Each account has a change journal; devices keep a cursor, get a 'something changed' push or long-poll response, fetch entries since their cursor and download missing blocks. Commits are compare-and-set on the parent revision; on a conflict the client keeps both versions as a conflicted copy, so no edit is ever lost."</p></div>
+</section>
+
+<section id="numbers">
+  <h2>Numbers to remember</h2>
+  <ul class="tags"><li>Cheat sheet</li></ul>
+  <div class="table"><table><tbody>
+    <tr><td>Block size</td><td class="num">4 MB (50 GB file = 12,500 blocks)</td></tr>
+    <tr><td>SHA-256 hash</td><td class="num">32 bytes per block</td></tr>
+    <tr><td>1 EB in 4 MB blocks</td><td class="num">250 billion block references</td></tr>
+    <tr><td>1B changes a day</td><td class="num">≈ 12k a second</td></tr>
+    <tr><td>Long poll timeout</td><td class="num">~30–90 s</td></tr>
+    <tr><td>Version history</td><td class="num">30+ days</td></tr>
+  </tbody></table></div>
+</section>
+  </article>
+</div>
+</main>
+
+<footer class="site"><div class="wrap">Part of Classic System Design, a companion to the <a href="https://devlcodes.github.io/agentic-ai-notebook/system-design/index.html">agentic system designs</a>. The 3D views use Three.js loaded from a CDN, so they need a connection; the text and tables cover the same ground. Figures marked illustrative show the shape of a system, not measured numbers. Check vendor docs before relying on a specific product limit.</div></footer>
+<script>
+(function(){
+  var $ = function(id){ return document.getElementById(id); }, E = 'tweak', CH = 'fixed';
+  var SS = [1, 10, 100, 1000, 10000, 50000], BS = [1, 2, 4, 16];
+  function mb(x){ if (x >= 1000) return +(x/1000).toFixed(x < 1e4 ? 1 : 0) + ' GB'; if (x >= 1) return +x.toFixed(x < 10 ? 1 : 0) + ' MB'; return Math.max(1, Math.round(x * 1000)) + ' KB'; }
+  function seg(id, set){ $(id).addEventListener('click', function(e){ var b = e.target.closest('button'); if (!b) return; set(b.dataset.v); this.querySelectorAll('button').forEach(function(x){ x.setAttribute('aria-pressed', x === b); }); run(); }); }
+  function run(){
+    var S = SS[+$('fs-s').value], B = BS[+$('fs-b').value];
+    $('fs-s-o').textContent = mb(S); $('fs-b-o').textContent = B + ' MB';
+    var n = Math.max(1, Math.ceil(S / B)), up, blocks;
+    if (CH === 'none'){ up = S + (E === 'append' ? 1 : 0); blocks = 1; n = 1; }
+    else if (E === 'tweak'){ blocks = CH === 'cdc' ? 1.5 : 1; up = Math.min(S, blocks * B); }
+    else if (E === 'append'){ blocks = Math.ceil(1 / B) + 1; up = Math.min(S + 1, (S % B === 0 ? 0 : B) + 1); if (CH === 'cdc') up = Math.min(S + 1, B + 1); }
+    else { if (CH === 'cdc'){ blocks = 1.5; up = Math.min(S, 1.5 * B); } else { blocks = n; up = S; } }
+    if (E === 'append' && CH !== 'none') n = Math.ceil((S + 1) / B);
+    var pct = Math.round(100 * up / S);
+    $('fs-m').innerHTML = '<div class="metric"><span class="n">' + n.toLocaleString() + '</span><span class="l">blocks in file</span></div>' +
+      '<div class="metric"><span class="n">' + mb(up) + '</span><span class="l">uploaded</span><small>' + Math.min(pct, 100) + '% of the file</small></div>' +
+      '<div class="metric"><span class="n">' + mb(n * 32 / 1e6) + '</span><span class="l">hash list</span><small>32 bytes per block</small></div>';
+    var msg;
+    if (CH === 'none') msg = 'Without blocks, every save re-uploads the whole ' + mb(S) + ', and a dropped connection restarts from zero. Fine for tiny files, painful for anything large.';
+    else if (E === 'insert' && CH === 'fixed') msg = 'Inserting 1 KB near the start shifts every fixed block boundary after it, so all ' + n.toLocaleString() + ' block hashes change and the whole file is re-uploaded. Content-defined chunking avoids this.';
+    else if (E === 'insert') msg = 'Content-defined boundaries move with the content, so the insert changes only the block it lands in (sometimes its neighbour): about ' + mb(up) + ' instead of ' + mb(S) + '.';
+    else if (E === 'tweak') msg = 'A small change touches ' + (CH === 'cdc' ? 'one or two blocks' : 'one block') + ', so ' + mb(up) + ' goes up instead of ' + mb(S) + '. Smaller blocks send less per edit but need a longer hash list and more requests.';
+    else msg = 'Appending only changes the last block and adds new ones: about ' + mb(up) + ' uploaded. Logs and growing files sync cheaply either way.';
+    $('fs-out').textContent = msg;
+  }
+  seg('fs-e', function(v){ E = v; }); seg('fs-c', function(v){ CH = v; });
+  ['fs-s','fs-b'].forEach(function(id){ $(id).addEventListener('input', run); });
+  run();
+})();
+
+</script>
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+  }
+}
+</script>
+<script type="module">
+import { boot } from './assets/scene3d.js';
+const D = {};
+D.hero = {
+  hero: true,
+  loop: 16,
+  view: { target: [-0.5, 0, 0.5], w: 29, d: 21, el: 52 },
+  steps: [
+    { t: 0.0, text: 'You save an edit to a 200 MB file on your laptop. The client splits it into 4 MB blocks and hashes each one. Only one block changed.' },
+    { t: 1.8, text: 'It sends the list of block hashes to the metadata service and asks which ones are missing.' },
+    { t: 3.2, text: 'The answer: just one, with a presigned URL to upload it.' },
+    { t: 4.4, text: 'The client uploads that single block straight to the block store, which is keyed by the block\'s hash.' },
+    { t: 6.0, text: 'It commits revision 42 with parent 41. The metadata DB stores the new block list and appends to the account\'s change journal in one transaction.' },
+    { t: 8.0, text: 'The notification service sees the journal move and tells your phone: something changed.' },
+    { t: 9.6, text: 'The phone asks for changes since its cursor and gets one entry: the new revision and its block list.' },
+    { t: 11.2, text: 'It already has every block but one, so it downloads only that block and rebuilds the file.' },
+  ],
+  build(c) {
+    const { V, C, P } = c;
+    const lap = c.obj(c.SHAPES.monitor([C.ingest, C.serve]), -13, -5, 'Laptop', 'chunk · hash');
+    const meta = c.obj(c.SHAPES.server({ color: 0x8a6a2e, emi: C.serve }), -4, -5, 'Metadata service');
+    const db = c.obj(c.SHAPES.database(C.kb, { r: 1.0 }), 4, -5, 'Metadata DB', 'revisions · journal');
+    const blk = c.obj('bucket', -4, 6.5, 'Block store', 'key = SHA-256');
+    const nt = c.obj(c.SHAPES.server({ emi: C.cross }), 4, 1, 'Notifications', 'long poll');
+    const ph = c.obj(c.SHAPES.browser(0xd7932a), 10.5, 6.5, 'Phone', 'cursor 1037');
+    c.lane([V(-13, -5), V(4, -5)]);
+    c.lane([V(4, -5), V(4, 1)]);
+    c.lane([V(-13, -5), V(-13, 6.5), V(10.5, 6.5)]);
+    c.lane([V(4, 1), V(10.5, 1), V(10.5, 6.5)]);
+    c.lane([V(-4, -5), V(-4, -1.5), V(10.5, -1.5), V(10.5, 1)]);
+    c.packet({ pts: [V(-13, -5), V(-4, -5)], t0: 1.9, t1: 2.9, n: 5, st: 0.08, kind: 'span', s: 1.2, from: lap, to: meta, label: '50 hashes' });
+    c.packet({ pts: [V(-4, -5), V(-13, -5)], t0: 3.2, t1: 4.1, kind: 'env', color: P.bad, to: lap, label: 'missing: 1 block' });
+    c.packet({ pts: [V(-13, -5), V(-13, 6.5), V(-4, 6.5)], t0: 4.5, t1: 5.8, kind: 'chunk', color: P.chunk, to: blk, label: '4 MB block' });
+    c.packet({ pts: [V(-13, -5), V(-4, -5)], t0: 6.0, t1: 6.8, kind: 'env', to: meta, label: 'commit rev 42 (parent 41)' });
+    c.packet({ pts: [V(-4, -5), V(4, -5)], t0: 6.9, t1: 7.6, kind: 'env', color: P.ship, to: db, label: 'seq 1042' });
+    c.packet({ pts: [V(4, -5), V(4, 1)], t0: 8.0, t1: 8.6, kind: 'span', to: nt });
+    c.packet({ pts: [V(4, 1), V(10.5, 1), V(10.5, 6.5)], t0: 8.6, t1: 9.4, kind: 'span', color: P.ask, to: ph, label: 'changed' });
+    c.packet({ pts: [V(10.5, 6.5), V(10.5, 1), V(10.5, -1.5), V(-4, -1.5), V(-4, -5)], t0: 9.7, t1: 10.5, kind: 'ask', to: meta, label: 'changes since 1037' });
+    c.packet({ pts: [V(-4, -5), V(-4, -1.5), V(10.5, -1.5), V(10.5, 1), V(10.5, 6.5)], t0: 10.5, t1: 11.1, kind: 'doc', color: P.ship, to: ph, label: 'rev 42 · block list' });
+    c.packet({ pts: [V(-4, 6.5), V(10.5, 6.5)], t0: 11.4, t1: 12.8, kind: 'chunk', color: P.chunk, to: ph, label: 'the 1 new block' });
+    c.note('metadata · ~12k commits/s', -9, -2.9);
+    c.note('bytes go direct to storage', -8.5, 8.8);
+  },
+};
+D.conflict3d = {
+  loop: 15,
+  view: { target: [-2, 0, 0.3], w: 31, d: 15, el: 48 },
+  steps: [
+    { t: 0.0, text: 'Two laptops both have report.docx at revision 41. Laptop B is offline on a train; both edit the file.' },
+    { t: 2.0, text: 'Laptop A commits: "new revision, my parent is 41". 41 is still the latest, so the commit succeeds as revision 42.' },
+    { t: 5.0, text: 'Laptop B comes back online and commits with parent 41 too. The latest is now 42, so the server answers 409: conflict.' },
+    { t: 8.0, text: 'B saves its version as "report (B\'s conflicted copy).docx" and commits it as a new file. Nothing is lost.' },
+    { t: 10.6, text: 'Both files sync to every device, and the person decides which edits to keep.' },
+  ],
+  build(c) {
+    const { V, C, P } = c;
+    const a = c.obj(c.SHAPES.monitor([C.ingest, C.serve]), -11, -4, 'Laptop A', 'parent rev 41');
+    const b = c.obj(c.SHAPES.monitor([C.ingest, C.serve]), -11, 4, 'Laptop B', 'offline · parent rev 41');
+    const m = c.obj(c.SHAPES.server({ color: 0x8a6a2e, emi: C.serve, w: 1.6 }), 0, 0, 'Metadata service', 'commit if parent = latest');
+    const db = c.obj(c.SHAPES.database(C.kb, { r: 1.0 }), 8, 0, 'report.docx', 'latest rev');
+    c.lane([V(-11, -4), V(-5, -4), V(-5, 0), V(0, 0)]);
+    c.lane([V(-11, 4), V(-5, 4), V(-5, 0)]);
+    c.lane([V(0, 0), V(8, 0)]);
+    c.packet({ pts: [V(-11, -4), V(-5, -4), V(-5, 0), V(0, 0)], t0: 2.1, t1: 3.1, kind: 'env', from: a, to: m, label: 'parent 41' });
+    c.packet({ pts: [V(0, 0), V(8, 0)], t0: 3.2, t1: 3.9, kind: 'env', color: P.ship, to: db, label: 'rev 42' });
+    c.packet({ pts: [V(0, 0), V(-5, 0), V(-5, -4), V(-11, -4)], t0: 4.0, t1: 4.8, kind: 'span', color: P.ship, to: a, label: 'ok' });
+    c.packet({ pts: [V(-11, 4), V(-5, 4), V(-5, 0), V(0, 0)], t0: 5.1, t1: 6.1, kind: 'env', from: b, to: m, label: 'parent 41' });
+    c.packet({ pts: [V(0, 0), V(-5, 0), V(-5, 4), V(-11, 4)], t0: 6.4, t1: 7.4, kind: 'env', color: P.bad, to: b, label: '409 · latest is 42' });
+    c.packet({ pts: [V(-11, 4), V(-5, 4), V(-5, 0), V(0, 0), V(8, 0)], t0: 8.1, t1: 9.8, kind: 'doc', color: P.ask, to: db, label: 'conflicted copy' });
+    c.packet({ pts: [V(0, 0), V(-5, 0), V(-5, -4), V(-11, -4)], t0: 10.8, t1: 11.8, n: 2, st: 0.25, kind: 'doc', to: a });
+    c.packet({ pts: [V(0, 0), V(-5, 0), V(-5, 4), V(-11, 4)], t0: 10.8, t1: 11.8, n: 2, st: 0.25, kind: 'doc', to: b });
+  },
+};
+
+boot(D);
+</script>
+</body>
+</html>
