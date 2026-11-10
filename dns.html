@@ -1,0 +1,356 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>DNS · Classic System Design</title>
+<meta name="description" content="DNS for system design: records, how a recursive lookup walks root, TLD and authoritative servers, TTLs and caching, DNS-based routing and failover, with a TTL lab.">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700&family=Instrument+Sans:ital,wght@0,400;0,500;0,600;1,400&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+  /* Layout: a slim site bar, then either a card grid (home), a sticky contents rail + reading column (articles), or a filterable term list (glossary). Light, single look. */
+  :root {
+    color-scheme: light;
+    --bg: #e9ecef; --paper: #f7f8f9; --ink: #1c2530; --muted: #586473; --line: #cdd4dc; --line-strong: #9aa5b1;
+    --accent: #4255d4; --accent-ink: #ffffff; --track: #d3d9e0; --code-bg: #eef1f4; --wire: #7d8996;
+    --c-ingest: #2a9d8f; --c-kb: #4d5fd8; --c-serve: #d7932a; --c-model: #e2674f; --c-gov: #b2456e; --c-cross: #4a5562; --c-dlq: #b23a3a; --c-ok: #2f8f5b;
+    --t-src: #e4e8ec; --t-ingest: #d8eeea; --t-kb: #dfe3fa; --t-serve: #f8ead2; --t-model: #fbe1da; --t-gov: #f3dde6; --t-cross: #dfe2e6; --t-dlq: #f6dddb;
+    --font-display: "Bricolage Grotesque", "Avenir Next", "Segoe UI", system-ui, sans-serif;
+    --font-body: "Instrument Sans", "Helvetica Neue", "Segoe UI", system-ui, sans-serif;
+    --font-mono: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  @media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
+  body { margin: 0; background: var(--bg); color: var(--ink); font-family: var(--font-body); font-size: 16px; line-height: 1.6; }
+  a { color: var(--accent); }
+  .wrap { max-width: 1240px; margin: 0 auto; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
+
+  .sitebar { border-bottom: 1px solid var(--line); background: var(--paper); }
+  .sitebar .wrap { display: flex; align-items: center; gap: 18px; flex-wrap: wrap; padding-block: 12px; }
+  .brand { font-family: var(--font-display); font-weight: 700; font-size: 17px; color: var(--ink); text-decoration: none; margin-right: auto; }
+  .sitebar nav { display: flex; gap: 16px; flex-wrap: wrap; font-size: 14px; }
+  .sitebar nav a { color: var(--muted); text-decoration: none; }
+  .sitebar nav a:hover, .sitebar nav a[aria-current="page"] { color: var(--ink); }
+  .sitebar nav a[aria-current="page"] { font-weight: 600; }
+
+  .intro { padding-block: 40px 8px; display: grid; gap: 10px; max-width: 820px; }
+  .eyebrow { margin: 0; font-family: var(--font-mono); font-size: 12px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+  h1 { margin: 0; font-family: var(--font-display); font-weight: 700; font-size: clamp(30px, 5vw, 46px); line-height: 1.05; text-wrap: balance; }
+  .intro .lead { font-size: 18px; margin: 0; }
+
+  .doc { display: grid; grid-template-columns: 220px minmax(0, 1fr); gap: 48px; padding-block: 36px 72px; }
+  .toc { position: sticky; top: calc(env(safe-area-inset-top, 0px) + 20px); align-self: start; }
+  .toc p { margin: 0 0 8px; font-family: var(--font-mono); font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+  .toc ol { margin: 0; padding: 0; list-style: none; display: grid; gap: 2px; counter-reset: toc; }
+  .toc li { counter-increment: toc; }
+  .toc a { display: flex; gap: 8px; padding: 3px 0; font-size: 14px; color: var(--muted); text-decoration: none; }
+  .toc a::before { content: counter(toc, decimal-leading-zero); font-family: var(--font-mono); font-size: 11.5px; padding-top: 2px; color: var(--line-strong); }
+  .toc a:hover { color: var(--ink); }
+  article { min-width: 0; max-width: 760px; }
+  section { padding-bottom: 36px; margin-bottom: 36px; border-bottom: 1px solid var(--line); scroll-margin-top: 20px; }
+  section:last-child { border-bottom: 0; }
+  h2 { margin: 0 0 10px; font-family: var(--font-display); font-weight: 700; font-size: 28px; line-height: 1.15; text-wrap: balance; }
+  h3 { margin: 26px 0 6px; font-family: var(--font-display); font-weight: 600; font-size: 19px; line-height: 1.25; }
+  p { margin: 0 0 14px; }
+  .lead { font-size: 18px; }
+  ul.plain, ol.plain { margin: 0 0 16px; padding-left: 22px; display: grid; gap: 6px; }
+  code { font-family: var(--font-mono); font-size: 0.88em; background: var(--code-bg); padding: 1px 5px; border-radius: 4px; }
+  pre { margin: 0 0 16px; padding: 14px 16px; background: var(--code-bg); border-radius: 10px; overflow-x: auto; font-size: 13px; line-height: 1.55; }
+  pre code { background: none; padding: 0; font-size: inherit; }
+  .table { overflow-x: auto; margin: 0 0 18px; }
+  table { width: 100%; border-collapse: collapse; font-size: 14.5px; line-height: 1.45; }
+  th, td { text-align: left; vertical-align: top; padding: 8px 10px; border-bottom: 1px solid var(--line); }
+  th { font-family: var(--font-mono); font-size: 11.5px; font-weight: 500; letter-spacing: .05em; text-transform: uppercase; color: var(--muted); }
+  td.num { font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .note { border-left: 3px solid var(--accent); background: var(--paper); padding: 12px 16px; border-radius: 0 10px 10px 0; margin: 0 0 18px; }
+  .note p:last-child { margin: 0; }
+  .formula { font-family: var(--font-mono); font-size: 14px; background: var(--paper); border: 1px solid var(--line); border-radius: 10px; padding: 12px 16px; margin: 0 0 16px; overflow-x: auto; white-space: nowrap; }
+  .related { display: flex; flex-wrap: wrap; gap: 8px; margin: 0; padding: 0; list-style: none; }
+  .related a { display: inline-block; padding: 4px 12px; border: 1px solid var(--line); border-radius: 999px; font-size: 14px; color: var(--ink); text-decoration: none; background: var(--paper); }
+  .related a:hover { border-color: var(--ink); }
+  .pager { display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; font-size: 14px; }
+  footer.site { border-top: 1px solid var(--line); padding-block: 20px 40px; font-size: 13px; color: var(--muted); }
+  a:focus-visible, input:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+  /* home */
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 16px; margin: 0 0 40px; padding: 0; list-style: none; }
+  .card { display: grid; gap: 8px; height: 100%; padding: 18px; background: var(--paper); border: 1px solid var(--line); border-radius: 14px; color: var(--ink); text-decoration: none; }
+  .card:hover { border-color: var(--ink); }
+  .card .k { font-family: var(--font-mono); font-size: 11px; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
+  .card h3 { margin: 0; font-size: 20px; }
+  .card p { margin: 0; font-size: 14.5px; color: var(--muted); }
+  .card svg { width: 100%; height: auto; display: block; }
+  .card.feature svg { max-width: 420px; justify-self: center; }
+  .card.feature { grid-column: 1 / -1; grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr); align-items: center; gap: 24px; }
+  .home-h { margin: 28px 0 12px; font-family: var(--font-display); font-size: 24px; }
+
+  /* glossary */
+  .gl-tools { position: sticky; top: 0; z-index: 2; background: var(--bg); padding-block: 12px; display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+  .gl-tools input { flex: 1 1 260px; min-width: 0; font: 15px var(--font-body); padding: 9px 12px; border-radius: 10px; border: 1px solid var(--line-strong); background: #fff; color: var(--ink); }
+  .gl-letters { display: flex; flex-wrap: wrap; gap: 4px; font-family: var(--font-mono); font-size: 13px; }
+  .gl-letters a { padding: 2px 6px; border-radius: 6px; text-decoration: none; color: var(--muted); }
+  .gl-letters a:hover { background: var(--paper); color: var(--ink); }
+  .gl { max-width: 860px; }
+  .gl-item { margin: 0; }
+  .gl-item { display: grid; grid-template-columns: 220px minmax(0, 1fr); gap: 16px; padding: 12px 0; border-bottom: 1px solid var(--line); scroll-margin-top: 70px; }
+  .gl-item dt { font-weight: 600; }
+  .gl-item dt small { display: block; font-weight: 400; font-family: var(--font-mono); font-size: 11px; color: var(--muted); letter-spacing: .04em; text-transform: uppercase; margin-top: 2px; }
+  .gl-item dd { margin: 0; }
+  .gl-item dd .see { font-size: 13.5px; }
+  .gl-letter { margin: 26px 0 4px; font-family: var(--font-display); font-size: 22px; scroll-margin-top: 70px; }
+
+  @media (max-width: 900px) {
+    .doc { grid-template-columns: minmax(0, 1fr); gap: 24px; padding-block: 28px 56px; }
+    .toc { position: static; }
+    .toc ol { grid-template-columns: repeat(2, minmax(0, 1fr)); column-gap: 12px; }
+    .card.feature { grid-template-columns: minmax(0, 1fr); }
+  }
+  @media (max-width: 640px) {
+    .gl-item { grid-template-columns: minmax(0, 1fr); gap: 4px; }
+    h2 { font-size: 24px; }
+    .intro .lead, .lead { font-size: 16.5px; }
+  }
+
+  /* diagrams */
+  .fig { margin: 6px 0 24px; overflow-x: auto; }
+  .fig svg { display: block; width: 100%; height: auto; min-width: 600px; }
+  .fig figcaption { margin-top: 8px; font-size: 13px; line-height: 1.45; color: var(--muted); }
+  .dg text { font-family: var(--font-body); font-size: 13px; fill: var(--ink); }
+  .dg .sm { font-size: 11.5px; fill: var(--muted); }
+  .dg .small { font-size: 12px; }
+  .dg .b { font-weight: 600; }
+  .dg .mono { font-family: var(--font-mono); }
+  .dg .it { font-style: italic; }
+  .dg .mute { fill: var(--muted); }
+  .dg .gov { fill: var(--c-gov); font-weight: 600; }
+  .dg .okt { fill: var(--c-ok); font-weight: 600; }
+  .dg .bad { fill: var(--c-dlq); font-weight: 600; }
+  .dg .cap { font-family: var(--font-mono); font-size: 11px; letter-spacing: .06em; fill: var(--muted); }
+  .dg .big { font-family: var(--font-display); font-size: 30px; font-weight: 700; fill: var(--ink); }
+  .dg .box { fill: var(--paper); stroke: var(--line-strong); stroke-width: 1.25; }
+  .dg .ghost { fill: none; stroke: var(--line-strong); stroke-width: 1.25; stroke-dasharray: 5 5; }
+  .dg .track { fill: var(--track); }
+  .dg .rule { stroke: var(--line); stroke-width: 1; }
+  .dg .axis { stroke: var(--line-strong); stroke-width: 1.25; }
+  .dg .wire { fill: none; stroke: var(--wire); stroke-width: 1.4; }
+  .dg .wire.dash { stroke-dasharray: 4 4; }
+  .dg .wire.hot { stroke: var(--accent); stroke-width: 2; }
+  .dg .wire.red { stroke: var(--c-dlq); }
+  .dg .ah { fill: var(--wire); }
+  .dg .xmark { stroke: var(--c-dlq); stroke-width: 1.8; fill: none; }
+  .dg .tick { stroke: var(--c-ok); stroke-width: 2; fill: none; }
+  .dg .k-src { fill: var(--t-src); stroke: #8795a3; stroke-width: 1.5; }
+  .dg .k-ingest { fill: var(--t-ingest); stroke: var(--c-ingest); stroke-width: 1.5; }
+  .dg .k-kb { fill: var(--t-kb); stroke: var(--c-kb); stroke-width: 1.5; }
+  .dg .k-serve { fill: var(--t-serve); stroke: var(--c-serve); stroke-width: 1.5; }
+  .dg .k-model { fill: var(--t-model); stroke: var(--c-model); stroke-width: 1.5; }
+  .dg .k-gov { fill: var(--t-gov); stroke: var(--c-gov); stroke-width: 1.5; }
+  .dg .k-cross { fill: var(--t-cross); stroke: var(--c-cross); stroke-width: 1.5; }
+  .dg .k-dlq { fill: var(--t-dlq); stroke: var(--c-dlq); stroke-width: 1.5; }
+  .dg .k-user { fill: #ffffff; stroke: var(--line-strong); stroke-width: 1.5; }
+  .dg .f-serve { fill: var(--c-serve); } .dg .f-kb { fill: var(--c-kb); } .dg .f-model { fill: var(--c-model); } .dg .f-gov { fill: var(--c-gov); } .dg .f-ingest { fill: var(--c-ingest); } .dg .f-cross { fill: #b8c0c9; } .dg .f-dlq { fill: var(--c-dlq); } .dg .f-ok { fill: var(--c-ok); }
+  .dg .cell { fill: var(--paper); stroke: var(--line-strong); stroke-width: 1; }
+  .dg .cell.hot { fill: var(--t-ingest); stroke: var(--c-ingest); stroke-width: 1.5; }
+  .dg .cell.old { fill: var(--t-kb); stroke: var(--c-kb); }
+  .dg .cell.new { fill: var(--t-ingest); stroke: var(--c-ingest); stroke-width: 1.5; }
+  .dg .cell.gone { fill: var(--paper); stroke: var(--line); }
+  .dg .dot-hr { fill: var(--c-gov); } .dg .dot-it { fill: var(--c-kb); } .dg .dot-eng { fill: var(--c-ingest); } .dg .dot-q { fill: var(--c-serve); stroke: var(--ink); stroke-width: 1.5; }
+  .dg .halo { fill: none; stroke: var(--c-serve); stroke-width: 1.5; stroke-dasharray: 4 4; }
+  .dg .zone { fill: var(--paper); stroke: var(--line); stroke-width: 1; }
+</style>
+
+<style>
+  .lab { margin: 6px 0 26px; padding: 14px 16px 16px; background: var(--paper); border: 1px solid var(--line); border-radius: 14px; }
+  .lab-row { display: flex; flex-wrap: wrap; gap: 10px 18px; align-items: center; margin: 0 0 12px; }
+  .lab-k { font-family: var(--font-mono); font-size: 11px; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
+  .lab label { display: inline-flex; gap: 8px; align-items: center; font-size: 14px; }
+  .lab input[type=range] { width: 150px; accent-color: var(--accent); }
+  .lab input[type=checkbox] { width: 16px; height: 16px; accent-color: var(--accent); }
+  .lab input[type=text] { flex: 1 1 260px; min-width: 0; font: 15px var(--font-body); padding: 8px 11px; border-radius: 9px; border: 1px solid var(--line-strong); background: #fff; color: var(--ink); }
+  .lab output { font-family: var(--font-mono); font-size: 12.5px; min-width: 6ch; font-variant-numeric: tabular-nums; }
+  .seg { display: inline-flex; flex-wrap: wrap; gap: 6px; }
+  .seg button, .chips button { font: 600 13px var(--font-body); color: var(--ink); background: #fff; border: 1px solid var(--line); border-radius: 8px; padding: 6px 12px; cursor: pointer; }
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; }
+  .chips button { font-weight: 500; border-radius: 999px; padding: 4px 11px; font-size: 13px; }
+  .seg button:hover, .chips button:hover { border-color: var(--ink); }
+  .seg button[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+  .seg button:focus-visible, .chips button:focus-visible, .lab input:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .lab-out { margin: 12px 0 0; padding: 10px 12px; background: #fff; border: 1px solid var(--line); border-radius: 10px; font-size: 14.5px; line-height: 1.5; font-variant-numeric: tabular-nums; }
+  .chunks { display: grid; gap: 8px; max-height: 470px; overflow: auto; padding-right: 4px; }
+  .chunk { min-width: 0; padding: 8px 11px; background: #fff; border: 1px solid var(--line); border-left: 4px solid var(--c-kb); border-radius: 8px; font-size: 14px; line-height: 1.5; overflow-wrap: anywhere; }
+  .chunk:nth-child(even) { border-left-color: var(--c-ingest); }
+  .chunk.ans { box-shadow: 0 0 0 2px var(--c-serve); }
+  .chunk .ch { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-bottom: 4px; font-family: var(--font-mono); font-size: 11px; color: var(--muted); }
+  .chunk .pfx { display: block; font-family: var(--font-mono); font-size: 11.5px; color: var(--c-kb); }
+  .chunk .ov { background: var(--track); border-radius: 3px; }
+  .chunk mark { background: #ffe9b3; border-radius: 3px; padding: 0 2px; }
+  .chunk table { width: auto; font-size: 13px; margin: 4px 0; }
+  .chunk td { padding: 2px 10px 2px 0; border-bottom: 1px solid var(--line); }
+  .badge { display: inline-block; padding: 0 7px; border-radius: 999px; border: 1px solid; font-family: var(--font-mono); font-size: 10.5px; line-height: 1.6; }
+  .badge.bad { color: var(--c-dlq); border-color: var(--c-dlq); background: var(--t-dlq); }
+  .badge.ok { color: var(--c-ok); border-color: var(--c-ok); background: #e3f3ea; }
+  .badge.info { color: var(--c-kb); border-color: var(--c-kb); background: var(--t-kb); }
+  .bars { display: grid; gap: 8px; margin: 4px 0 0; }
+  .bar-row { display: grid; grid-template-columns: minmax(0, 150px) minmax(0, 1fr) 46px; gap: 10px; align-items: center; font-size: 14px; }
+  .bar { position: relative; height: 14px; border-radius: 7px; background: var(--track); }
+  .bar i { position: absolute; inset: 0 auto 0 0; border-radius: 7px; background: var(--c-kb); transition: width .3s; }
+  .bar b { position: absolute; top: -4px; bottom: -4px; width: 2px; background: var(--c-dlq); }
+  .bar-row .v { font-family: var(--font-mono); font-size: 12.5px; text-align: right; }
+  .stages { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 10px; padding: 0; list-style: none; font-size: 13px; }
+  .stages li { padding: 2px 10px; border-radius: 999px; border: 1px solid var(--line); color: var(--muted); background: #fff; }
+  .stages li.hit { border-color: var(--accent); color: var(--accent-ink); background: var(--accent); }
+  .stages li.skip { text-decoration: line-through; }
+  .rlist { display: grid; gap: 6px; margin: 0; padding: 0; list-style: none; counter-reset: r; }
+  .rlist li { counter-increment: r; display: grid; grid-template-columns: 28px minmax(0, 1fr) auto; gap: 10px; align-items: center; padding: 6px 10px; background: #fff; border: 1px solid var(--line); border-radius: 8px; font-size: 14px; }
+  .rlist li::before { content: counter(r); font-family: var(--font-mono); font-size: 12px; color: var(--muted); }
+  .rlist li.rel { border-color: var(--c-ok); background: #f0f8f3; }
+  .rlist button { font: 600 12px var(--font-body); padding: 3px 10px; border-radius: 999px; border: 1px solid var(--line-strong); background: #fff; color: var(--ink); cursor: pointer; white-space: nowrap; }
+  .rlist li.rel button { background: var(--c-ok); border-color: var(--c-ok); color: #fff; }
+  .metrics { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 8px; margin: 12px 0 0; }
+  .metric { padding: 8px 10px; background: #fff; border: 1px solid var(--line); border-radius: 10px; }
+  .metric .n { display: block; font-family: var(--font-display); font-size: 24px; font-weight: 700; font-variant-numeric: tabular-nums; }
+  .metric .l { font-family: var(--font-mono); font-size: 11px; letter-spacing: .04em; text-transform: uppercase; color: var(--muted); }
+  .metric small { display: block; font-size: 12px; color: var(--muted); line-height: 1.35; margin-top: 2px; }
+  td.pass { color: var(--c-ok); font-weight: 600; } td.fail { color: var(--c-dlq); font-weight: 600; }
+  .say { border-left: 3px solid var(--c-serve); background: var(--paper); padding: 12px 16px; border-radius: 0 10px 10px 0; margin: 0 0 16px; font-size: 15.5px; }
+  .say p:last-child { margin: 0; }
+</style>
+
+<style>
+  .lab-chart { display: block; width: 100%; height: auto; margin: 4px 0 0; }
+  .lab-chart text { font-family: var(--font-body); font-size: 12px; fill: var(--muted); }
+  .grid-cells { display: grid; gap: 4px; }
+  .srv { display: grid; grid-template-columns: 92px minmax(0,1fr) 70px; gap: 10px; align-items: center; font-size: 14px; }
+  .muted { color: var(--muted); }
+  .lab select { font: 14px var(--font-body); padding: 6px 8px; border-radius: 8px; border: 1px solid var(--line-strong); background: #fff; color: var(--ink); }
+  .lab input[type=number] { width: 9ch; font: 14px var(--font-mono); padding: 6px 8px; border-radius: 8px; border: 1px solid var(--line-strong); background: #fff; color: var(--ink); }
+</style>
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs><marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" class="ah" style="fill:#7d8996"/></marker></defs></svg>
+<header class="sitebar"><div class="wrap"><a class="brand" href="index.html">Classic System Design</a><nav aria-label="Site"><a href="index.html">Home</a><a href="index.html#blocks" aria-current="page">Building blocks</a><a href="index.html#designs">Designs</a><a href="https://devlcodes.github.io/agentic-ai-notebook/system-design/index.html">Agentic designs ↗</a></nav></div></header>
+<main>
+<div class="wrap"><div class="intro"><p class="eyebrow">Building block · networking</p><h1>DNS</h1><p class="lead">The internet's phone book: it turns a name like api.shop.com into an IP address, through a hierarchy of servers and caches. It is also the first load balancer and the first thing to break in a regional failover.</p></div></div>
+<div class="wrap doc">
+  <nav class="toc" aria-label="On this page"><p>On this page</p><ol><li><a href="#what">What DNS does</a></li><li><a href="#records">Records</a></li><li><a href="#resolve">How a lookup works</a></li><li><a href="#ttl">Caching and TTLs</a></li><li><a href="#lab">Try it: pick a TTL</a></li><li><a href="#routing">DNS as a traffic router</a></li><li><a href="#failure">How DNS fails</a></li><li><a href="#interview">Saying it in an interview</a></li><li><a href="#real-world">In the real world</a></li><li><a href="#related">Related</a></li></ol></nav>
+  <article>
+<section id="what"><h2>What DNS does</h2>
+<p class="lead">Before a browser can open a connection to api.shop.com it needs an IP address. DNS is a distributed, heavily cached database that answers that question in a few milliseconds when cached and tens of milliseconds when not.</p>
+<p>DNS is not one server. It is a hierarchy of <strong>name servers</strong>, each responsible for a slice of the namespace, plus <strong>recursive resolvers</strong> (run by ISPs, companies, or public services such as 1.1.1.1 and 8.8.8.8) that do the legwork and cache answers. Answers are stored as <strong>resource records</strong>, the smallest unit you can ask for. Lookups normally use UDP on port 53, because a question and answer fit in one packet each; large answers and zone transfers use TCP.</p></section>
+
+<section id="records"><h2>Records</h2>
+<div class="table"><table><thead><tr><th>Type</th><th>Maps</th><th>Example</th><th>Used for</th></tr></thead><tbody>
+<tr><td>A / AAAA</td><td>Name → IPv4 / IPv6 address</td><td><code>api.shop.com → 203.0.113.10</code></td><td>The actual answer most lookups want</td></tr>
+<tr><td>CNAME</td><td>Alias → canonical name</td><td><code>www.shop.com → shop.cdn-provider.net</code></td><td>Pointing at a CDN or load balancer whose IPs change</td></tr>
+<tr><td>NS</td><td>Domain → its authoritative name servers</td><td><code>shop.com → ns1.dns-host.com</code></td><td>Delegation: who to ask next</td></tr>
+<tr><td>MX</td><td>Domain → mail servers, with priority</td><td><code>shop.com → 10 mx1.mail-host.com</code></td><td>Email delivery</td></tr>
+<tr><td>TXT</td><td>Name → free text</td><td><code>v=spf1 …</code></td><td>Domain ownership checks, email authentication (SPF, DKIM, DMARC)</td></tr>
+<tr><td>SRV</td><td>Service → host and port</td><td><code>_sip._tcp.shop.com</code></td><td>Service discovery in some protocols</td></tr>
+</tbody></table></div>
+<p>A CNAME can't sit at the bare domain (<code>shop.com</code>) because that name must also hold NS and other records. DNS providers offer an ALIAS or "CNAME flattening" record that resolves the target themselves and returns A records.</p></section>
+
+<section id="resolve"><h2>How a lookup works</h2>
+<figure class="fig"><svg viewBox="0 0 722 270" class="dg" role="img" aria-label="A recursive lookup: the client asks its resolver, which asks a root server, then the .com TLD server, then shop.com's authoritative server, and caches the answer">
+<rect x="14" y="110" width="110" height="50" rx="8" class="k-user"/><text x="69" y="132" class="small b" text-anchor="middle">Browser / OS</text><text x="69" y="148" class="sm" text-anchor="middle">stub resolver</text>
+<rect x="190" y="110" width="140" height="50" rx="8" class="k-serve"/><text x="260" y="132" class="small b" text-anchor="middle">Recursive resolver</text><text x="260" y="148" class="sm" text-anchor="middle">ISP / 1.1.1.1 · caches</text>
+<rect x="470" y="16" width="230" height="44" rx="8" class="box"/><text x="585" y="36" class="small b" text-anchor="middle">Root servers (13 names)</text><text x="585" y="52" class="sm" text-anchor="middle">"ask the .com servers"</text>
+<rect x="470" y="112" width="230" height="44" rx="8" class="k-kb"/><text x="585" y="132" class="small b" text-anchor="middle">TLD servers (.com)</text><text x="585" y="148" class="sm" text-anchor="middle">"ask ns1.dns-host.com"</text>
+<rect x="470" y="208" width="230" height="44" rx="8" class="k-ingest"/><text x="585" y="228" class="small b" text-anchor="middle">Authoritative (shop.com)</text><text x="585" y="244" class="sm" text-anchor="middle">"203.0.113.10, TTL 300"</text>
+<path d="M124 128 L188 128" class="wire hot" marker-end="url(#ah)"/><text x="156" y="120" class="sm" text-anchor="middle">1</text>
+<path d="M188 146 L126 146" class="wire" marker-end="url(#ah)"/><text x="156" y="166" class="sm" text-anchor="middle">8</text>
+<path d="M330 120 L468 44" class="wire" marker-end="url(#ah)"/><text x="392" y="74" class="sm">2 · 3</text>
+<path d="M330 134 L468 134" class="wire" marker-end="url(#ah)"/><text x="400" y="126" class="sm">4 · 5</text>
+<path d="M330 148 L468 226" class="wire" marker-end="url(#ah)"/><text x="392" y="204" class="sm">6 · 7</text>
+<text x="14" y="214" class="sm">Every step is cached for its TTL.</text><text x="14" y="232" class="sm">Usually only steps 1, 6–7, 8 happen,</text><text x="14" y="250" class="sm">and often only 1 and 8.</text>
+</svg><figcaption>A full (cold) lookup walks the hierarchy. The root and TLD answers are cached for days, so in practice the resolver usually goes straight to the authoritative server, or answers from cache.</figcaption></figure>
+<ol class="plain">
+<li><strong>Stub resolver.</strong> The OS checks its own cache and hosts file, then asks the configured recursive resolver.</li>
+<li><strong>Root.</strong> If the resolver knows nothing, it asks a root server, which replies with the servers for <code>.com</code>. The 13 root names are served by over a thousand machines worldwide through anycast.</li>
+<li><strong>TLD.</strong> The <code>.com</code> servers reply with the authoritative name servers for <code>shop.com</code> (its NS records).</li>
+<li><strong>Authoritative.</strong> The organisation's own DNS (or its DNS provider) returns the A record and a TTL. The resolver caches it and answers the client.</li>
+</ol></section>
+
+<section id="ttl"><h2>Caching and TTLs</h2>
+<p>Every answer carries a <strong>time to live</strong> in seconds. Browsers, operating systems and resolvers cache it that long, which is why DNS can serve the whole internet. The same TTL decides how fast a change spreads: if <code>api.shop.com</code> has a 1-hour TTL and you move it to a new IP, some users keep going to the old address for up to an hour, and longer if a client ignores TTLs (some do).</p>
+<div class="table"><table><thead><tr><th>TTL</th><th>Use for</th></tr></thead><tbody>
+<tr><td>30–60 s</td><td>Records you fail over automatically (health-checked regional endpoints)</td></tr>
+<tr><td>5 min</td><td>A reasonable default for service endpoints</td></tr>
+<tr><td>1 h – 1 day</td><td>Things that never move: MX, TXT verification, NS</td></tr>
+</tbody></table></div>
+<div class="note"><p>Planning a migration? Lower the TTL to 60 s a day or two before the change, so caches already hold short TTLs when you switch; raise it again afterwards. Failed lookups are cached too (<strong>negative caching</strong>, set by the zone's SOA record), so a typo'd record can linger after you fix it.</p></div></section>
+
+<section id="lab"><h2>Try it: pick a TTL</h2>
+<p>Your API's record is cached by resolvers all over the world. A shorter TTL makes failover faster but sends more queries to your authoritative servers and makes more users wait for a fresh lookup.</p>
+<div class="lab" id="dnslab">
+  <div class="lab-row"><label for="dn-t">TTL <input type="range" id="dn-t" min="0" max="6" step="1" value="3"><output id="dn-t-o"></output></label><label for="dn-r">Resolvers caching it <input type="range" id="dn-r" min="0" max="3" step="1" value="2"><output id="dn-r-o"></output></label></div>
+  <div class="lab-row"><span class="lab-k">Clients</span><span class="seg" role="group" aria-label="Client behaviour" id="dn-c"><button type="button" data-v="obey" aria-pressed="true">Respect TTL</button><button type="button" data-v="floor" aria-pressed="false">Some cache ≥ 5 min</button></span></div>
+  <div class="metrics" id="dn-m"></div>
+  <p class="lab-out" id="dn-out" aria-live="polite"></p>
+</div>
+<p class="muted" style="font-size:13.5px">Simple model: each resolver refreshes once per TTL while it has traffic; a failover is detected in 30 s; a cold lookup costs about 40 ms.</p></section>
+
+<section id="routing"><h2>DNS as a traffic router</h2>
+<p>Because the authoritative server chooses the answer, it can choose a different answer per user. Managed DNS services turn this into routing policies:</p>
+<div class="table"><table><thead><tr><th>Policy</th><th>Answers with</th><th>Use for</th></tr></thead><tbody>
+<tr><td>Simple / round robin</td><td>Several A records, shuffled</td><td>Crude spreading; clients often stick to the first IP</td></tr>
+<tr><td>Weighted</td><td>Records in proportion to weights</td><td>Shifting 5% of traffic to a new region or stack</td></tr>
+<tr><td>Latency or geo</td><td>The region nearest the resolver (or the client subnet, with EDNS Client Subnet)</td><td>Multi-region apps, data residency</td></tr>
+<tr><td>Failover</td><td>The primary while its health check passes, else the secondary</td><td>Active-passive regions</td></tr>
+</tbody></table></div>
+<p>DNS routing is coarse: it sees the resolver, not the user, and it is slowed by caching. So DNS usually picks a region or a CDN, and an <a href="load-balancing.html">L4/L7 load balancer</a> spreads load inside it. <strong>Anycast</strong> goes further: many sites announce the same IP address and internet routing delivers each packet to the nearest one, which is how public resolvers, root servers and CDNs absorb huge traffic and attacks.</p></section>
+
+<section id="failure"><h2>How DNS fails</h2>
+<h3>Your DNS provider goes down</h3>
+<p>If nobody can resolve your name, a perfectly healthy service is unreachable. In 2016 an attack on the Dyn DNS provider made many large sites unreachable for hours. Use a provider with anycast at scale, and for critical domains consider two providers serving the same zone.</p>
+<h3>Failover slower than expected</h3>
+<p>Health check interval + TTL + clients that cache longer than the TTL (some runtimes cached DNS forever by default) means a "60-second" failover can take many minutes for part of your users. Test it, and keep long-lived connections able to reconnect.</p>
+<h3>Lookups in the hot path</h3>
+<p>A service that resolves a hostname on every outbound call adds latency and hammers its resolver; a crawler resolving millions of hosts can melt one. Cache lookups in process (respecting TTLs) or run a local caching resolver.</p>
+<h3>Dangling records</h3>
+<p>A CNAME left pointing at a deleted cloud resource can be claimed by someone else (subdomain takeover). Remove records when you delete what they point to.</p></section>
+
+<section id="interview"><h2>Saying it in an interview</h2>
+<div class="say"><p>"Users resolve api.shop.com through a managed, anycast DNS provider with latency-based routing to our nearest healthy region; within a region an L7 load balancer spreads requests. The record has a 60-second TTL so a failed region drains in a minute or two, at the cost of more lookups, which the provider absorbs. Static content is a CNAME to the CDN. For a planned migration I'd drop the TTL a day early. Internally, services cache DNS answers in process so lookups never sit on the hot path."</p></div></section>
+
+<section id="real-world"><h2>In the real world</h2>
+<div class="table"><table><thead><tr><th>Need</th><th>Real options</th><th>Notes</th></tr></thead><tbody>
+<tr><td>Managed authoritative DNS</td><td>Amazon Route 53, Cloudflare DNS, Google Cloud DNS, Azure DNS, NS1</td><td>Health checks and routing policies</td></tr>
+<tr><td>Public resolvers</td><td>Cloudflare 1.1.1.1, Google 8.8.8.8, Quad9</td><td>Anycast; DNS over HTTPS and TLS</td></tr>
+<tr><td>Self-hosted</td><td>BIND, PowerDNS, CoreDNS (Kubernetes service discovery)</td><td>Internal names</td></tr>
+<tr><td>Local caching</td><td>systemd-resolved, dnsmasq, NodeLocal DNSCache</td><td>Takes lookups off the hot path</td></tr>
+</tbody></table></div>
+<p class="muted" style="font-size:13.5px;color:var(--muted)">Products change quickly; names here are examples, not endorsements. Check current docs before choosing.</p></section>
+
+<section id="related"><h2>Related</h2><ul class="related"><li><a href="protocols.html">Network protocols and APIs</a></li><li><a href="load-balancing.html">Load balancing</a></li><li><a href="caching.html">Caching</a></li><li><a href="numbers.html#call">Anatomy of one API call</a></li></ul></section>
+  </article>
+</div>
+</main>
+
+<footer class="site"><div class="wrap">Part of Classic System Design, a companion to the <a href="https://devlcodes.github.io/agentic-ai-notebook/system-design/index.html">agentic system designs</a>. Figures marked illustrative show the shape of a system, not measured numbers. Check vendor docs before relying on a specific product limit.</div></footer>
+<script>
+(function(){
+  var $ = function(id){ return document.getElementById(id); }, cl = 'obey';
+  var TS = [30, 60, 120, 300, 900, 3600, 86400], RS = [1000, 10000, 100000, 1000000];
+  function dur(s){ return s < 120 ? Math.round(s) + ' s' : s < 7200 ? Math.round(s/60) + ' min' : (s/3600).toFixed(s < 36000 ? 1 : 0) + ' h'; }
+  function fmt(x){ return x >= 1e6 ? (x/1e6).toFixed(1) + 'M' : x >= 1e3 ? (x/1e3).toFixed(x >= 1e4 ? 0 : 1) + 'k' : x < 10 ? x.toFixed(1) : Math.round(x) + ''; }
+  function run(){
+    var t = TS[+$('dn-t').value], r = RS[+$('dn-r').value];
+    $('dn-t-o').textContent = dur(t); $('dn-r-o').textContent = fmt(r);
+    var eff = cl === 'floor' ? Math.max(t, 300) : t;
+    var qps = r / t, worst = 30 + eff, avg = 30 + eff / 2, cold = Math.min(1, 1 / (t / 10));
+    $('dn-m').innerHTML = '<div class="metric"><span class="n">' + fmt(qps) + '/s</span><span class="l">queries to your DNS</span></div><div class="metric"><span class="n">' + dur(avg) + '</span><span class="l">typical failover</span><small>worst case ' + dur(worst) + '</small></div><div class="metric"><span class="n">' + (cold * 100 < 1 ? '<1' : Math.round(cold * 100)) + '%</span><span class="l">sessions paying a cold lookup</span><small>if a user returns every ~10 s</small></div>';
+    var msg;
+    if (t <= 60) msg = 'Failover in about a minute, at ' + fmt(qps) + ' queries a second to your authoritative servers. A managed anycast provider shrugs that off; a self-hosted pair might not.';
+    else if (t <= 300) msg = 'A sensible default: a region failure drains in a few minutes, and query load is modest.';
+    else msg = 'Cheap and fast for users, but a failed region keeps receiving traffic for up to ' + dur(worst) + '. Fine for records that never move, wrong for anything you fail over.';
+    if (cl === 'floor' && t < 300) msg += ' Some clients ignore short TTLs, so part of your users take 5 minutes or more no matter what you set.';
+    $('dn-out').textContent = msg;
+  }
+  $('dn-c').addEventListener('click', function(e){ var b = e.target.closest('button'); if (!b) return; cl = b.dataset.v; this.querySelectorAll('button').forEach(function(x){ x.setAttribute('aria-pressed', x === b); }); run(); });
+  ['dn-t','dn-r'].forEach(function(id){ $(id).addEventListener('input', run); });
+  run();
+})();
+
+</script>
+</body>
+</html>
