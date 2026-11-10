@@ -267,7 +267,9 @@
 <tr><td>Read-through</td><td>The cache library loads from the DB on a miss</td><td>Less app code</td><td>Same staleness as cache-aside</td></tr>
 <tr><td>Write-through</td><td>Every write goes to the cache and the DB together</td><td>Cache is always fresh</td><td>Slower writes; caches data nobody reads</td></tr>
 <tr><td>Write-back (write-behind)</td><td>Write to the cache; flush to the DB later in batches</td><td>Very fast writes; absorbs bursts</td><td>Data loss if the cache dies before flushing</td></tr>
+<tr><td>Write-around</td><td>Writes go only to the DB; the cache is filled later, on the first read</td><td>Write-once data (logs, uploads) never pollutes the cache</td><td>The first read after a write always misses</td></tr>
 </tbody></table></div>
+<p>Pick the write policy from the consistency you need. PACELC frames it: with no failure in play, you still trade latency for consistency. Write-through pays write latency for a cache that is never stale; write-back buys the fastest writes and accepts that a crash can lose them. See <a href="consistency.html">consistency</a>.</p>
 <div class="note"><p>On a write, <strong>delete</strong> the cache key rather than updating it. Two concurrent writers that each update the cache can leave the older value in place; deleting forces the next reader to load the current value.</p></div></section>
 
 <section id="lab"><h2>Try it: hit ratio and cache size</h2>
@@ -286,7 +288,35 @@
 <tr><td>LFU</td><td>Least frequently used key</td><td>Stable popularity; resists a one-off scan flushing the cache</td></tr>
 <tr><td>TTL</td><td>Anything older than its time to live</td><td>Always set one, so stale data heals itself even if an invalidation is missed</td></tr>
 </tbody></table></div>
-<p>Redis approximates LRU and LFU by sampling a few keys rather than keeping an exact order, which is cheap and close enough. Add a little random jitter to TTLs so keys written together do not all expire together.</p></section>
+<p>Redis approximates LRU and LFU by sampling a few keys rather than keeping an exact order, which is cheap and close enough. Add a little random jitter to TTLs so keys written together do not all expire together.</p>
+<h3>Active and passive expiry</h3>
+<p><strong>Passive</strong> expiry checks a key's TTL when it is read and drops it if it has expired. It costs nothing, but expired keys nobody reads keep using memory. <strong>Active</strong> expiry runs a background sweep that deletes expired keys. Redis does both: every read checks the TTL, and a sweep samples keys with TTLs about ten times a second and deletes the expired ones.</p>
+<h3>Inside a cache server: an O(1) LRU</h3>
+<figure class="fig"><svg viewBox="0 0 722 196" class="dg" role="img" aria-label="An LRU cache: a hash map points to nodes in a doubly linked list ordered from most to least recently used">
+<text x="20" y="22" class="cap">HASH MAP</text>
+<rect x="20" y="34" width="120" height="30" rx="6" class="box"/><text x="80" y="54" class="mono small" text-anchor="middle">user:42</text>
+<rect x="20" y="74" width="120" height="30" rx="6" class="box"/><text x="80" y="94" class="mono small" text-anchor="middle">post:7</text>
+<rect x="20" y="114" width="120" height="30" rx="6" class="box"/><text x="80" y="134" class="mono small" text-anchor="middle">feed:9</text>
+<text x="230" y="22" class="cap">DOUBLY LINKED LIST · MOST RECENT → LEAST RECENT</text>
+<rect x="230" y="64" width="110" height="44" rx="8" class="k-ingest"/><text x="285" y="91" class="small b" text-anchor="middle">post:7</text>
+<rect x="380" y="64" width="110" height="44" rx="8" class="k-ingest"/><text x="435" y="91" class="small b" text-anchor="middle">user:42</text>
+<rect x="530" y="64" width="110" height="44" rx="8" class="k-ingest"/><text x="585" y="91" class="small b" text-anchor="middle">feed:9</text>
+<path d="M340 80 L378 80" class="wire" marker-end="url(#ah)"/><path d="M378 94 L342 94" class="wire" marker-end="url(#ah)"/>
+<path d="M490 80 L528 80" class="wire" marker-end="url(#ah)"/><path d="M528 94 L492 94" class="wire" marker-end="url(#ah)"/>
+<path d="M140 49 C200 49 360 40 420 62" class="wire dash" marker-end="url(#ah)"/>
+<path d="M140 89 C190 89 230 86 236 86" class="wire dash" marker-end="url(#ah)"/>
+<path d="M140 129 C260 160 520 150 576 110" class="wire dash" marker-end="url(#ah)"/>
+<text x="285" y="134" class="sm" text-anchor="middle">a hit moves the node here</text>
+<text x="585" y="134" class="sm bad" text-anchor="middle">evict from this end</text>
+<text x="361" y="182" class="sm" text-anchor="middle">get: map lookup + unlink + push to head · set when full: drop tail + delete its map entry · all O(1)</text>
+</svg><figcaption>The classic LRU: the map finds a key in O(1), the list keeps recency order in O(1). An LFU keeps a count per key instead (often in buckets by frequency).</figcaption></figure>
+<p>MRU (evict the most recent key) and MFU are rarely right; MRU only helps for a cyclic scan larger than the cache, where the item just read is the one you will need last.</p>
+<h3>Dedicated or co-located cache nodes</h3>
+<div class="table"><table><thead><tr><th>Layout</th><th>How it works</th><th>Pros</th><th>Cons</th></tr></thead><tbody>
+<tr><td>Dedicated</td><td>A separate cluster of cache servers, sharded by key</td><td>Scales and fails independently of the app; one shared copy</td><td>Extra hardware and a network hop</td></tr>
+<tr><td>Co-located</td><td>Each app server runs a cache shard in its own memory</td><td>No extra machines; lower cost</td><td>An app deploy or crash takes a cache shard with it; app and cache fight for memory</td></tr>
+</tbody></table></div>
+<p>Either way, keys are spread with <a href="sharding.html">consistent hashing</a> so adding or losing a node moves only about 1/N of the keys.</p></section>
 
 <section id="failure"><h2>How caches fail</h2>
 <h3>Stale data</h3>

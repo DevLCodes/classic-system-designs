@@ -192,31 +192,43 @@
 <p class="lead">The building blocks behind every large web system, before any AI is involved: how traffic is spread, data is stored and copied, work is queued, and systems stay correct under load. Each page has a hands-on lab.</p></div></div>
 <div class="wrap" style="padding-bottom:56px">
   <ul class="doors">
-    <li><a class="door" href="#blocks"><span class="k">8 topic pages · 8 labs · 6 walkthroughs</span><h2>Building blocks →</h2><p>Load balancing, caching, databases, sharding, queues, consistency, rate limiting and the numbers to size them.</p></a></li>
+    <li><a class="door" href="#blocks"><span class="k">14 topic pages · 14 labs · 6 walkthroughs</span><h2>Building blocks →</h2><p>Requirements, networking and DNS, load balancing, caching, databases, sharding, queues, consistency, consensus and the numbers to size them.</p></a></li>
     <li><a class="door" href="https://devlcodes.github.io/agentic-ai-notebook/system-design/index.html"><span class="k">AI systems</span><h2>Agentic designs →</h2><p>The companion section: RAG, agents with actions, text-to-SQL and evals, built on top of these same blocks.</p></a></li>
   </ul>
 
   <h2 class="home-h" id="blocks">Building blocks</h2>
   <p class="sub">Read them in order, or jump to what a design needs.</p>
+  <h3 class="group-h">Foundations</h3>
+  <ul class="grid">
+    <li><a class="card" href="requirements.html"><span class="num">01</span><h3>Non-functional requirements</h3><p>Scale, latency, availability, durability and consistency targets; SLIs, SLOs, percentiles, RTO and RPO. Lab: availability of a request path.</p></a></li>
+    <li><a class="card" href="protocols.html"><span class="num">02</span><h3>Network protocols and APIs</h3><p>TCP, UDP and QUIC, HTTP/1.1 to HTTP/3, REST vs GraphQL vs gRPC, polling vs SSE vs WebSockets. Lab: how to push updates.</p></a></li>
+    <li><a class="card" href="dns.html"><span class="num">03</span><h3>DNS</h3><p>Records, the resolution path, TTLs and caching, weighted, geo and failover routing, anycast. Lab: pick a TTL.</p></a></li>
+  </ul>
   <h3 class="group-h">Traffic</h3>
   <ul class="grid">
-    <li><a class="card" href="load-balancing.html"><span class="num">01</span><h3>Load balancing</h3><p>L4 vs L7, round robin to power of two choices, health checks. Lab: one slow server.</p></a></li>
-    <li><a class="card" href="rate-limiting.html"><span class="num">02</span><h3>Rate limiting</h3><p>Token bucket, fixed and sliding windows, limits across many servers. Lab: four limiters on the same traffic.</p></a></li>
+    <li><a class="card" href="load-balancing.html"><span class="num">04</span><h3>Load balancing</h3><p>L4 vs L7, round robin to power of two choices, health checks. Lab: one slow server.</p></a></li>
+    <li><a class="card" href="rate-limiting.html"><span class="num">05</span><h3>Rate limiting</h3><p>Token bucket, fixed and sliding windows, limits across many servers. Lab: four limiters on the same traffic.</p></a></li>
   </ul>
   <h3 class="group-h">Data</h3>
   <ul class="grid">
-    <li><a class="card" href="caching.html"><span class="num">03</span><h3>Caching</h3><p>Cache-aside and write patterns, eviction, stampedes and hot keys. Lab: hit ratio vs cache size.</p></a></li>
-    <li><a class="card" href="databases.html"><span class="num">04</span><h3>Databases, indexes and replication</h3><p>SQL vs NoSQL families, B-trees and LSM trees, transactions, replication lag. Lab: with and without an index.</p></a></li>
-    <li><a class="card" href="sharding.html"><span class="num">05</span><h3>Sharding and consistent hashing</h3><p>Range vs hash, picking a shard key, hot partitions, resharding. Lab: add a node.</p></a></li>
+    <li><a class="card" href="caching.html"><span class="num">06</span><h3>Caching</h3><p>Cache-aside and write patterns, eviction, stampedes and hot keys. Lab: hit ratio vs cache size.</p></a></li>
+    <li><a class="card" href="databases.html"><span class="num">07</span><h3>Databases, indexes and replication</h3><p>SQL vs NoSQL families, B-trees and LSM trees, transactions, replication lag. Lab: with and without an index.</p></a></li>
+    <li><a class="card" href="sharding.html"><span class="num">08</span><h3>Sharding and consistent hashing</h3><p>Range vs hash, picking a shard key, hot partitions, resharding. Lab: add a node.</p></a></li>
   </ul>
   <h3 class="group-h">Async and correctness</h3>
   <ul class="grid">
-    <li><a class="card" href="queues.html"><span class="num">06</span><h3>Message queues and streams</h3><p>Queues vs Kafka-style logs, delivery guarantees, idempotency, outbox, dead letters. Lab: a traffic burst.</p></a></li>
-    <li><a class="card" href="consistency.html"><span class="num">07</span><h3>Consistency and CAP</h3><p>CAP and PACELC in plain terms, consistency models, quorums, sagas. Lab: tune R, W and N.</p></a></li>
+    <li><a class="card" href="queues.html"><span class="num">09</span><h3>Message queues and streams</h3><p>Queues vs Kafka-style logs, delivery guarantees, idempotency, outbox, dead letters. Lab: a traffic burst.</p></a></li>
+    <li><a class="card" href="consistency.html"><span class="num">10</span><h3>Consistency and CAP</h3><p>CAP and PACELC in plain terms, consistency models, quorums, sagas. Lab: tune R, W and N.</p></a></li>
+  </ul>
+  <h3 class="group-h">Distributed internals</h3>
+  <ul class="grid">
+    <li><a class="card" href="raft.html"><span class="num">11</span><h3>Consensus with Raft</h3><p>Leaders, terms, elections and log replication; why a majority prevents split brain. Lab: break a five-node cluster.</p></a></li>
+    <li><a class="card" href="merkle-trees.html"><span class="num">12</span><h3>Merkle trees</h3><p>Hash trees for anti-entropy repair, tree depth vs overstreaming, tombstones. Lab: repair two replicas.</p></a></li>
+    <li><a class="card" href="cassandra-vs-cockroachdb.html"><span class="num">13</span><h3>Cassandra vs CockroachDB</h3><p>Leaderless wide-column vs Raft per range, write paths, tunable vs serializable consistency. Lab: same failure, two databases.</p></a></li>
   </ul>
   <h3 class="group-h">Estimation</h3>
   <ul class="grid">
-    <li><a class="card" href="numbers.html"><span class="num">08</span><h3>Numbers to know</h3><p>Latency by layer, what one machine can do, availability nines. Lab: from daily users to QPS and storage.</p></a></li>
+    <li><a class="card" href="numbers.html"><span class="num">14</span><h3>Numbers to know</h3><p>Latency by layer, what one machine can do, availability nines. Lab: from daily users to QPS and storage.</p></a></li>
   </ul>
 
   <h2 class="home-h" id="designs">System designs</h2>

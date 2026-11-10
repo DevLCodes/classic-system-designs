@@ -232,7 +232,7 @@
 <main>
 <div class="wrap"><div class="intro"><p class="eyebrow">Building block · estimation</p><h1>Numbers to know</h1><p class="lead">The handful of latency, throughput and availability numbers that let you size a system on a whiteboard in two minutes.</p></div></div>
 <div class="wrap doc">
-  <nav class="toc" aria-label="On this page"><p>On this page</p><ol><li><a href="#why">Why estimate</a></li><li><a href="#latency">Latency by layer</a></li><li><a href="#throughput">What one machine can do</a></li><li><a href="#time">Handy conversions</a></li><li><a href="#lab">Try it: size a service</a></li><li><a href="#method">The two-minute method</a></li><li><a href="#related">Related</a></li></ol></nav>
+  <nav class="toc" aria-label="On this page"><p>On this page</p><ol><li><a href="#why">Why estimate</a></li><li><a href="#latency">Latency by layer</a></li><li><a href="#throughput">What one machine can do</a></li><li><a href="#time">Handy conversions</a></li><li><a href="#lab">Try it: size a service</a></li><li><a href="#call">Anatomy of one API call</a></li><li><a href="#method">The two-minute method</a></li><li><a href="#related">Related</a></li></ol></nav>
   <article>
 <section id="why"><h2>Why estimate</h2>
 <p class="lead">Estimates decide the design. 50 writes a second fits on one Postgres node; 500,000 does not. You only need to be right to within a factor of ten.</p>
@@ -260,6 +260,9 @@
 <tr><td>Redis</td><td class="num">~100k+ ops/s</td><td>Single-threaded core; more with pipelining and clustering</td></tr>
 <tr><td>PostgreSQL / MySQL</td><td class="num">~10k–50k simple queries/s; a few thousand writes/s comfortably</td><td>Reads scale with replicas and caches; writes need sharding</td></tr>
 <tr><td>Kafka</td><td class="num">~100 MB/s+ per broker</td><td>Throughput scales with partitions and brokers</td></tr>
+<tr><td>Cassandra / ScyllaDB</td><td class="num">~10k–100k writes/s per node</td><td>Leaderless and LSM-based, so writes scale by adding nodes</td></tr>
+<tr><td>Elasticsearch</td><td class="num">~1k–10k searches/s per node</td><td>Wide range: depends on query cost and index size</td></tr>
+<tr><td>WebSocket gateway</td><td class="num">~100k–1M open connections</td><td>Idle connections are cheap; message rate and memory per connection decide it</td></tr>
 <tr><td>Network card</td><td class="num">10–25 Gbit/s (~1–3 GB/s)</td><td>Video and file serving hit this first</td></tr>
 <tr><td>Memory</td><td class="num">64–512 GB typical server</td><td>A big cache fits in a few nodes</td></tr>
 </tbody></table></div>
@@ -281,6 +284,17 @@
 <tr><td>99.99% (four nines)</td><td class="num">~53 minutes</td><td class="num">~4.4 minutes</td></tr>
 <tr><td>99.999% (five nines)</td><td class="num">~5.3 minutes</td><td class="num">~26 seconds</td></tr>
 </tbody></table></div>
+<h3>Ratios and targets worth assuming</h3>
+<div class="table"><table><thead><tr><th>Thing</th><th>Typical value</th></tr></thead><tbody>
+<tr><td>Read : write ratio</td><td class="num">Social feeds 100:1 or more · e-commerce ~10:1 · chat ~1:1 · logging and metrics mostly writes</td></tr>
+<tr><td>API latency target</td><td class="num">p50 under ~100 ms, p99 under ~200–500 ms</td></tr>
+<tr><td>Web page fully usable</td><td class="num">Under ~2–3 s</td></tr>
+<tr><td>Search results</td><td class="num">Under ~200–500 ms</td></tr>
+<tr><td>Cache hit ratio worth having</td><td class="num">80–95%+</td></tr>
+<tr><td>Message size</td><td class="num">Kafka default max ~1 MB · SQS 256 KB · store anything bigger in object storage and pass a pointer</td></tr>
+<tr><td>Object size</td><td class="num">S3: 5 GB per single upload, 5 TB per object with multipart upload</td></tr>
+</tbody></table></div>
+<p class="muted" style="font-size:13.5px;color:var(--muted)">Starting assumptions for an interview; the real numbers come from your product and your load tests.</p>
 <p>Dependencies in series multiply: three services at 99.9% each give about 99.7% together. Redundant copies in parallel improve it: two independent 99% replicas give 99.99%, if their failures really are independent.</p></section>
 
 <section id="lab"><h2>Try it: size a service</h2>
@@ -292,6 +306,18 @@
   <p class="lab-out" id="n-out" aria-live="polite"></p>
 </div>
 <p class="muted" style="font-size:13.5px">Storage counts three replicas for the database and ignores compression and indexes. Read bandwidth assumes each read returns one item plus any media.</p></section>
+
+<section id="call"><h2>Anatomy of one API call</h2>
+<p><strong>Latency</strong> is time on the wire; <strong>processing time</strong> is time in your servers; <strong>response time</strong> is what the user feels, the sum of both. A cold call from a new client pays several network round trips (RTT) before your code even runs:</p>
+<div class="table"><table><thead><tr><th>Step</th><th>Cost</th><th>Avoided by</th></tr></thead><tbody>
+<tr><td>DNS lookup</td><td class="num">0 (cached) to 1+ RTT to resolvers</td><td>DNS caching and TTLs; see <a href="dns.html">DNS</a></td></tr>
+<tr><td>TCP handshake</td><td class="num">1 RTT</td><td>Keep-alive and connection pools</td></tr>
+<tr><td>TLS handshake</td><td class="num">1 RTT with TLS 1.3 (2 with TLS 1.2)</td><td>Session resumption; QUIC folds TCP and TLS into 1 RTT</td></tr>
+<tr><td>Request to first byte</td><td class="num">1 RTT + processing time</td><td>Faster servers, caches, nearby regions</td></tr>
+<tr><td>Download the response</td><td class="num">size ÷ bandwidth, plus extra RTTs while TCP ramps up</td><td>Compression, smaller payloads, a CDN</td></tr>
+</tbody></table></div>
+<div class="formula">cold call ≈ DNS + 3 × RTT + processing + transfer      warm call ≈ 1 × RTT + processing + transfer</div>
+<p>With a 150 ms intercontinental RTT, a cold call costs about 450 ms of handshakes before 50 ms of processing; a warm call on a reused connection costs 200 ms. That is why CDNs terminate TLS near the user, and why mobile apps keep one long-lived connection. Protocol details are on <a href="protocols.html">network protocols</a>.</p></section>
 
 <section id="method"><h2>The two-minute method</h2>
 <ol class="plain">

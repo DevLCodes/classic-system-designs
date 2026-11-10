@@ -1,0 +1,401 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Cassandra vs CockroachDB · Classic System Design</title>
+<meta name="description" content="Leaderless wide-column Cassandra against Raft-per-range CockroachDB: data model, write path, consistency and a failure lab.">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700&family=Instrument+Sans:ital,wght@0,400;0,500;0,600;1,400&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+  /* Layout: a slim site bar, then either a card grid (home), a sticky contents rail + reading column (articles), or a filterable term list (glossary). Light, single look. */
+  :root {
+    color-scheme: light;
+    --bg: #e9ecef; --paper: #f7f8f9; --ink: #1c2530; --muted: #586473; --line: #cdd4dc; --line-strong: #9aa5b1;
+    --accent: #4255d4; --accent-ink: #ffffff; --track: #d3d9e0; --code-bg: #eef1f4; --wire: #7d8996;
+    --c-ingest: #2a9d8f; --c-kb: #4d5fd8; --c-serve: #d7932a; --c-model: #e2674f; --c-gov: #b2456e; --c-cross: #4a5562; --c-dlq: #b23a3a; --c-ok: #2f8f5b;
+    --t-src: #e4e8ec; --t-ingest: #d8eeea; --t-kb: #dfe3fa; --t-serve: #f8ead2; --t-model: #fbe1da; --t-gov: #f3dde6; --t-cross: #dfe2e6; --t-dlq: #f6dddb;
+    --font-display: "Bricolage Grotesque", "Avenir Next", "Segoe UI", system-ui, sans-serif;
+    --font-body: "Instrument Sans", "Helvetica Neue", "Segoe UI", system-ui, sans-serif;
+    --font-mono: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  @media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
+  body { margin: 0; background: var(--bg); color: var(--ink); font-family: var(--font-body); font-size: 16px; line-height: 1.6; }
+  a { color: var(--accent); }
+  .wrap { max-width: 1240px; margin: 0 auto; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
+
+  .sitebar { border-bottom: 1px solid var(--line); background: var(--paper); }
+  .sitebar .wrap { display: flex; align-items: center; gap: 18px; flex-wrap: wrap; padding-block: 12px; }
+  .brand { font-family: var(--font-display); font-weight: 700; font-size: 17px; color: var(--ink); text-decoration: none; margin-right: auto; }
+  .sitebar nav { display: flex; gap: 16px; flex-wrap: wrap; font-size: 14px; }
+  .sitebar nav a { color: var(--muted); text-decoration: none; }
+  .sitebar nav a:hover, .sitebar nav a[aria-current="page"] { color: var(--ink); }
+  .sitebar nav a[aria-current="page"] { font-weight: 600; }
+
+  .intro { padding-block: 40px 8px; display: grid; gap: 10px; max-width: 820px; }
+  .eyebrow { margin: 0; font-family: var(--font-mono); font-size: 12px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+  h1 { margin: 0; font-family: var(--font-display); font-weight: 700; font-size: clamp(30px, 5vw, 46px); line-height: 1.05; text-wrap: balance; }
+  .intro .lead { font-size: 18px; margin: 0; }
+
+  .doc { display: grid; grid-template-columns: 220px minmax(0, 1fr); gap: 48px; padding-block: 36px 72px; }
+  .toc { position: sticky; top: calc(env(safe-area-inset-top, 0px) + 20px); align-self: start; }
+  .toc p { margin: 0 0 8px; font-family: var(--font-mono); font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+  .toc ol { margin: 0; padding: 0; list-style: none; display: grid; gap: 2px; counter-reset: toc; }
+  .toc li { counter-increment: toc; }
+  .toc a { display: flex; gap: 8px; padding: 3px 0; font-size: 14px; color: var(--muted); text-decoration: none; }
+  .toc a::before { content: counter(toc, decimal-leading-zero); font-family: var(--font-mono); font-size: 11.5px; padding-top: 2px; color: var(--line-strong); }
+  .toc a:hover { color: var(--ink); }
+  article { min-width: 0; max-width: 760px; }
+  section { padding-bottom: 36px; margin-bottom: 36px; border-bottom: 1px solid var(--line); scroll-margin-top: 20px; }
+  section:last-child { border-bottom: 0; }
+  h2 { margin: 0 0 10px; font-family: var(--font-display); font-weight: 700; font-size: 28px; line-height: 1.15; text-wrap: balance; }
+  h3 { margin: 26px 0 6px; font-family: var(--font-display); font-weight: 600; font-size: 19px; line-height: 1.25; }
+  p { margin: 0 0 14px; }
+  .lead { font-size: 18px; }
+  ul.plain, ol.plain { margin: 0 0 16px; padding-left: 22px; display: grid; gap: 6px; }
+  code { font-family: var(--font-mono); font-size: 0.88em; background: var(--code-bg); padding: 1px 5px; border-radius: 4px; }
+  pre { margin: 0 0 16px; padding: 14px 16px; background: var(--code-bg); border-radius: 10px; overflow-x: auto; font-size: 13px; line-height: 1.55; }
+  pre code { background: none; padding: 0; font-size: inherit; }
+  .table { overflow-x: auto; margin: 0 0 18px; }
+  table { width: 100%; border-collapse: collapse; font-size: 14.5px; line-height: 1.45; }
+  th, td { text-align: left; vertical-align: top; padding: 8px 10px; border-bottom: 1px solid var(--line); }
+  th { font-family: var(--font-mono); font-size: 11.5px; font-weight: 500; letter-spacing: .05em; text-transform: uppercase; color: var(--muted); }
+  td.num { font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .note { border-left: 3px solid var(--accent); background: var(--paper); padding: 12px 16px; border-radius: 0 10px 10px 0; margin: 0 0 18px; }
+  .note p:last-child { margin: 0; }
+  .formula { font-family: var(--font-mono); font-size: 14px; background: var(--paper); border: 1px solid var(--line); border-radius: 10px; padding: 12px 16px; margin: 0 0 16px; overflow-x: auto; white-space: nowrap; }
+  .related { display: flex; flex-wrap: wrap; gap: 8px; margin: 0; padding: 0; list-style: none; }
+  .related a { display: inline-block; padding: 4px 12px; border: 1px solid var(--line); border-radius: 999px; font-size: 14px; color: var(--ink); text-decoration: none; background: var(--paper); }
+  .related a:hover { border-color: var(--ink); }
+  .pager { display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; font-size: 14px; }
+  footer.site { border-top: 1px solid var(--line); padding-block: 20px 40px; font-size: 13px; color: var(--muted); }
+  a:focus-visible, input:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+  /* home */
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 16px; margin: 0 0 40px; padding: 0; list-style: none; }
+  .card { display: grid; gap: 8px; height: 100%; padding: 18px; background: var(--paper); border: 1px solid var(--line); border-radius: 14px; color: var(--ink); text-decoration: none; }
+  .card:hover { border-color: var(--ink); }
+  .card .k { font-family: var(--font-mono); font-size: 11px; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
+  .card h3 { margin: 0; font-size: 20px; }
+  .card p { margin: 0; font-size: 14.5px; color: var(--muted); }
+  .card svg { width: 100%; height: auto; display: block; }
+  .card.feature svg { max-width: 420px; justify-self: center; }
+  .card.feature { grid-column: 1 / -1; grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr); align-items: center; gap: 24px; }
+  .home-h { margin: 28px 0 12px; font-family: var(--font-display); font-size: 24px; }
+
+  /* glossary */
+  .gl-tools { position: sticky; top: 0; z-index: 2; background: var(--bg); padding-block: 12px; display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+  .gl-tools input { flex: 1 1 260px; min-width: 0; font: 15px var(--font-body); padding: 9px 12px; border-radius: 10px; border: 1px solid var(--line-strong); background: #fff; color: var(--ink); }
+  .gl-letters { display: flex; flex-wrap: wrap; gap: 4px; font-family: var(--font-mono); font-size: 13px; }
+  .gl-letters a { padding: 2px 6px; border-radius: 6px; text-decoration: none; color: var(--muted); }
+  .gl-letters a:hover { background: var(--paper); color: var(--ink); }
+  .gl { max-width: 860px; }
+  .gl-item { margin: 0; }
+  .gl-item { display: grid; grid-template-columns: 220px minmax(0, 1fr); gap: 16px; padding: 12px 0; border-bottom: 1px solid var(--line); scroll-margin-top: 70px; }
+  .gl-item dt { font-weight: 600; }
+  .gl-item dt small { display: block; font-weight: 400; font-family: var(--font-mono); font-size: 11px; color: var(--muted); letter-spacing: .04em; text-transform: uppercase; margin-top: 2px; }
+  .gl-item dd { margin: 0; }
+  .gl-item dd .see { font-size: 13.5px; }
+  .gl-letter { margin: 26px 0 4px; font-family: var(--font-display); font-size: 22px; scroll-margin-top: 70px; }
+
+  @media (max-width: 900px) {
+    .doc { grid-template-columns: minmax(0, 1fr); gap: 24px; padding-block: 28px 56px; }
+    .toc { position: static; }
+    .toc ol { grid-template-columns: repeat(2, minmax(0, 1fr)); column-gap: 12px; }
+    .card.feature { grid-template-columns: minmax(0, 1fr); }
+  }
+  @media (max-width: 640px) {
+    .gl-item { grid-template-columns: minmax(0, 1fr); gap: 4px; }
+    h2 { font-size: 24px; }
+    .intro .lead, .lead { font-size: 16.5px; }
+  }
+
+  /* diagrams */
+  .fig { margin: 6px 0 24px; overflow-x: auto; }
+  .fig svg { display: block; width: 100%; height: auto; min-width: 600px; }
+  .fig figcaption { margin-top: 8px; font-size: 13px; line-height: 1.45; color: var(--muted); }
+  .dg text { font-family: var(--font-body); font-size: 13px; fill: var(--ink); }
+  .dg .sm { font-size: 11.5px; fill: var(--muted); }
+  .dg .small { font-size: 12px; }
+  .dg .b { font-weight: 600; }
+  .dg .mono { font-family: var(--font-mono); }
+  .dg .it { font-style: italic; }
+  .dg .mute { fill: var(--muted); }
+  .dg .gov { fill: var(--c-gov); font-weight: 600; }
+  .dg .okt { fill: var(--c-ok); font-weight: 600; }
+  .dg .bad { fill: var(--c-dlq); font-weight: 600; }
+  .dg .cap { font-family: var(--font-mono); font-size: 11px; letter-spacing: .06em; fill: var(--muted); }
+  .dg .big { font-family: var(--font-display); font-size: 30px; font-weight: 700; fill: var(--ink); }
+  .dg .box { fill: var(--paper); stroke: var(--line-strong); stroke-width: 1.25; }
+  .dg .ghost { fill: none; stroke: var(--line-strong); stroke-width: 1.25; stroke-dasharray: 5 5; }
+  .dg .track { fill: var(--track); }
+  .dg .rule { stroke: var(--line); stroke-width: 1; }
+  .dg .axis { stroke: var(--line-strong); stroke-width: 1.25; }
+  .dg .wire { fill: none; stroke: var(--wire); stroke-width: 1.4; }
+  .dg .wire.dash { stroke-dasharray: 4 4; }
+  .dg .wire.hot { stroke: var(--accent); stroke-width: 2; }
+  .dg .wire.red { stroke: var(--c-dlq); }
+  .dg .ah { fill: var(--wire); }
+  .dg .xmark { stroke: var(--c-dlq); stroke-width: 1.8; fill: none; }
+  .dg .tick { stroke: var(--c-ok); stroke-width: 2; fill: none; }
+  .dg .k-src { fill: var(--t-src); stroke: #8795a3; stroke-width: 1.5; }
+  .dg .k-ingest { fill: var(--t-ingest); stroke: var(--c-ingest); stroke-width: 1.5; }
+  .dg .k-kb { fill: var(--t-kb); stroke: var(--c-kb); stroke-width: 1.5; }
+  .dg .k-serve { fill: var(--t-serve); stroke: var(--c-serve); stroke-width: 1.5; }
+  .dg .k-model { fill: var(--t-model); stroke: var(--c-model); stroke-width: 1.5; }
+  .dg .k-gov { fill: var(--t-gov); stroke: var(--c-gov); stroke-width: 1.5; }
+  .dg .k-cross { fill: var(--t-cross); stroke: var(--c-cross); stroke-width: 1.5; }
+  .dg .k-dlq { fill: var(--t-dlq); stroke: var(--c-dlq); stroke-width: 1.5; }
+  .dg .k-user { fill: #ffffff; stroke: var(--line-strong); stroke-width: 1.5; }
+  .dg .f-serve { fill: var(--c-serve); } .dg .f-kb { fill: var(--c-kb); } .dg .f-model { fill: var(--c-model); } .dg .f-gov { fill: var(--c-gov); } .dg .f-ingest { fill: var(--c-ingest); } .dg .f-cross { fill: #b8c0c9; } .dg .f-dlq { fill: var(--c-dlq); } .dg .f-ok { fill: var(--c-ok); }
+  .dg .cell { fill: var(--paper); stroke: var(--line-strong); stroke-width: 1; }
+  .dg .cell.hot { fill: var(--t-ingest); stroke: var(--c-ingest); stroke-width: 1.5; }
+  .dg .cell.old { fill: var(--t-kb); stroke: var(--c-kb); }
+  .dg .cell.new { fill: var(--t-ingest); stroke: var(--c-ingest); stroke-width: 1.5; }
+  .dg .cell.gone { fill: var(--paper); stroke: var(--line); }
+  .dg .dot-hr { fill: var(--c-gov); } .dg .dot-it { fill: var(--c-kb); } .dg .dot-eng { fill: var(--c-ingest); } .dg .dot-q { fill: var(--c-serve); stroke: var(--ink); stroke-width: 1.5; }
+  .dg .halo { fill: none; stroke: var(--c-serve); stroke-width: 1.5; stroke-dasharray: 4 4; }
+  .dg .zone { fill: var(--paper); stroke: var(--line); stroke-width: 1; }
+</style>
+
+<style>
+  .lab { margin: 6px 0 26px; padding: 14px 16px 16px; background: var(--paper); border: 1px solid var(--line); border-radius: 14px; }
+  .lab-row { display: flex; flex-wrap: wrap; gap: 10px 18px; align-items: center; margin: 0 0 12px; }
+  .lab-k { font-family: var(--font-mono); font-size: 11px; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
+  .lab label { display: inline-flex; gap: 8px; align-items: center; font-size: 14px; }
+  .lab input[type=range] { width: 150px; accent-color: var(--accent); }
+  .lab input[type=checkbox] { width: 16px; height: 16px; accent-color: var(--accent); }
+  .lab input[type=text] { flex: 1 1 260px; min-width: 0; font: 15px var(--font-body); padding: 8px 11px; border-radius: 9px; border: 1px solid var(--line-strong); background: #fff; color: var(--ink); }
+  .lab output { font-family: var(--font-mono); font-size: 12.5px; min-width: 6ch; font-variant-numeric: tabular-nums; }
+  .seg { display: inline-flex; flex-wrap: wrap; gap: 6px; }
+  .seg button, .chips button { font: 600 13px var(--font-body); color: var(--ink); background: #fff; border: 1px solid var(--line); border-radius: 8px; padding: 6px 12px; cursor: pointer; }
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; }
+  .chips button { font-weight: 500; border-radius: 999px; padding: 4px 11px; font-size: 13px; }
+  .seg button:hover, .chips button:hover { border-color: var(--ink); }
+  .seg button[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+  .seg button:focus-visible, .chips button:focus-visible, .lab input:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .lab-out { margin: 12px 0 0; padding: 10px 12px; background: #fff; border: 1px solid var(--line); border-radius: 10px; font-size: 14.5px; line-height: 1.5; font-variant-numeric: tabular-nums; }
+  .chunks { display: grid; gap: 8px; max-height: 470px; overflow: auto; padding-right: 4px; }
+  .chunk { min-width: 0; padding: 8px 11px; background: #fff; border: 1px solid var(--line); border-left: 4px solid var(--c-kb); border-radius: 8px; font-size: 14px; line-height: 1.5; overflow-wrap: anywhere; }
+  .chunk:nth-child(even) { border-left-color: var(--c-ingest); }
+  .chunk.ans { box-shadow: 0 0 0 2px var(--c-serve); }
+  .chunk .ch { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-bottom: 4px; font-family: var(--font-mono); font-size: 11px; color: var(--muted); }
+  .chunk .pfx { display: block; font-family: var(--font-mono); font-size: 11.5px; color: var(--c-kb); }
+  .chunk .ov { background: var(--track); border-radius: 3px; }
+  .chunk mark { background: #ffe9b3; border-radius: 3px; padding: 0 2px; }
+  .chunk table { width: auto; font-size: 13px; margin: 4px 0; }
+  .chunk td { padding: 2px 10px 2px 0; border-bottom: 1px solid var(--line); }
+  .badge { display: inline-block; padding: 0 7px; border-radius: 999px; border: 1px solid; font-family: var(--font-mono); font-size: 10.5px; line-height: 1.6; }
+  .badge.bad { color: var(--c-dlq); border-color: var(--c-dlq); background: var(--t-dlq); }
+  .badge.ok { color: var(--c-ok); border-color: var(--c-ok); background: #e3f3ea; }
+  .badge.info { color: var(--c-kb); border-color: var(--c-kb); background: var(--t-kb); }
+  .bars { display: grid; gap: 8px; margin: 4px 0 0; }
+  .bar-row { display: grid; grid-template-columns: minmax(0, 150px) minmax(0, 1fr) 46px; gap: 10px; align-items: center; font-size: 14px; }
+  .bar { position: relative; height: 14px; border-radius: 7px; background: var(--track); }
+  .bar i { position: absolute; inset: 0 auto 0 0; border-radius: 7px; background: var(--c-kb); transition: width .3s; }
+  .bar b { position: absolute; top: -4px; bottom: -4px; width: 2px; background: var(--c-dlq); }
+  .bar-row .v { font-family: var(--font-mono); font-size: 12.5px; text-align: right; }
+  .stages { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 10px; padding: 0; list-style: none; font-size: 13px; }
+  .stages li { padding: 2px 10px; border-radius: 999px; border: 1px solid var(--line); color: var(--muted); background: #fff; }
+  .stages li.hit { border-color: var(--accent); color: var(--accent-ink); background: var(--accent); }
+  .stages li.skip { text-decoration: line-through; }
+  .rlist { display: grid; gap: 6px; margin: 0; padding: 0; list-style: none; counter-reset: r; }
+  .rlist li { counter-increment: r; display: grid; grid-template-columns: 28px minmax(0, 1fr) auto; gap: 10px; align-items: center; padding: 6px 10px; background: #fff; border: 1px solid var(--line); border-radius: 8px; font-size: 14px; }
+  .rlist li::before { content: counter(r); font-family: var(--font-mono); font-size: 12px; color: var(--muted); }
+  .rlist li.rel { border-color: var(--c-ok); background: #f0f8f3; }
+  .rlist button { font: 600 12px var(--font-body); padding: 3px 10px; border-radius: 999px; border: 1px solid var(--line-strong); background: #fff; color: var(--ink); cursor: pointer; white-space: nowrap; }
+  .rlist li.rel button { background: var(--c-ok); border-color: var(--c-ok); color: #fff; }
+  .metrics { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 8px; margin: 12px 0 0; }
+  .metric { padding: 8px 10px; background: #fff; border: 1px solid var(--line); border-radius: 10px; }
+  .metric .n { display: block; font-family: var(--font-display); font-size: 24px; font-weight: 700; font-variant-numeric: tabular-nums; }
+  .metric .l { font-family: var(--font-mono); font-size: 11px; letter-spacing: .04em; text-transform: uppercase; color: var(--muted); }
+  .metric small { display: block; font-size: 12px; color: var(--muted); line-height: 1.35; margin-top: 2px; }
+  td.pass { color: var(--c-ok); font-weight: 600; } td.fail { color: var(--c-dlq); font-weight: 600; }
+  .say { border-left: 3px solid var(--c-serve); background: var(--paper); padding: 12px 16px; border-radius: 0 10px 10px 0; margin: 0 0 16px; font-size: 15.5px; }
+  .say p:last-child { margin: 0; }
+</style>
+
+<style>
+  .lab-chart { display: block; width: 100%; height: auto; margin: 4px 0 0; }
+  .lab-chart text { font-family: var(--font-body); font-size: 12px; fill: var(--muted); }
+  .grid-cells { display: grid; gap: 4px; }
+  .srv { display: grid; grid-template-columns: 92px minmax(0,1fr) 70px; gap: 10px; align-items: center; font-size: 14px; }
+  .muted { color: var(--muted); }
+  .lab select { font: 14px var(--font-body); padding: 6px 8px; border-radius: 8px; border: 1px solid var(--line-strong); background: #fff; color: var(--ink); }
+  .lab input[type=number] { width: 9ch; font: 14px var(--font-mono); padding: 6px 8px; border-radius: 8px; border: 1px solid var(--line-strong); background: #fff; color: var(--ink); }
+</style>
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs><marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" class="ah" style="fill:#7d8996"/></marker></defs></svg>
+<header class="sitebar"><div class="wrap"><a class="brand" href="index.html">Classic System Design</a><nav aria-label="Site"><a href="index.html">Home</a><a href="index.html#blocks" aria-current="page">Building blocks</a><a href="index.html#designs">Designs</a><a href="https://devlcodes.github.io/agentic-ai-notebook/system-design/index.html">Agentic designs ↗</a></nav></div></header>
+<main>
+<div class="wrap"><div class="intro"><p class="eyebrow">Building block · distributed internals</p><h1>Cassandra vs CockroachDB</h1><p class="lead">Two distributed databases that both scale by adding nodes and survive node loss, built on opposite bets. Cassandra is leaderless and favours always-on writes; CockroachDB runs Raft per range and gives you serializable SQL. Knowing why they differ teaches most of distributed storage.</p></div></div>
+<div class="wrap doc">
+  <nav class="toc" aria-label="On this page"><p>On this page</p><ol><li><a href="#glance">At a glance</a></li><li><a href="#cassandra">How Cassandra works</a></li><li><a href="#cockroach">How CockroachDB works</a></li><li><a href="#writes">Inside a write</a></li><li><a href="#lab">Try it: same failure, two databases</a></li><li><a href="#choose">Choosing</a></li><li><a href="#failure">Failure modes</a></li><li><a href="#interview">Saying it in an interview</a></li><li><a href="#real-world">In the real world</a></li><li><a href="#related">Related</a></li></ol></nav>
+  <article>
+<section id="glance"><h2>At a glance</h2>
+<div class="table"><table><thead><tr><th></th><th>Cassandra</th><th>CockroachDB</th></tr></thead><tbody>
+<tr><td>Model</td><td>Wide-column: tables keyed by partition key, rows sorted by clustering columns inside a partition</td><td>Relational SQL (Postgres wire protocol), secondary indexes, joins</td></tr>
+<tr><td>Replication</td><td>Leaderless; any replica takes writes</td><td>One Raft group per range; a leaseholder serves reads and coordinates writes</td></tr>
+<tr><td>Consistency</td><td>Tunable per query (ONE, QUORUM, ALL…); eventual by default</td><td>Serializable transactions by default</td></tr>
+<tr><td>CAP leaning</td><td>AP: stays writable with replicas down or partitioned, at weaker consistency</td><td>CP: a range without a majority stops serving rather than diverge</td></tr>
+<tr><td>Conflicts</td><td>Last write wins, per cell, by timestamp</td><td>Prevented: transactions conflict and one retries</td></tr>
+<tr><td>Partitioning</td><td>Hash of the partition key on a token ring (consistent hashing)</td><td>Ordered key ranges (512 MB by default) that split and move automatically</td></tr>
+<tr><td>Sweet spot</td><td>Huge write volumes, time series, known access patterns</td><td>Transactional data that has outgrown one Postgres, multi-region correctness</td></tr>
+</tbody></table></div></section>
+
+<section id="cassandra"><h2>How Cassandra works</h2>
+<figure class="fig"><svg viewBox="0 0 722 314" class="dg" role="img" aria-label="Cassandra and CockroachDB side by side: a Cassandra ring where a coordinator sends a write to three replicas of a partition, and a CockroachDB cluster where each range has three replicas in a Raft group with one leaseholder">
+<text x="20" y="22" class="cap">CASSANDRA · LEADERLESS RING</text><text x="392" y="22" class="cap">COCKROACHDB · RAFT PER RANGE</text>
+<line x1="372" y1="34" x2="372" y2="306" class="rule"/>
+<circle cx="180" cy="160" r="96" class="ghost"/>
+<g>
+<circle cx="180" cy="64" r="20" class="k-ingest"/><text x="180" y="68" class="sm b" text-anchor="middle">A</text>
+<circle cx="263" cy="112" r="20" class="k-ingest"/><text x="263" y="116" class="sm b" text-anchor="middle">B</text>
+<circle cx="263" cy="208" r="20" class="k-ingest"/><text x="263" y="212" class="sm b" text-anchor="middle">C</text>
+<circle cx="180" cy="256" r="20" class="box"/><text x="180" y="260" class="sm b" text-anchor="middle">D</text>
+<circle cx="97" cy="208" r="20" class="box"/><text x="97" y="212" class="sm b" text-anchor="middle">E</text>
+<circle cx="97" cy="112" r="20" class="k-serve"/><text x="97" y="116" class="sm b" text-anchor="middle">F</text>
+</g>
+<path d="M114 104 L160 70 M117 116 L242 112 M112 126 L246 196" class="wire hot"/>
+<text x="20" y="66" class="sm">coordinator F</text><text x="20" y="80" class="sm">(any node)</text>
+<text x="20" y="294" class="sm"><tspan class="b">hash(user_42)</tspan> → A, B, C hold it (RF 3).</text><text x="20" y="310" class="sm">Write at QUORUM: done when 2 of them ack.</text>
+<g>
+<rect x="392" y="44" width="100" height="74" rx="8" class="box"/><text x="442" y="62" class="sm b" text-anchor="middle">Node 1</text>
+<rect x="502" y="44" width="100" height="74" rx="8" class="box"/><text x="552" y="62" class="sm b" text-anchor="middle">Node 2</text>
+<rect x="612" y="44" width="100" height="74" rx="8" class="box"/><text x="662" y="62" class="sm b" text-anchor="middle">Node 3</text>
+<rect x="402" y="70" width="38" height="18" rx="4" class="k-gov"/><text x="421" y="83" class="sm" text-anchor="middle">R1★</text>
+<rect x="444" y="70" width="38" height="18" rx="4" class="k-serve"/><text x="463" y="83" class="sm" text-anchor="middle">R2</text>
+<rect x="402" y="92" width="38" height="18" rx="4" class="k-cross"/><text x="421" y="105" class="sm" text-anchor="middle">R3</text>
+<rect x="512" y="70" width="38" height="18" rx="4" class="k-gov"/><text x="531" y="83" class="sm" text-anchor="middle">R1</text>
+<rect x="554" y="70" width="38" height="18" rx="4" class="k-serve"/><text x="573" y="83" class="sm" text-anchor="middle">R2★</text>
+<rect x="512" y="92" width="38" height="18" rx="4" class="k-cross"/><text x="531" y="105" class="sm" text-anchor="middle">R3</text>
+<rect x="622" y="70" width="38" height="18" rx="4" class="k-gov"/><text x="641" y="83" class="sm" text-anchor="middle">R1</text>
+<rect x="664" y="70" width="38" height="18" rx="4" class="k-serve"/><text x="683" y="83" class="sm" text-anchor="middle">R2</text>
+<rect x="622" y="92" width="38" height="18" rx="4" class="k-cross"/><text x="641" y="105" class="sm" text-anchor="middle">R3★</text>
+</g>
+<text x="392" y="144" class="small b">Ranges R1, R2, R3: sorted key spans</text>
+<text x="392" y="164" class="sm">R1 = /users/1 … /users/40000</text>
+<text x="392" y="182" class="sm">Each range has 3 replicas forming a Raft group.</text>
+<text x="392" y="200" class="sm">★ leaseholder (usually the Raft leader):</text>
+<text x="392" y="216" class="sm">serves reads and proposes writes for that range.</text>
+<text x="392" y="240" class="sm">Leaseholders are spread so every node works.</text>
+<text x="392" y="264" class="sm">A range that grows past 512 MB splits in two;</text>
+<text x="392" y="280" class="sm">ranges move between nodes to balance load.</text>
+</svg><figcaption>Cassandra places data by hashing; any replica can take a write. CockroachDB keeps data in sorted ranges, each with its own Raft group and one leaseholder.</figcaption></figure>
+<ul class="plain">
+<li><strong>Ring and tokens.</strong> The partition key is hashed (Murmur3) to a token. Each node owns several token ranges (virtual nodes), and the next RF nodes clockwise hold the replicas; see <a href="sharding.html">consistent hashing</a>. Nodes learn about each other by gossip; there is no master.</li>
+<li><strong>Coordinator.</strong> The client talks to any node, which forwards the request to the replicas and waits for as many as the <strong>consistency level</strong> asks: ONE, QUORUM (2 of 3), ALL, or LOCAL_QUORUM to stay inside one datacenter.</li>
+<li><strong>Tunable consistency.</strong> If reads plus writes overlap (R + W &gt; RF, such as QUORUM and QUORUM) a read sees the latest acknowledged write. ONE/ONE is faster and more available but can return stale data. See <a href="consistency.html#quorum">quorums</a>.</li>
+<li><strong>Convergence.</strong> Replicas that missed writes catch up through hinted handoff, read repair and <a href="merkle-trees.html">Merkle-tree repair</a>. Concurrent writes to the same cell resolve by <strong>last write wins</strong> on timestamp.</li>
+<li><strong>Query-first modelling.</strong> No joins and limited secondary indexes, so you design one table per query, partitioned by what you look up and clustered by how you sort. Data is duplicated across tables on purpose. Keep partitions bounded (a common guideline is under about 100 MB).</li>
+<li><strong>Lightweight transactions</strong> (<code>IF NOT EXISTS</code>) use Paxos for compare-and-set on one partition, at about four round trips. Use them sparingly.</li>
+</ul></section>
+
+<section id="cockroach"><h2>How CockroachDB works</h2>
+<ul class="plain">
+<li><strong>One sorted key space.</strong> Every table and index row becomes a key like <code>/table/index/primary-key</code>. The key space is cut into ranges, 512 MB by default (64 MB in older versions). Ranges split when they grow or get hot and are rebalanced across nodes.</li>
+<li><strong>Raft per range.</strong> Each range's replicas (3 by default, 5 for important data) form a <a href="raft.html">Raft</a> group. A write commits once a majority has it in their log. A cluster has thousands of small Raft groups, so leadership and load spread across all nodes.</li>
+<li><strong>Leaseholder.</strong> One replica holds a lease and serves reads without a round of consensus, since it knows every committed write. It is usually also the Raft leader.</li>
+<li><strong>Transactions.</strong> Writes are laid down as <strong>intents</strong> (provisional values) plus a transaction record; commit flips the record and intents resolve afterwards. Keys are versioned (<strong>MVCC</strong>) with hybrid logical clock timestamps, so reads see a consistent snapshot. Conflicting transactions wait or restart; clients should retry on serialization errors.</li>
+<li><strong>Clocks.</strong> Nodes need loosely synchronized clocks (a 500 ms maximum offset by default). A read that sees a value with a timestamp inside its uncertainty window may restart. A node whose clock drifts too far shuts itself down rather than risk wrong answers.</li>
+<li><strong>Multi-region.</strong> Tables can be pinned to a home region, so reads and writes in that region are fast, or replicated globally for fast reads everywhere at the cost of slower writes.</li>
+</ul></section>
+
+<section id="writes"><h2>Inside a write</h2>
+<p>Both store data on disk in an <strong>LSM tree</strong>: Cassandra in its own SSTable engine, CockroachDB in Pebble (a RocksDB-style engine). The difference is what happens before the disk.</p>
+<div class="table"><table><thead><tr><th>Step</th><th>Cassandra (QUORUM, RF 3)</th><th>CockroachDB (RF 3)</th></tr></thead><tbody>
+<tr><td>1</td><td>Client sends to any node; it becomes coordinator</td><td>Gateway node finds the range's leaseholder</td></tr>
+<tr><td>2</td><td>Coordinator sends the write to all 3 replicas in parallel</td><td>Leaseholder checks for conflicts, writes an intent, proposes it to Raft</td></tr>
+<tr><td>3</td><td>Each replica appends to its commit log and memtable</td><td>Followers append to their Raft log</td></tr>
+<tr><td>4</td><td>Success after 2 acks; the third catches up later</td><td>Committed after a majority (2 of 3); applied to the state machine</td></tr>
+<tr><td>5</td><td>Memtables flush to immutable SSTables; compaction merges them</td><td>Commit flips the transaction record; intents become values</td></tr>
+<tr><td>Cost</td><td>One round trip to the replicas, no reads before writes</td><td>A consensus round trip per range written, plus transaction bookkeeping</td></tr>
+</tbody></table></div>
+<p>Cassandra writes are blind (no read first) and sequential on disk, which is why a node can take tens of thousands of writes a second. Reads pay instead: they may merge a memtable and several SSTables (bloom filters skip most), so the compaction strategy matters, such as size-tiered for writes, leveled for reads, time-window for time series.</p></section>
+
+<section id="lab"><h2>Try it: same failure, two databases</h2>
+<p>Both databases hold three replicas of a key. Pick how Cassandra reads and writes, take replicas down, and compare what each database does.</p>
+<div class="lab" id="cclab">
+  <div class="lab-row"><span class="lab-k">Deployment</span><span class="seg" role="group" aria-label="Deployment" id="cc-dep"><button type="button" data-v="1" aria-pressed="true">One region</button><button type="button" data-v="3" aria-pressed="false">Three regions</button></span></div>
+  <div class="lab-row"><span class="lab-k">Cassandra write</span><span class="seg" role="group" aria-label="Cassandra write consistency" id="cc-w"><button type="button" data-v="1" aria-pressed="true">ONE</button><button type="button" data-v="2" aria-pressed="false">QUORUM</button><button type="button" data-v="3" aria-pressed="false">ALL</button></span></div>
+  <div class="lab-row"><span class="lab-k">Cassandra read</span><span class="seg" role="group" aria-label="Cassandra read consistency" id="cc-r"><button type="button" data-v="1" aria-pressed="true">ONE</button><button type="button" data-v="2" aria-pressed="false">QUORUM</button><button type="button" data-v="3" aria-pressed="false">ALL</button></span></div>
+  <div class="lab-row"><label for="cc-down">Replicas down <input type="range" id="cc-down" min="0" max="2" step="1" value="0"><output id="cc-down-o"></output></label></div>
+  <div class="metrics" id="cc-m"></div>
+  <p class="lab-out" id="cc-out" aria-live="polite"></p>
+</div>
+<p class="muted" style="font-size:13.5px">Rough model: in one region a replica round trip is about 1 ms; across three regions each replica sits in a different region about 70 ms away. CockroachDB's leaseholder is in the client's region and the replicas that go down are remote ones; losing the leaseholder itself adds a few seconds while the lease moves.</p></section>
+
+<section id="choose"><h2>Choosing</h2>
+<div class="table"><table><thead><tr><th>Pick Cassandra when</th><th>Pick CockroachDB when</th></tr></thead><tbody>
+<tr><td>Writes dominate and must never be refused: events, metrics, messages, IoT</td><td>You need transactions across rows and tables: orders, payments, inventory, accounts</td></tr>
+<tr><td>Access patterns are known and simple (by key, by key and time range)</td><td>Queries change over time and need joins and secondary indexes</td></tr>
+<tr><td>Stale reads for a moment are acceptable, or you can pay QUORUM where they aren't</td><td>Reads must always reflect committed writes</td></tr>
+<tr><td>You want the lowest write latency, including across regions with LOCAL_QUORUM</td><td>You can afford consensus latency per write in exchange for correctness</td></tr>
+</tbody></table></div>
+<p>Other options sit near each: ScyllaDB and DynamoDB are Cassandra-like; Spanner, YugabyteDB and TiDB are CockroachDB-like. And if one Postgres with replicas fits your data for the next few years, that is still the simplest answer; see <a href="databases.html">Databases</a>.</p></section>
+
+<section id="failure"><h2>Failure modes</h2>
+<h3>Cassandra: lost updates and zombie data</h3>
+<p>Last write wins means two concurrent updates silently drop one, and clock skew between clients can make an older write win. Deletes leave tombstones; too many slow reads, and a replica that misses repair for longer than the grace period can bring deleted data back.</p>
+<h3>Cassandra: hot and huge partitions</h3>
+<p>A partition key with low cardinality (a country, today's date) puts a huge share of traffic and data on three nodes. Add a bucket to the key, such as <code>(sensor_id, day)</code>.</p>
+<h3>CockroachDB: contention and retries</h3>
+<p>Many transactions writing the same rows (a global counter, one popular product's stock) queue and restart. Spread hot keys, keep transactions short, and always retry serialization errors in the client.</p>
+<h3>CockroachDB: sequential keys</h3>
+<p>Auto-incrementing primary keys send all inserts to the last range, so one node takes every write. Use UUIDs or hash-sharded indexes.</p>
+<h3>Both: running out of headroom</h3>
+<p>Compaction (Cassandra) and rebalancing (both) need spare disk and I/O. Keep disks well under full, often at most about 50–70% for Cassandra with size-tiered compaction.</p></section>
+
+<section id="interview"><h2>Saying it in an interview</h2>
+<div class="say"><p>"For the message history I'd use Cassandra: writes dominate, the access pattern is fixed (messages by conversation, newest first), so the partition key is conversation id plus a time bucket and the clustering key is the message time. I'd write and read at LOCAL_QUORUM, so each region is consistent and fast and stays up when a node dies. For balances and orders I'd use CockroachDB or Spanner: those need multi-row transactions and must never show a stale balance, and I accept a consensus round trip per write. The two are connected by events through a queue, not by joins."</p></div></section>
+
+<section id="real-world"><h2>In the real world</h2>
+<div class="table"><table><thead><tr><th>Company</th><th>Uses</th></tr></thead><tbody>
+<tr><td>Apple, Netflix, Instagram</td><td>Large Cassandra fleets for user data, viewing history and feeds</td></tr>
+<tr><td>Discord</td><td>Messages on Cassandra, later moved to ScyllaDB for more predictable latency</td></tr>
+<tr><td>DoorDash, Netflix, banks</td><td>CockroachDB for transactional services that outgrew single Postgres instances</td></tr>
+<tr><td>Google</td><td>Spanner, the design CockroachDB follows, behind Ads and many internal systems</td></tr>
+</tbody></table></div>
+<p class="muted" style="font-size:13.5px;color:var(--muted)">Products change quickly; names here are examples, not endorsements. Check current docs before choosing.</p></section>
+
+<section id="related"><h2>Related</h2><ul class="related"><li><a href="databases.html">Databases and replication</a></li><li><a href="consistency.html">Consistency and CAP</a></li><li><a href="raft.html">Consensus with Raft</a></li><li><a href="merkle-trees.html">Merkle trees</a></li><li><a href="sharding.html">Sharding and consistent hashing</a></li></ul></section>
+  </article>
+</div>
+</main>
+
+<footer class="site"><div class="wrap">Part of Classic System Design, a companion to the <a href="https://devlcodes.github.io/agentic-ai-notebook/system-design/index.html">agentic system designs</a>. Figures marked illustrative show the shape of a system, not measured numbers. Check vendor docs before relying on a specific product limit.</div></footer>
+<script>
+(function(){
+  var $ = function(id){ return document.getElementById(id); };
+  var S = { dep: 1, w: 1, r: 1 }, NAMES = { 1: 'ONE', 2: 'QUORUM', 3: 'ALL' };
+  function seg(id, key){ $(id).addEventListener('click', function(e){ var b = e.target.closest('button'); if (!b) return; S[key] = +b.dataset.v; this.querySelectorAll('button').forEach(function(x){ x.setAttribute('aria-pressed', x === b); }); run(); }); }
+  function lat(n, multi){ if (!multi) return 2; return n <= 1 ? 2 : 72; }
+  function card(title, ok, ms, note){ return '<div class="metric"><span class="n"' + (ok ? '' : ' style="color:var(--c-dlq)"') + '>' + (ok ? '~' + ms + ' ms' : 'fails') + '</span><span class="l">' + title + '</span><small>' + note + '</small></div>'; }
+  function run(){
+    var down = +$('cc-down').value, up = 3 - down, multi = S.dep === 3;
+    $('cc-down-o').textContent = down + ' of 3';
+    var cw = up >= S.w, cr = up >= S.r, fresh = S.r + S.w > 3;
+    var kw = up >= 2, kr = up >= 2;
+    $('cc-m').innerHTML =
+      card('Cassandra write', cw, lat(S.w, multi), 'needs ' + S.w + ' of 3 acks') +
+      card('Cassandra read', cr, lat(S.r, multi), cr ? (fresh ? 'sees the latest write' : 'may return stale data') : 'needs ' + S.r + ' replicas up') +
+      card('CockroachDB write', kw, multi ? 72 : 4, 'Raft majority: 2 of 3') +
+      card('CockroachDB read', kr, 2, kr ? 'leaseholder, always fresh' : 'range has no majority');
+    var m = [];
+    if (cw && cr) m.push('Cassandra at ' + NAMES[S.w] + '/' + NAMES[S.r] + ' keeps serving' + (fresh ? ' and reads overlap writes (R + W > 3), so reads are current.' : ', but R + W ≤ 3 means a read can miss the latest write until repair catches the replicas up.'));
+    else m.push('Cassandra at ' + NAMES[S.w] + '/' + NAMES[S.r] + ' refuses ' + (!cw && !cr ? 'reads and writes' : !cw ? 'writes' : 'reads') + ' with ' + up + ' replica' + (up > 1 ? 's' : '') + ' up; lowering the consistency level would keep it available at the cost of freshness.');
+    if (kw) m.push(multi ? 'CockroachDB stays correct and up, but every write waits for a replica in another region (about 70 ms).' : 'CockroachDB serves everything, consistently, at a few ms per write.');
+    else m.push('CockroachDB stops serving this range: with only one replica it cannot form a majority, so it refuses rather than risk diverging. That is the CP choice.');
+    if (multi && cw && S.w === 1) m.push('Cassandra at ONE answers in about 2 ms from the local replica, which is why it wins on cross-region write latency; LOCAL_QUORUM with several replicas per region gets a similar result with better guarantees.');
+    $('cc-out').textContent = m.join(' ');
+  }
+  seg('cc-dep', 'dep'); seg('cc-w', 'w'); seg('cc-r', 'r');
+  $('cc-down').addEventListener('input', run);
+  run();
+})();
+
+</script>
+</body>
+</html>

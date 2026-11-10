@@ -244,10 +244,21 @@
 <tr><td>Wide-column</td><td>Rows keyed by partition, sorted by a clustering key</td><td>Huge write volumes, time-ordered data per key (messages, events)</td><td>Cassandra, ScyllaDB, Bigtable, HBase</td></tr>
 <tr><td>Search</td><td>Inverted index over text</td><td>Full-text search, filters, facets, relevance ranking</td><td>Elasticsearch, OpenSearch</td></tr>
 <tr><td>Time series</td><td>Timestamped points</td><td>Metrics, downsampling, range queries over time</td><td>Prometheus, InfluxDB, TimescaleDB</td></tr>
+<tr><td>Columnar (analytics)</td><td>Each column stored together, compressed</td><td>Scans and aggregates over a few columns of billions of rows (sum of amounts per month)</td><td>BigQuery, Redshift, ClickHouse, Snowflake</td></tr>
 <tr><td>Graph</td><td>Nodes and edges</td><td>Many-hop relationship queries</td><td>Neo4j, Amazon Neptune</td></tr>
 <tr><td>Object storage</td><td>Files (blobs) by key</td><td>Images, video, backups, data lake files; cheap and nearly unlimited</td><td>Amazon S3, Google Cloud Storage, Azure Blob</td></tr>
 </tbody></table></div>
-<p>Real systems combine them: Postgres as the source of truth, Redis as a cache, S3 for media, and Elasticsearch fed from Postgres for search. Each extra store is another thing to keep in sync, so add them only when an access pattern demands it.</p></section>
+<p>Real systems combine them: Postgres as the source of truth, Redis as a cache, S3 for media, and Elasticsearch fed from Postgres for search. Each extra store is another thing to keep in sync, so add them only when an access pattern demands it.</p>
+<h3>Row store or column store</h3>
+<p>A row store keeps each row's fields together on disk, so fetching one order with all its fields is one read. A column store keeps each column together, so <code>SELECT sum(amount) FROM payments WHERE month = '2026-10'</code> reads only two columns, compresses them 5 to 10 times because neighbouring values are similar, and skips the rest. Use row stores for the app (OLTP) and column stores for reporting (OLAP), fed by a pipeline from the first to the second. Wide-column stores like Cassandra are a different thing: they are row stores grouped by partition key, built for writes, not analytics.</p>
+<h3>SQL or NoSQL</h3>
+<div class="table"><table><thead><tr><th>Lean SQL when</th><th>Lean NoSQL when</th></tr></thead><tbody>
+<tr><td>Data is relational and you need joins</td><td>Every query is a lookup by a known key or key range</td></tr>
+<tr><td>Several writes must commit together (transactions)</td><td>Writes are huge (clickstream, logs, messages) and mostly appends</td></tr>
+<tr><td>Ad hoc queries and reports matter</td><td>The schema changes often or varies per record</td></tr>
+<tr><td>Data fits a few large machines (up to a few TB per primary is routine)</td><td>Data is many TB to PB and must spread over many nodes</td></tr>
+</tbody></table></div>
+<p>Good NoSQL fits: shopping carts, session data, leaderboards, metadata and lookup tables, and very hot tables. The cost is <strong>impedance mismatch</strong> in the other direction: what SQL does in one join, a key-value store makes you do with denormalized copies kept in sync by your code.</p></section>
 
 <section id="indexes"><h2>Indexes</h2>
 <p>Without an index, finding rows means reading the whole table. An index is a separate sorted structure that points to rows, so the database can jump straight to the ones it needs.</p>
@@ -300,8 +311,16 @@
 </tbody></table></div>
 <h3>Replication lag</h3>
 <p>Followers are usually milliseconds behind, but under load it can be seconds. A user who updates their profile and immediately reloads might read an old copy from a follower. Fixes, in order of simplicity: read your own recent writes from the leader for a few seconds; route all of one user's reads to the same follower; or wait until the follower has caught up to the write's position in the log.</p>
+<h3>How changes reach the followers</h3>
+<div class="table"><table><thead><tr><th>Method</th><th>What is shipped</th><th>Watch out for</th><th>Used by</th></tr></thead><tbody>
+<tr><td>Statement-based</td><td>The SQL statements themselves</td><td><code>NOW()</code>, <code>RAND()</code> or triggers give different results on each replica</td><td>Old MySQL default; rarely used now</td></tr>
+<tr><td>Write-ahead log (WAL) shipping</td><td>The low-level log of bytes changed on disk</td><td>Tied to the storage format, so leader and followers must run the same version</td><td>PostgreSQL streaming replication, Oracle</td></tr>
+<tr><td>Logical (row-based)</td><td>Each row inserted, updated or deleted</td><td>Bigger logs for bulk updates</td><td>MySQL row-based binlog, Postgres logical replication; also feeds change data capture (Debezium)</td></tr>
+</tbody></table></div>
 <h3>Other topologies</h3>
-<p><strong>Multi-leader</strong> lets each region accept writes, but two regions can change the same row at once and you must resolve the conflict. <strong>Leaderless</strong> stores such as Cassandra and DynamoDB write to several replicas and read from several, using quorums; see <a href="consistency.html#quorum">Consistency</a>.</p></section>
+<p><strong>Multi-leader</strong> lets each region accept writes, but two regions can change the same row at once and you must resolve the conflict. The options: avoid it by sending all writes for one record to one "home" leader; <strong>last write wins</strong> by timestamp, which silently drops one of the writes and depends on clocks; or merge, with application logic or CRDTs (counters and sets that merge without conflicts). <strong>Leaderless</strong> stores such as Cassandra and DynamoDB write to several replicas and read from several, using quorums; see <a href="consistency.html#quorum">Consistency</a>.</p>
+<h3>Federation and denormalization</h3>
+<p><strong>Federation</strong> (functional partitioning) splits one database by feature: users, products and orders each get their own. Each is smaller, so more of it fits in memory and each primary takes a fraction of the writes; the price is that joins across them move into the application. <strong>Denormalization</strong> stores redundant copies (the author's name on every post) to skip expensive joins on reads, at the cost of extra writes and keeping copies in step. Materialized views do this inside the database. Both usually come before <a href="sharding.html">sharding</a>, which splits one table across machines.</p></section>
 
 <section id="interview"><h2>Saying it in an interview</h2>
 <div class="say"><p>"Users, orders and payments are relational and need transactions, so they live in Postgres. I'd index the queries we actually run, like <code>(user_id, created_at)</code> for 'my recent orders'. The leader replicates semi-synchronously to a follower in another zone for failover, and async read replicas handle reads, except a user's own reads right after a write, which go to the leader. Images go to S3. If writes outgrow one leader, I'd shard by user ID."</p></div></section>

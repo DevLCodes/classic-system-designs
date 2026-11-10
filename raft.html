@@ -1,0 +1,420 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Consensus with Raft · Classic System Design</title>
+<meta name="description" content="Raft consensus for system design: leaders, terms, elections, log replication and commit, cluster sizes and costs, and split-brain safety, with a lab to break a five-node cluster.">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700&family=Instrument+Sans:ital,wght@0,400;0,500;0,600;1,400&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+  /* Layout: a slim site bar, then either a card grid (home), a sticky contents rail + reading column (articles), or a filterable term list (glossary). Light, single look. */
+  :root {
+    color-scheme: light;
+    --bg: #e9ecef; --paper: #f7f8f9; --ink: #1c2530; --muted: #586473; --line: #cdd4dc; --line-strong: #9aa5b1;
+    --accent: #4255d4; --accent-ink: #ffffff; --track: #d3d9e0; --code-bg: #eef1f4; --wire: #7d8996;
+    --c-ingest: #2a9d8f; --c-kb: #4d5fd8; --c-serve: #d7932a; --c-model: #e2674f; --c-gov: #b2456e; --c-cross: #4a5562; --c-dlq: #b23a3a; --c-ok: #2f8f5b;
+    --t-src: #e4e8ec; --t-ingest: #d8eeea; --t-kb: #dfe3fa; --t-serve: #f8ead2; --t-model: #fbe1da; --t-gov: #f3dde6; --t-cross: #dfe2e6; --t-dlq: #f6dddb;
+    --font-display: "Bricolage Grotesque", "Avenir Next", "Segoe UI", system-ui, sans-serif;
+    --font-body: "Instrument Sans", "Helvetica Neue", "Segoe UI", system-ui, sans-serif;
+    --font-mono: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  @media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
+  body { margin: 0; background: var(--bg); color: var(--ink); font-family: var(--font-body); font-size: 16px; line-height: 1.6; }
+  a { color: var(--accent); }
+  .wrap { max-width: 1240px; margin: 0 auto; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
+
+  .sitebar { border-bottom: 1px solid var(--line); background: var(--paper); }
+  .sitebar .wrap { display: flex; align-items: center; gap: 18px; flex-wrap: wrap; padding-block: 12px; }
+  .brand { font-family: var(--font-display); font-weight: 700; font-size: 17px; color: var(--ink); text-decoration: none; margin-right: auto; }
+  .sitebar nav { display: flex; gap: 16px; flex-wrap: wrap; font-size: 14px; }
+  .sitebar nav a { color: var(--muted); text-decoration: none; }
+  .sitebar nav a:hover, .sitebar nav a[aria-current="page"] { color: var(--ink); }
+  .sitebar nav a[aria-current="page"] { font-weight: 600; }
+
+  .intro { padding-block: 40px 8px; display: grid; gap: 10px; max-width: 820px; }
+  .eyebrow { margin: 0; font-family: var(--font-mono); font-size: 12px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+  h1 { margin: 0; font-family: var(--font-display); font-weight: 700; font-size: clamp(30px, 5vw, 46px); line-height: 1.05; text-wrap: balance; }
+  .intro .lead { font-size: 18px; margin: 0; }
+
+  .doc { display: grid; grid-template-columns: 220px minmax(0, 1fr); gap: 48px; padding-block: 36px 72px; }
+  .toc { position: sticky; top: calc(env(safe-area-inset-top, 0px) + 20px); align-self: start; }
+  .toc p { margin: 0 0 8px; font-family: var(--font-mono); font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+  .toc ol { margin: 0; padding: 0; list-style: none; display: grid; gap: 2px; counter-reset: toc; }
+  .toc li { counter-increment: toc; }
+  .toc a { display: flex; gap: 8px; padding: 3px 0; font-size: 14px; color: var(--muted); text-decoration: none; }
+  .toc a::before { content: counter(toc, decimal-leading-zero); font-family: var(--font-mono); font-size: 11.5px; padding-top: 2px; color: var(--line-strong); }
+  .toc a:hover { color: var(--ink); }
+  article { min-width: 0; max-width: 760px; }
+  section { padding-bottom: 36px; margin-bottom: 36px; border-bottom: 1px solid var(--line); scroll-margin-top: 20px; }
+  section:last-child { border-bottom: 0; }
+  h2 { margin: 0 0 10px; font-family: var(--font-display); font-weight: 700; font-size: 28px; line-height: 1.15; text-wrap: balance; }
+  h3 { margin: 26px 0 6px; font-family: var(--font-display); font-weight: 600; font-size: 19px; line-height: 1.25; }
+  p { margin: 0 0 14px; }
+  .lead { font-size: 18px; }
+  ul.plain, ol.plain { margin: 0 0 16px; padding-left: 22px; display: grid; gap: 6px; }
+  code { font-family: var(--font-mono); font-size: 0.88em; background: var(--code-bg); padding: 1px 5px; border-radius: 4px; }
+  pre { margin: 0 0 16px; padding: 14px 16px; background: var(--code-bg); border-radius: 10px; overflow-x: auto; font-size: 13px; line-height: 1.55; }
+  pre code { background: none; padding: 0; font-size: inherit; }
+  .table { overflow-x: auto; margin: 0 0 18px; }
+  table { width: 100%; border-collapse: collapse; font-size: 14.5px; line-height: 1.45; }
+  th, td { text-align: left; vertical-align: top; padding: 8px 10px; border-bottom: 1px solid var(--line); }
+  th { font-family: var(--font-mono); font-size: 11.5px; font-weight: 500; letter-spacing: .05em; text-transform: uppercase; color: var(--muted); }
+  td.num { font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .note { border-left: 3px solid var(--accent); background: var(--paper); padding: 12px 16px; border-radius: 0 10px 10px 0; margin: 0 0 18px; }
+  .note p:last-child { margin: 0; }
+  .formula { font-family: var(--font-mono); font-size: 14px; background: var(--paper); border: 1px solid var(--line); border-radius: 10px; padding: 12px 16px; margin: 0 0 16px; overflow-x: auto; white-space: nowrap; }
+  .related { display: flex; flex-wrap: wrap; gap: 8px; margin: 0; padding: 0; list-style: none; }
+  .related a { display: inline-block; padding: 4px 12px; border: 1px solid var(--line); border-radius: 999px; font-size: 14px; color: var(--ink); text-decoration: none; background: var(--paper); }
+  .related a:hover { border-color: var(--ink); }
+  .pager { display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; font-size: 14px; }
+  footer.site { border-top: 1px solid var(--line); padding-block: 20px 40px; font-size: 13px; color: var(--muted); }
+  a:focus-visible, input:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+  /* home */
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 16px; margin: 0 0 40px; padding: 0; list-style: none; }
+  .card { display: grid; gap: 8px; height: 100%; padding: 18px; background: var(--paper); border: 1px solid var(--line); border-radius: 14px; color: var(--ink); text-decoration: none; }
+  .card:hover { border-color: var(--ink); }
+  .card .k { font-family: var(--font-mono); font-size: 11px; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
+  .card h3 { margin: 0; font-size: 20px; }
+  .card p { margin: 0; font-size: 14.5px; color: var(--muted); }
+  .card svg { width: 100%; height: auto; display: block; }
+  .card.feature svg { max-width: 420px; justify-self: center; }
+  .card.feature { grid-column: 1 / -1; grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr); align-items: center; gap: 24px; }
+  .home-h { margin: 28px 0 12px; font-family: var(--font-display); font-size: 24px; }
+
+  /* glossary */
+  .gl-tools { position: sticky; top: 0; z-index: 2; background: var(--bg); padding-block: 12px; display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+  .gl-tools input { flex: 1 1 260px; min-width: 0; font: 15px var(--font-body); padding: 9px 12px; border-radius: 10px; border: 1px solid var(--line-strong); background: #fff; color: var(--ink); }
+  .gl-letters { display: flex; flex-wrap: wrap; gap: 4px; font-family: var(--font-mono); font-size: 13px; }
+  .gl-letters a { padding: 2px 6px; border-radius: 6px; text-decoration: none; color: var(--muted); }
+  .gl-letters a:hover { background: var(--paper); color: var(--ink); }
+  .gl { max-width: 860px; }
+  .gl-item { margin: 0; }
+  .gl-item { display: grid; grid-template-columns: 220px minmax(0, 1fr); gap: 16px; padding: 12px 0; border-bottom: 1px solid var(--line); scroll-margin-top: 70px; }
+  .gl-item dt { font-weight: 600; }
+  .gl-item dt small { display: block; font-weight: 400; font-family: var(--font-mono); font-size: 11px; color: var(--muted); letter-spacing: .04em; text-transform: uppercase; margin-top: 2px; }
+  .gl-item dd { margin: 0; }
+  .gl-item dd .see { font-size: 13.5px; }
+  .gl-letter { margin: 26px 0 4px; font-family: var(--font-display); font-size: 22px; scroll-margin-top: 70px; }
+
+  @media (max-width: 900px) {
+    .doc { grid-template-columns: minmax(0, 1fr); gap: 24px; padding-block: 28px 56px; }
+    .toc { position: static; }
+    .toc ol { grid-template-columns: repeat(2, minmax(0, 1fr)); column-gap: 12px; }
+    .card.feature { grid-template-columns: minmax(0, 1fr); }
+  }
+  @media (max-width: 640px) {
+    .gl-item { grid-template-columns: minmax(0, 1fr); gap: 4px; }
+    h2 { font-size: 24px; }
+    .intro .lead, .lead { font-size: 16.5px; }
+  }
+
+  /* diagrams */
+  .fig { margin: 6px 0 24px; overflow-x: auto; }
+  .fig svg { display: block; width: 100%; height: auto; min-width: 600px; }
+  .fig figcaption { margin-top: 8px; font-size: 13px; line-height: 1.45; color: var(--muted); }
+  .dg text { font-family: var(--font-body); font-size: 13px; fill: var(--ink); }
+  .dg .sm { font-size: 11.5px; fill: var(--muted); }
+  .dg .small { font-size: 12px; }
+  .dg .b { font-weight: 600; }
+  .dg .mono { font-family: var(--font-mono); }
+  .dg .it { font-style: italic; }
+  .dg .mute { fill: var(--muted); }
+  .dg .gov { fill: var(--c-gov); font-weight: 600; }
+  .dg .okt { fill: var(--c-ok); font-weight: 600; }
+  .dg .bad { fill: var(--c-dlq); font-weight: 600; }
+  .dg .cap { font-family: var(--font-mono); font-size: 11px; letter-spacing: .06em; fill: var(--muted); }
+  .dg .big { font-family: var(--font-display); font-size: 30px; font-weight: 700; fill: var(--ink); }
+  .dg .box { fill: var(--paper); stroke: var(--line-strong); stroke-width: 1.25; }
+  .dg .ghost { fill: none; stroke: var(--line-strong); stroke-width: 1.25; stroke-dasharray: 5 5; }
+  .dg .track { fill: var(--track); }
+  .dg .rule { stroke: var(--line); stroke-width: 1; }
+  .dg .axis { stroke: var(--line-strong); stroke-width: 1.25; }
+  .dg .wire { fill: none; stroke: var(--wire); stroke-width: 1.4; }
+  .dg .wire.dash { stroke-dasharray: 4 4; }
+  .dg .wire.hot { stroke: var(--accent); stroke-width: 2; }
+  .dg .wire.red { stroke: var(--c-dlq); }
+  .dg .ah { fill: var(--wire); }
+  .dg .xmark { stroke: var(--c-dlq); stroke-width: 1.8; fill: none; }
+  .dg .tick { stroke: var(--c-ok); stroke-width: 2; fill: none; }
+  .dg .k-src { fill: var(--t-src); stroke: #8795a3; stroke-width: 1.5; }
+  .dg .k-ingest { fill: var(--t-ingest); stroke: var(--c-ingest); stroke-width: 1.5; }
+  .dg .k-kb { fill: var(--t-kb); stroke: var(--c-kb); stroke-width: 1.5; }
+  .dg .k-serve { fill: var(--t-serve); stroke: var(--c-serve); stroke-width: 1.5; }
+  .dg .k-model { fill: var(--t-model); stroke: var(--c-model); stroke-width: 1.5; }
+  .dg .k-gov { fill: var(--t-gov); stroke: var(--c-gov); stroke-width: 1.5; }
+  .dg .k-cross { fill: var(--t-cross); stroke: var(--c-cross); stroke-width: 1.5; }
+  .dg .k-dlq { fill: var(--t-dlq); stroke: var(--c-dlq); stroke-width: 1.5; }
+  .dg .k-user { fill: #ffffff; stroke: var(--line-strong); stroke-width: 1.5; }
+  .dg .f-serve { fill: var(--c-serve); } .dg .f-kb { fill: var(--c-kb); } .dg .f-model { fill: var(--c-model); } .dg .f-gov { fill: var(--c-gov); } .dg .f-ingest { fill: var(--c-ingest); } .dg .f-cross { fill: #b8c0c9; } .dg .f-dlq { fill: var(--c-dlq); } .dg .f-ok { fill: var(--c-ok); }
+  .dg .cell { fill: var(--paper); stroke: var(--line-strong); stroke-width: 1; }
+  .dg .cell.hot { fill: var(--t-ingest); stroke: var(--c-ingest); stroke-width: 1.5; }
+  .dg .cell.old { fill: var(--t-kb); stroke: var(--c-kb); }
+  .dg .cell.new { fill: var(--t-ingest); stroke: var(--c-ingest); stroke-width: 1.5; }
+  .dg .cell.gone { fill: var(--paper); stroke: var(--line); }
+  .dg .dot-hr { fill: var(--c-gov); } .dg .dot-it { fill: var(--c-kb); } .dg .dot-eng { fill: var(--c-ingest); } .dg .dot-q { fill: var(--c-serve); stroke: var(--ink); stroke-width: 1.5; }
+  .dg .halo { fill: none; stroke: var(--c-serve); stroke-width: 1.5; stroke-dasharray: 4 4; }
+  .dg .zone { fill: var(--paper); stroke: var(--line); stroke-width: 1; }
+</style>
+
+<style>
+  .lab { margin: 6px 0 26px; padding: 14px 16px 16px; background: var(--paper); border: 1px solid var(--line); border-radius: 14px; }
+  .lab-row { display: flex; flex-wrap: wrap; gap: 10px 18px; align-items: center; margin: 0 0 12px; }
+  .lab-k { font-family: var(--font-mono); font-size: 11px; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
+  .lab label { display: inline-flex; gap: 8px; align-items: center; font-size: 14px; }
+  .lab input[type=range] { width: 150px; accent-color: var(--accent); }
+  .lab input[type=checkbox] { width: 16px; height: 16px; accent-color: var(--accent); }
+  .lab input[type=text] { flex: 1 1 260px; min-width: 0; font: 15px var(--font-body); padding: 8px 11px; border-radius: 9px; border: 1px solid var(--line-strong); background: #fff; color: var(--ink); }
+  .lab output { font-family: var(--font-mono); font-size: 12.5px; min-width: 6ch; font-variant-numeric: tabular-nums; }
+  .seg { display: inline-flex; flex-wrap: wrap; gap: 6px; }
+  .seg button, .chips button { font: 600 13px var(--font-body); color: var(--ink); background: #fff; border: 1px solid var(--line); border-radius: 8px; padding: 6px 12px; cursor: pointer; }
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; }
+  .chips button { font-weight: 500; border-radius: 999px; padding: 4px 11px; font-size: 13px; }
+  .seg button:hover, .chips button:hover { border-color: var(--ink); }
+  .seg button[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+  .seg button:focus-visible, .chips button:focus-visible, .lab input:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .lab-out { margin: 12px 0 0; padding: 10px 12px; background: #fff; border: 1px solid var(--line); border-radius: 10px; font-size: 14.5px; line-height: 1.5; font-variant-numeric: tabular-nums; }
+  .chunks { display: grid; gap: 8px; max-height: 470px; overflow: auto; padding-right: 4px; }
+  .chunk { min-width: 0; padding: 8px 11px; background: #fff; border: 1px solid var(--line); border-left: 4px solid var(--c-kb); border-radius: 8px; font-size: 14px; line-height: 1.5; overflow-wrap: anywhere; }
+  .chunk:nth-child(even) { border-left-color: var(--c-ingest); }
+  .chunk.ans { box-shadow: 0 0 0 2px var(--c-serve); }
+  .chunk .ch { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-bottom: 4px; font-family: var(--font-mono); font-size: 11px; color: var(--muted); }
+  .chunk .pfx { display: block; font-family: var(--font-mono); font-size: 11.5px; color: var(--c-kb); }
+  .chunk .ov { background: var(--track); border-radius: 3px; }
+  .chunk mark { background: #ffe9b3; border-radius: 3px; padding: 0 2px; }
+  .chunk table { width: auto; font-size: 13px; margin: 4px 0; }
+  .chunk td { padding: 2px 10px 2px 0; border-bottom: 1px solid var(--line); }
+  .badge { display: inline-block; padding: 0 7px; border-radius: 999px; border: 1px solid; font-family: var(--font-mono); font-size: 10.5px; line-height: 1.6; }
+  .badge.bad { color: var(--c-dlq); border-color: var(--c-dlq); background: var(--t-dlq); }
+  .badge.ok { color: var(--c-ok); border-color: var(--c-ok); background: #e3f3ea; }
+  .badge.info { color: var(--c-kb); border-color: var(--c-kb); background: var(--t-kb); }
+  .bars { display: grid; gap: 8px; margin: 4px 0 0; }
+  .bar-row { display: grid; grid-template-columns: minmax(0, 150px) minmax(0, 1fr) 46px; gap: 10px; align-items: center; font-size: 14px; }
+  .bar { position: relative; height: 14px; border-radius: 7px; background: var(--track); }
+  .bar i { position: absolute; inset: 0 auto 0 0; border-radius: 7px; background: var(--c-kb); transition: width .3s; }
+  .bar b { position: absolute; top: -4px; bottom: -4px; width: 2px; background: var(--c-dlq); }
+  .bar-row .v { font-family: var(--font-mono); font-size: 12.5px; text-align: right; }
+  .stages { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 10px; padding: 0; list-style: none; font-size: 13px; }
+  .stages li { padding: 2px 10px; border-radius: 999px; border: 1px solid var(--line); color: var(--muted); background: #fff; }
+  .stages li.hit { border-color: var(--accent); color: var(--accent-ink); background: var(--accent); }
+  .stages li.skip { text-decoration: line-through; }
+  .rlist { display: grid; gap: 6px; margin: 0; padding: 0; list-style: none; counter-reset: r; }
+  .rlist li { counter-increment: r; display: grid; grid-template-columns: 28px minmax(0, 1fr) auto; gap: 10px; align-items: center; padding: 6px 10px; background: #fff; border: 1px solid var(--line); border-radius: 8px; font-size: 14px; }
+  .rlist li::before { content: counter(r); font-family: var(--font-mono); font-size: 12px; color: var(--muted); }
+  .rlist li.rel { border-color: var(--c-ok); background: #f0f8f3; }
+  .rlist button { font: 600 12px var(--font-body); padding: 3px 10px; border-radius: 999px; border: 1px solid var(--line-strong); background: #fff; color: var(--ink); cursor: pointer; white-space: nowrap; }
+  .rlist li.rel button { background: var(--c-ok); border-color: var(--c-ok); color: #fff; }
+  .metrics { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 8px; margin: 12px 0 0; }
+  .metric { padding: 8px 10px; background: #fff; border: 1px solid var(--line); border-radius: 10px; }
+  .metric .n { display: block; font-family: var(--font-display); font-size: 24px; font-weight: 700; font-variant-numeric: tabular-nums; }
+  .metric .l { font-family: var(--font-mono); font-size: 11px; letter-spacing: .04em; text-transform: uppercase; color: var(--muted); }
+  .metric small { display: block; font-size: 12px; color: var(--muted); line-height: 1.35; margin-top: 2px; }
+  td.pass { color: var(--c-ok); font-weight: 600; } td.fail { color: var(--c-dlq); font-weight: 600; }
+  .say { border-left: 3px solid var(--c-serve); background: var(--paper); padding: 12px 16px; border-radius: 0 10px 10px 0; margin: 0 0 16px; font-size: 15.5px; }
+  .say p:last-child { margin: 0; }
+</style>
+
+<style>
+  .lab-chart { display: block; width: 100%; height: auto; margin: 4px 0 0; }
+  .lab-chart text { font-family: var(--font-body); font-size: 12px; fill: var(--muted); }
+  .grid-cells { display: grid; gap: 4px; }
+  .srv { display: grid; grid-template-columns: 92px minmax(0,1fr) 70px; gap: 10px; align-items: center; font-size: 14px; }
+  .muted { color: var(--muted); }
+  .lab select { font: 14px var(--font-body); padding: 6px 8px; border-radius: 8px; border: 1px solid var(--line-strong); background: #fff; color: var(--ink); }
+  .lab input[type=number] { width: 9ch; font: 14px var(--font-mono); padding: 6px 8px; border-radius: 8px; border: 1px solid var(--line-strong); background: #fff; color: var(--ink); }
+</style>
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs><marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" class="ah" style="fill:#7d8996"/></marker></defs></svg>
+<header class="sitebar"><div class="wrap"><a class="brand" href="index.html">Classic System Design</a><nav aria-label="Site"><a href="index.html">Home</a><a href="index.html#blocks" aria-current="page">Building blocks</a><a href="index.html#designs">Designs</a><a href="https://devlcodes.github.io/agentic-ai-notebook/system-design/index.html">Agentic designs ↗</a></nav></div></header>
+<main>
+<div class="wrap"><div class="intro"><p class="eyebrow">Building block · distributed internals</p><h1>Consensus with Raft</h1><p class="lead">How a handful of servers agree on one ordered log, even when some of them crash or the network splits. Raft is what keeps etcd, Consul, CockroachDB and Kafka's metadata correct.</p></div></div>
+<div class="wrap doc">
+  <nav class="toc" aria-label="On this page"><p>On this page</p><ol><li><a href="#why">Why consensus</a></li><li><a href="#roles">Leaders, followers and terms</a></li><li><a href="#election">Leader election</a></li><li><a href="#replication">Log replication</a></li><li><a href="#lab">Try it: break a cluster</a></li><li><a href="#cost">What it costs</a></li><li><a href="#failure">Failure modes</a></li><li><a href="#interview">Saying it in an interview</a></li><li><a href="#real-world">In the real world</a></li><li><a href="#related">Related</a></li></ol></nav>
+  <article>
+<section id="why"><h2>Why consensus</h2>
+<p class="lead">One database server is consistent but dies. Several copies survive failures but can disagree. Consensus gives you both: a group of servers that acts like one, as long as a majority is up and can talk.</p>
+<p>The trick is a <strong>replicated log</strong>. Every change ("set x = 5", "move range 12 to node 3") is appended to a log, the servers agree on the order of entries, and each server applies them in that order to its own copy of the state (a <strong>state machine</strong>). Same log, same order, same state. Raft (2014) was designed to be easier to understand and implement than Paxos, and it is now the default choice.</p>
+<p>You rarely implement it. You use it through a system built on it when you need a small amount of state that must never be wrong: who the leader is, which node owns which shard, a lock, the cluster's config.</p></section>
+
+<section id="roles"><h2>Leaders, followers and terms</h2>
+<figure class="fig"><svg viewBox="0 0 722 210" class="dg" role="img" aria-label="Raft roles: a follower that hears no heartbeat becomes a candidate; a candidate with a majority of votes becomes leader; a leader that sees a higher term steps down">
+<rect x="30" y="80" width="150" height="56" rx="10" class="box"/><text x="105" y="104" class="small b" text-anchor="middle">Follower</text><text x="105" y="122" class="sm" text-anchor="middle">replicates, votes</text>
+<rect x="286" y="80" width="150" height="56" rx="10" class="k-serve"/><text x="361" y="104" class="small b" text-anchor="middle">Candidate</text><text x="361" y="122" class="sm" text-anchor="middle">term + 1, asks for votes</text>
+<rect x="542" y="80" width="150" height="56" rx="10" class="k-ingest"/><text x="617" y="104" class="small b" text-anchor="middle">Leader</text><text x="617" y="122" class="sm" text-anchor="middle">takes all writes</text>
+<path d="M180 98 L284 98" class="wire hot" marker-end="url(#ah)"/><text x="232" y="88" class="sm" text-anchor="middle">no heartbeat for</text><text x="232" y="76" class="sm" text-anchor="middle">a random 150–300 ms</text>
+<path d="M436 98 L540 98" class="wire" marker-end="url(#ah)"/><text x="488" y="88" class="sm" text-anchor="middle">majority of votes</text>
+<path d="M286 124 L182 124" class="wire" marker-end="url(#ah)"/><text x="234" y="146" class="sm" text-anchor="middle">sees a leader or higher term</text>
+<path d="M617 136 C617 190 105 190 105 138" class="wire dash" marker-end="url(#ah)"/><text x="361" y="200" class="sm" text-anchor="middle">a leader that sees a higher term steps down to follower</text>
+<path d="M330 80 C330 40 392 40 392 78" class="wire dash" marker-end="url(#ah)"/><text x="361" y="34" class="sm" text-anchor="middle">split vote: wait, try again</text>
+</svg><figcaption>Every server is in one of three roles. Time is divided into numbered terms; each term has at most one leader.</figcaption></figure>
+<ul class="plain">
+<li><strong>Leader.</strong> One per term. Clients send writes to it; it appends them to its log, sends them to followers and sends heartbeats so followers know it's alive.</li>
+<li><strong>Followers.</strong> Passive: they accept entries from the leader and vote in elections.</li>
+<li><strong>Terms.</strong> A counter that only goes up. Every message carries the sender's term; anyone who sees a higher term updates to it, and a leader that sees one steps down. Terms are how stale leaders are detected without clocks.</li>
+</ul></section>
+
+<section id="election"><h2>Leader election</h2>
+<ol class="plain">
+<li>A follower hears nothing from a leader for its <strong>election timeout</strong>, randomly chosen between about 150 and 300 ms.</li>
+<li>It becomes a candidate, increments the term, votes for itself and asks every other server for a vote.</li>
+<li>Each server grants at most one vote per term, and only to a candidate whose log is <strong>at least as up to date</strong> as its own (higher last term, or same term and at least as long). This rule ensures a new leader already has every committed entry.</li>
+<li>With votes from a majority, the candidate becomes leader and starts sending heartbeats.</li>
+</ol>
+<p>The random timeouts make it unlikely that two followers start an election at the same moment and split the vote; if they do, both time out again at different random moments and one wins.</p></section>
+
+<section id="replication"><h2>Log replication</h2>
+<figure class="fig"><svg viewBox="0 0 722 232" class="dg" role="img" aria-label="Logs on five servers: entries tagged with index and term; the leader's entries up to index 5 are on a majority and committed, index 6 is only on two servers so not committed">
+<text x="20" y="20" class="cap">EACH ENTRY: INDEX · TERM · COMMAND</text>
+<g font-size="12">
+<text x="20" y="54" class="small b">S1 leader</text><text x="20" y="94" class="small b">S2</text><text x="20" y="134" class="small b">S3</text><text x="20" y="174" class="small b">S4</text><text x="20" y="214" class="small b">S5 (down)</text>
+</g>
+<g>
+<rect x="110" y="36" width="86" height="28" rx="5" class="k-ingest"/><rect x="200" y="36" width="86" height="28" rx="5" class="k-ingest"/><rect x="290" y="36" width="86" height="28" rx="5" class="k-ingest"/><rect x="380" y="36" width="86" height="28" rx="5" class="k-ingest"/><rect x="470" y="36" width="86" height="28" rx="5" class="k-ingest"/><rect x="560" y="36" width="86" height="28" rx="5" class="box"/>
+<rect x="110" y="76" width="86" height="28" rx="5" class="k-ingest"/><rect x="200" y="76" width="86" height="28" rx="5" class="k-ingest"/><rect x="290" y="76" width="86" height="28" rx="5" class="k-ingest"/><rect x="380" y="76" width="86" height="28" rx="5" class="k-ingest"/><rect x="470" y="76" width="86" height="28" rx="5" class="k-ingest"/><rect x="560" y="76" width="86" height="28" rx="5" class="box"/>
+<rect x="110" y="116" width="86" height="28" rx="5" class="k-ingest"/><rect x="200" y="116" width="86" height="28" rx="5" class="k-ingest"/><rect x="290" y="116" width="86" height="28" rx="5" class="k-ingest"/><rect x="380" y="116" width="86" height="28" rx="5" class="k-ingest"/><rect x="470" y="116" width="86" height="28" rx="5" class="k-ingest"/>
+<rect x="110" y="156" width="86" height="28" rx="5" class="k-ingest"/><rect x="200" y="156" width="86" height="28" rx="5" class="k-ingest"/><rect x="290" y="156" width="86" height="28" rx="5" class="k-ingest"/>
+<rect x="110" y="196" width="86" height="28" rx="5" class="ghost"/><rect x="200" y="196" width="86" height="28" rx="5" class="ghost"/>
+</g>
+<g class="mono">
+<text x="153" y="55" class="sm" text-anchor="middle">1·1 x=3</text><text x="243" y="55" class="sm" text-anchor="middle">2·1 y=1</text><text x="333" y="55" class="sm" text-anchor="middle">3·2 x=5</text><text x="423" y="55" class="sm" text-anchor="middle">4·3 y=9</text><text x="513" y="55" class="sm" text-anchor="middle">5·3 z=2</text><text x="603" y="55" class="sm" text-anchor="middle">6·3 x=7</text>
+</g>
+<path d="M558 30 L558 230" class="rule"/><text x="553" y="230" class="sm okt" text-anchor="end">committed: on 3 of 5</text><text x="566" y="230" class="sm bad">index 6: on 2 of 5, not yet</text>
+</svg><figcaption>An entry is committed once a majority stores it. Only then does the leader apply it and answer the client. S4 is behind and will be caught up; S5 is down and will catch up when it returns.</figcaption></figure>
+<ol class="plain">
+<li>The leader appends the client's command to its log as entry (index, term).</li>
+<li>It sends <code>AppendEntries</code> to every follower, including the index and term of the entry just before the new ones.</li>
+<li>A follower accepts only if its log has that previous entry. If not, it refuses, and the leader backs up and resends earlier entries until the logs match. This consistency check is how a lagging or recovering follower is repaired.</li>
+<li>Once a majority (including the leader) has the entry, it is <strong>committed</strong>. The leader applies it to its state machine, replies to the client, and tells followers the new commit index in later messages.</li>
+</ol>
+<p>Logs grow forever, so servers periodically write a <strong>snapshot</strong> of the state and discard the log before it; a follower that is far behind gets the snapshot instead of millions of entries. Adding or removing servers goes through the log too, one server at a time, so two different majorities can never exist.</p></section>
+
+<section id="lab"><h2>Try it: break a cluster</h2>
+<p>A five-server Raft cluster. Write entries, kill the leader, split the network, then heal it. Watch which writes commit, who leads, and what happens to writes accepted by a leader that lost its majority.</p>
+<div class="lab" id="rflab">
+  <div id="rf-nodes" style="display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:8px;margin-bottom:12px"></div>
+  <div class="lab-row"><span class="chips" id="rf-act"><button type="button" data-a="write">Write an entry</button><button type="button" data-a="kill">Kill the leader</button><button type="button" data-a="split">Split network 2 | 3</button><button type="button" data-a="wold">Write via the old leader</button><button type="button" data-a="heal">Heal and restart all</button><button type="button" data-a="reset">Reset</button></span></div>
+  <div class="metrics" id="rf-m"></div>
+  <p class="lab-out" id="rf-out" aria-live="polite"></p>
+</div>
+<p class="muted" style="font-size:13.5px">A teaching model, not a full implementation: elections happen instantly and pick the most up-to-date reachable server. Green entries are committed; grey entries are stored but not committed.</p></section>
+
+<section id="cost"><h2>What it costs</h2>
+<div class="table"><table><thead><tr><th>Cluster size</th><th>Majority</th><th>Tolerates</th><th>Notes</th></tr></thead><tbody>
+<tr><td>3</td><td>2</td><td>1 failure</td><td>The usual choice</td></tr>
+<tr><td>5</td><td>3</td><td>2 failures</td><td>Survive one failure during maintenance of another</td></tr>
+<tr><td>4 or 6</td><td>3 or 4</td><td>Same as 3 or 5</td><td>Even sizes add cost without tolerance</td></tr>
+<tr><td>7+</td><td>4+</td><td>3+</td><td>Rare: every write waits on more servers</td></tr>
+</tbody></table></div>
+<div class="formula">write latency ≈ leader's disk fsync + round trip to the slowest server in the fastest majority</div>
+<p>In one region that is a millisecond or two. Spread across three regions it is a cross-region round trip, 30 to 100 ms, on every write; that is the price of surviving a region loss. Reads served by the leader must also confirm it is still leader (a heartbeat round, or a time-based lease), or a deposed leader could serve stale data. All writes go through one leader, so a single Raft group is limited to what one server can handle; systems like CockroachDB and TiKV run thousands of small Raft groups, one per data range, to scale.</p></section>
+
+<section id="failure"><h2>Failure modes</h2>
+<h3>Split brain, prevented</h3>
+<p>In a 2 | 3 split, the side with 3 can elect a leader and commit; the side with 2 cannot reach a majority, so its old leader can accept writes but never commit them. When the network heals, the old leader sees a higher term, steps down, and its uncommitted entries are overwritten. Clients that got no success reply must retry, which is why requests should be idempotent.</p>
+<h3>Leader flapping</h3>
+<p>Election timeouts that are too short relative to network or disk latency (a GC pause, a slow fsync) cause needless elections, each a brief write outage. Tune timeouts to well above your p99 heartbeat delay; Raft implementations add "pre-vote" so a flaky node can't keep disrupting a healthy leader.</p>
+<h3>Lost majority</h3>
+<p>Lose 3 of 5 and the cluster stops accepting writes, by design. Recovery from permanent loss needs a manual, carefully documented procedure; practice it.</p>
+<h3>Slow disks</h3>
+<p>Every commit waits on an fsync. Put the log on fast, dedicated SSDs; etcd warns when fsync takes more than about 10 ms.</p></section>
+
+<section id="interview"><h2>Saying it in an interview</h2>
+<div class="say"><p>"Shard ownership and leader election live in etcd, which uses Raft: three or five nodes, one leader per term, writes committed once a majority has them, and an up-to-date-log rule in elections so a new leader never loses committed data. Three nodes survive one failure; I'd use five across three zones to survive a zone loss during maintenance. Writes cost a quorum round trip, so I keep only small, critical metadata there, not user data. A minority partition can't commit, so there's no split brain; clients retry idempotently after a leader change."</p></div></section>
+
+<section id="real-world"><h2>In the real world</h2>
+<div class="table"><table><thead><tr><th>System</th><th>Uses consensus for</th></tr></thead><tbody>
+<tr><td>etcd, Consul</td><td>Kubernetes cluster state, service discovery, config, locks (Raft)</td></tr>
+<tr><td>CockroachDB, TiKV, YugabyteDB</td><td>One Raft group per data range, giving SQL with strong consistency; see <a href="cassandra-vs-cockroachdb.html">Cassandra vs CockroachDB</a></td></tr>
+<tr><td>Kafka (KRaft)</td><td>Cluster metadata, replacing ZooKeeper</td></tr>
+<tr><td>ZooKeeper</td><td>Coordination with Zab, a Paxos-like protocol</td></tr>
+<tr><td>Google Spanner, Chubby</td><td>Paxos groups per data split; lock service</td></tr>
+</tbody></table></div>
+<p class="muted" style="font-size:13.5px;color:var(--muted)">Products change quickly; names here are examples, not endorsements. Check current docs before choosing.</p></section>
+
+<section id="related"><h2>Related</h2><ul class="related"><li><a href="consistency.html">Consistency and CAP</a></li><li><a href="databases.html">Databases and replication</a></li><li><a href="cassandra-vs-cockroachdb.html">Cassandra vs CockroachDB</a></li><li><a href="merkle-trees.html">Merkle trees</a></li></ul></section>
+  </article>
+</div>
+</main>
+
+<footer class="site"><div class="wrap">Part of Classic System Design, a companion to the <a href="https://devlcodes.github.io/agentic-ai-notebook/system-design/index.html">agentic system designs</a>. Figures marked illustrative show the shape of a system, not measured numbers. Check vendor docs before relying on a specific product limit.</div></footer>
+<script>
+(function(){
+  var $ = function(id){ return document.getElementById(id); };
+  var S, msg;
+  function reset(){ S = { term: 1, leader: 0, side: null, nodes: [0,1,2,3,4].map(function(){ return { up: true, log: [{t:1,c:true},{t:1,c:true}] }; }), commit: 2, writes: 0 }; msg = 'Server S1 is leader in term 1. Two entries are committed on all five servers.'; }
+  function reach(i){ var n = S.nodes, r = []; for (var j = 0; j < 5; j++) if (n[j].up && (S.side === null || S.side[i] === S.side[j])) r.push(j); return r; }
+  function upToDate(a, b){ var la = a.log[a.log.length-1], lb = b.log[b.log.length-1]; return la.t !== lb.t ? la.t > lb.t : a.log.length >= b.log.length; }
+  function elect(){
+    var cands = [0,1,2,3,4].filter(function(i){ return S.nodes[i].up; });
+    var best = null;
+    cands.forEach(function(i){ var r = reach(i); if (r.length < 3) return; var voters = r.filter(function(j){ return upToDate(S.nodes[i], S.nodes[j]); }); if (voters.length >= 3 && (best === null || upToDate(S.nodes[i], S.nodes[best]) && !upToDate(S.nodes[best], S.nodes[i]))) best = i; });
+    if (best === null){ S.leader = null; return false; }
+    S.term++; S.leader = best; return true;
+  }
+  function write(){
+    if (S.leader === null){ msg = 'No leader: no side of the cluster has a majority of 3 reachable servers, so no write can be accepted. The cluster is unavailable for writes, but nothing is wrong.'; return; }
+    var L = S.nodes[S.leader], r = reach(S.leader); S.writes++;
+    var e = { t: S.term, c: false }; L.log.push(e);
+    if (r.length >= 3){
+      r.forEach(function(j){ if (j !== S.leader){ S.nodes[j].log = L.log.map(function(x){ return { t: x.t, c: x.c }; }); } });
+      r.forEach(function(j){ S.nodes[j].log.forEach(function(x){ x.c = true; }); });
+      L.log.forEach(function(x){ x.c = true; });
+      msg = 'Entry ' + L.log.length + ' reached ' + r.length + ' of 5 servers, a majority, so it is committed and the client gets success.';
+    } else msg = 'S' + (S.leader+1) + ' still thinks it is leader and appended entry ' + L.log.length + ', but it can reach only ' + r.length + ' of 5 servers. It can never commit, so the client gets no success reply.';
+  }
+  function act(a){
+    if (a === 'reset'){ reset(); return; }
+    if (a === 'write'){ write(); return; }
+    if (a === 'wold'){
+      if (S.stale == null){ msg = 'There is no cut-off old leader right now. Split the network first.'; return; }
+      var O = S.nodes[S.stale]; O.log.push({ t: S.term - 1, c: false });
+      msg = 'A client still connected to S' + (S.stale+1) + ' sent a write. S' + (S.stale+1) + ' appended it, but it can reach only 2 of 5 servers, so it can never commit and the client gets no success reply. Now heal the network.'; return;
+    }
+    if (a === 'kill'){
+      if (S.leader === null){ msg = 'There is no leader to kill.'; return; }
+      var old = S.leader; S.nodes[old].up = false;
+      if (elect()) msg = 'S' + (old+1) + ' crashed. After a random timeout a follower with an up-to-date log won a majority: S' + (S.leader+1) + ' leads term ' + S.term + '. Committed entries are all safe on it.';
+      else msg = 'S' + (old+1) + ' crashed and no server can gather 3 votes. Writes stop until enough servers return.';
+      return;
+    }
+    if (a === 'split'){
+      if (S.leader === null){ msg = 'Heal the cluster first.'; return; }
+      var Lr = S.leader, mate = (Lr + 1) % 5; S.side = [1,1,1,1,1]; S.side[Lr] = 0; S.side[mate] = 0;
+      var oldL = Lr, others = [0,1,2,3,4].filter(function(i){ return S.side[i] === 1 && S.nodes[i].up; });
+      if (others.length >= 3){ var bestI = others[0]; others.forEach(function(i){ if (upToDate(S.nodes[i], S.nodes[bestI]) && S.nodes[i].log.length > S.nodes[bestI].log.length) bestI = i; }); S.term++; S.leader = bestI; S.stale = oldL; msg = 'The network split: S' + (oldL+1) + ' (the old leader) and S' + (mate+1) + ' on one side, three servers on the other. The three elected S' + (bestI+1) + ' in term ' + S.term + '. Try writing: new writes commit on the majority side. The old leader is cut off.'; }
+      else msg = 'The network split, but the majority side has too few live servers to elect anyone.';
+      return;
+    }
+    if (a === 'heal'){
+      var lost = 0, ref = S.leader !== null ? S.nodes[S.leader] : null;
+      S.nodes.forEach(function(n){ n.up = true; }); S.side = null;
+      if (!ref){ elect(); ref = S.nodes[S.leader]; }
+      S.nodes.forEach(function(n, i){ n.log.forEach(function(x){ if (!x.c) lost++; }); });
+      var clean = ref.log.filter(function(x){ return x.c; }).map(function(x){ return { t: x.t, c: true }; });
+      S.nodes.forEach(function(n){ n.log = clean.map(function(x){ return { t: x.t, c: true }; }); });
+      msg = 'Network healed and every server is back. Any old leader saw the higher term and stepped down. ' + (lost ? lost + ' uncommitted entr' + (lost === 1 ? 'y was' : 'ies were') + ' overwritten; those clients never got success and must retry. ' : '') + 'All logs now match S' + (S.leader+1) + '’s.';
+      S.stale = null;
+    }
+  }
+  function render(){
+    $('rf-nodes').innerHTML = S.nodes.map(function(n, i){
+      var role = !n.up ? 'down' : i === S.leader ? 'leader' : (S.stale === i ? 'old leader' : 'follower');
+      var border = !n.up ? 'var(--line)' : i === S.leader ? 'var(--c-ingest)' : S.stale === i ? 'var(--c-dlq)' : 'var(--line-strong)';
+      var side = S.side ? (S.side[i] === S.side[S.leader === null ? 0 : S.leader] ? '' : ' · cut off') : '';
+      var cells = n.log.map(function(x){ return '<i title="term ' + x.t + '" style="display:inline-block;width:9px;height:14px;margin:1px;border-radius:2px;background:' + (x.c ? 'var(--c-ok)' : 'var(--line-strong)') + '"></i>'; }).join('');
+      return '<div style="border:2px solid ' + border + ';border-radius:8px;padding:6px 6px 4px;background:#fff;opacity:' + (n.up ? 1 : .45) + ';min-width:0"><div style="font:600 13px var(--font-body)">S' + (i+1) + '</div><div style="font:11px var(--font-mono);color:var(--muted);text-transform:uppercase;letter-spacing:.04em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">' + role + side + '</div><div style="line-height:0;margin-top:4px">' + cells + '</div></div>';
+    }).join('');
+    var committed = 0; S.nodes.forEach(function(n){ committed = Math.max(committed, n.log.filter(function(x){ return x.c; }).length); });
+    $('rf-m').innerHTML = '<div class="metric"><span class="n">' + S.term + '</span><span class="l">current term</span></div><div class="metric"><span class="n">' + (S.leader === null ? 'none' : 'S' + (S.leader+1)) + '</span><span class="l">leader</span></div><div class="metric"><span class="n">' + committed + '</span><span class="l">committed entries</span></div>';
+    $('rf-out').textContent = msg;
+  }
+  $('rf-act').addEventListener('click', function(e){ var b = e.target.closest('button'); if (!b) return; act(b.dataset.a); render(); });
+  reset(); render();
+})();
+
+</script>
+</body>
+</html>

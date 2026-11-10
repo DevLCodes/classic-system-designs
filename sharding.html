@@ -248,6 +248,7 @@
 <p>Sharding is a big step. Cross-shard joins and transactions become hard, and operations get heavier. Before sharding, try: a bigger machine, read replicas, a cache, archiving old data, and splitting unrelated tables into separate databases. A single well-tuned Postgres node handles more than most people expect.</p></section>
 
 <section id="strategies"><h2>How to split</h2>
+<p>There are two directions to split. <strong>Vertical</strong> partitioning splits by columns or features: move the large, rarely read <code>profile_photo</code> and <code>bio</code> columns to their own table, or give users, orders and products separate databases (federation, see <a href="databases.html#replication">databases</a>). It is simple but runs out once a single table is too big. <strong>Horizontal</strong> sharding splits one table's rows across machines, and is what "sharding" usually means. The strategies below are all horizontal.</p>
 <div class="table"><table><thead><tr><th>Strategy</th><th>How</th><th>Good for</th><th>Risk</th></tr></thead><tbody>
 <tr><td>Range</td><td>Contiguous key ranges: A–F, G–M, …; or by date</td><td>Range scans ("all orders in March")</td><td>Hot spots: new data all lands on the last range</td></tr>
 <tr><td>Hash</td><td><code>hash(key)</code> decides the shard</td><td>Even spread of load</td><td>Range queries must ask every shard</td></tr>

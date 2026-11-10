@@ -6,14 +6,20 @@ Interactive pages on how large web systems are built, before any AI is involved:
 
 ## Building blocks
 
-1. [Load balancing](https://devlcodes.github.io/classic-system-designs/load-balancing.html)
-2. [Rate limiting](https://devlcodes.github.io/classic-system-designs/rate-limiting.html)
-3. [Caching](https://devlcodes.github.io/classic-system-designs/caching.html)
-4. [Databases, indexes and replication](https://devlcodes.github.io/classic-system-designs/databases.html)
-5. [Sharding and consistent hashing](https://devlcodes.github.io/classic-system-designs/sharding.html)
-6. [Message queues and streams](https://devlcodes.github.io/classic-system-designs/queues.html)
-7. [Consistency and CAP](https://devlcodes.github.io/classic-system-designs/consistency.html)
-8. [Numbers to know](https://devlcodes.github.io/classic-system-designs/numbers.html)
+1. [Non-functional requirements](https://devlcodes.github.io/classic-system-designs/requirements.html)
+2. [Network protocols and APIs](https://devlcodes.github.io/classic-system-designs/protocols.html)
+3. [DNS](https://devlcodes.github.io/classic-system-designs/dns.html)
+4. [Load balancing](https://devlcodes.github.io/classic-system-designs/load-balancing.html)
+5. [Rate limiting](https://devlcodes.github.io/classic-system-designs/rate-limiting.html)
+6. [Caching](https://devlcodes.github.io/classic-system-designs/caching.html)
+7. [Databases, indexes and replication](https://devlcodes.github.io/classic-system-designs/databases.html)
+8. [Sharding and consistent hashing](https://devlcodes.github.io/classic-system-designs/sharding.html)
+9. [Message queues and streams](https://devlcodes.github.io/classic-system-designs/queues.html)
+10. [Consistency and CAP](https://devlcodes.github.io/classic-system-designs/consistency.html)
+11. [Consensus with Raft](https://devlcodes.github.io/classic-system-designs/raft.html)
+12. [Merkle trees](https://devlcodes.github.io/classic-system-designs/merkle-trees.html)
+13. [Cassandra vs CockroachDB](https://devlcodes.github.io/classic-system-designs/cassandra-vs-cockroachdb.html)
+14. [Numbers to know](https://devlcodes.github.io/classic-system-designs/numbers.html)
 
 ## Worked designs
 
