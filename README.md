@@ -1,6 +1,6 @@
 # Classic System Design
 
-Interactive pages on how large web systems are built, before any AI is involved: how traffic is spread, data is stored and copied, work is queued, and systems stay correct under load. Every page has a hands-on lab, and the six walkthroughs have 3D architecture views.
+Interactive pages on how large web systems are built, before any AI is involved: how traffic is spread, data is stored and copied, work is queued, and systems stay correct under load. Every page has a hands-on lab, and every walkthrough has 3D architecture views.
 
 **Start here:** https://devlcodes.github.io/classic-system-designs/
 
@@ -29,6 +29,10 @@ Interactive pages on how large web systems are built, before any AI is involved:
 - [Distributed rate limiter](https://devlcodes.github.io/classic-system-designs/rate-limiter.html): 1M requests/s across 300 gateways
 - [Payments](https://devlcodes.github.io/classic-system-designs/payments.html): 10M payments a day with 10× sale peaks
 - [Ride matching](https://devlcodes.github.io/classic-system-designs/ride-matching.html): 5M drivers pinging every 4 s
+- [Video streaming](https://devlcodes.github.io/classic-system-designs/video-streaming.html): 500M daily viewers, 26–50 Tb/s of video
+- [Live comments](https://devlcodes.github.io/classic-system-designs/live-comments.html): 50M viewers, 11k comments/s
+- [Web crawler](https://devlcodes.github.io/classic-system-designs/web-crawler.html): 15B pages in 4 weeks
+- [Nearby places](https://devlcodes.github.io/classic-system-designs/nearby-places.html): 500M places, 100k searches/s
 
 The companion site, [agentic system designs](https://devlcodes.github.io/agentic-ai-notebook/system-design/), builds RAG, agents and evals on top of these same blocks.
 
