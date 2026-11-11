@@ -298,7 +298,7 @@
 
 <section id="hot"><h2>Hot partitions and resharding</h2>
 <h3>Hot partitions</h3>
-<p>Even with a good hash, one key can be hot: a celebrity's timeline, a viral post, a huge tenant. Options: split that key with a suffix (<code>post:123#0</code> to <code>post:123#9</code>) and merge on read; give big tenants their own shard via a directory; or put a cache in front.</p>
+<p>Even with a good hash, one key can be hot: a celebrity's timeline, a viral post, a huge tenant. Options: split that key with a suffix (<code>post:123#0</code> to <code>post:123#9</code>) and merge on read; give big tenants their own shard via a directory; or put a cache in front. <a href="hot-partitions.html">Hot partitions and write buffering</a> goes deeper: splitting keys only when they get hot, and batching writes through a log.</p>
 <h3>Resharding</h3>
 <p>Plan for growth from day one. Common approaches:</p>
 <ul class="plain">
@@ -320,7 +320,7 @@
 </tbody></table></div>
 <p class="muted" style="font-size:13.5px;color:var(--muted)">Products change quickly; names here are examples, not endorsements. Check current docs before choosing.</p></section>
 
-<section id="related"><h2>Related</h2><ul class="related"><li><a href="databases.html">Databases and replication</a></li><li><a href="consistency.html">Consistency</a></li><li><a href="caching.html">Caching</a></li><li><a href="load-balancing.html">Load balancing</a></li></ul></section>
+<section id="related"><h2>Related</h2><ul class="related"><li><a href="databases.html">Databases and replication</a></li><li><a href="consistency.html">Consistency</a></li><li><a href="caching.html">Caching</a></li><li><a href="load-balancing.html">Load balancing</a></li><li><a href="hot-partitions.html">Hot partitions</a></li></ul></section>
   </article>
 </div>
 </main>

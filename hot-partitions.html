@@ -1,0 +1,431 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Hot partitions · Classic System Design</title>
+<meta name="description" content="Hot partitions for system design: how hot keys happen, key salting, dynamic sub-sharding with merged reads, write-ahead buffering and read-your-writes trade-offs, with a celebrity-key lab.">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700&family=Instrument+Sans:ital,wght@0,400;0,500;0,600;1,400&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+  /* Layout: a slim site bar, then either a card grid (home), a sticky contents rail + reading column (articles), or a filterable term list (glossary). Light, single look. */
+  :root {
+    color-scheme: light;
+    --bg: #e9ecef; --paper: #f7f8f9; --ink: #1c2530; --muted: #586473; --line: #cdd4dc; --line-strong: #9aa5b1;
+    --accent: #4255d4; --accent-ink: #ffffff; --track: #d3d9e0; --code-bg: #eef1f4; --wire: #7d8996;
+    --c-ingest: #2a9d8f; --c-kb: #4d5fd8; --c-serve: #d7932a; --c-model: #e2674f; --c-gov: #b2456e; --c-cross: #4a5562; --c-dlq: #b23a3a; --c-ok: #2f8f5b;
+    --t-src: #e4e8ec; --t-ingest: #d8eeea; --t-kb: #dfe3fa; --t-serve: #f8ead2; --t-model: #fbe1da; --t-gov: #f3dde6; --t-cross: #dfe2e6; --t-dlq: #f6dddb;
+    --font-display: "Bricolage Grotesque", "Avenir Next", "Segoe UI", system-ui, sans-serif;
+    --font-body: "Instrument Sans", "Helvetica Neue", "Segoe UI", system-ui, sans-serif;
+    --font-mono: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  @media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
+  body { margin: 0; background: var(--bg); color: var(--ink); font-family: var(--font-body); font-size: 16px; line-height: 1.6; }
+  a { color: var(--accent); }
+  .wrap { max-width: 1240px; margin: 0 auto; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
+
+  .sitebar { border-bottom: 1px solid var(--line); background: var(--paper); }
+  .sitebar .wrap { display: flex; align-items: center; gap: 18px; flex-wrap: wrap; padding-block: 12px; }
+  .brand { font-family: var(--font-display); font-weight: 700; font-size: 17px; color: var(--ink); text-decoration: none; margin-right: auto; }
+  .sitebar nav { display: flex; gap: 16px; flex-wrap: wrap; font-size: 14px; }
+  .sitebar nav a { color: var(--muted); text-decoration: none; }
+  .sitebar nav a:hover, .sitebar nav a[aria-current="page"] { color: var(--ink); }
+  .sitebar nav a[aria-current="page"] { font-weight: 600; }
+
+  .intro { padding-block: 40px 8px; display: grid; gap: 10px; max-width: 820px; }
+  .eyebrow { margin: 0; font-family: var(--font-mono); font-size: 12px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+  h1 { margin: 0; font-family: var(--font-display); font-weight: 700; font-size: clamp(30px, 5vw, 46px); line-height: 1.05; text-wrap: balance; }
+  .intro .lead { font-size: 18px; margin: 0; }
+
+  .doc { display: grid; grid-template-columns: 220px minmax(0, 1fr); gap: 48px; padding-block: 36px 72px; }
+  .toc { position: sticky; top: calc(env(safe-area-inset-top, 0px) + 20px); align-self: start; }
+  .toc p { margin: 0 0 8px; font-family: var(--font-mono); font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+  .toc ol { margin: 0; padding: 0; list-style: none; display: grid; gap: 2px; counter-reset: toc; }
+  .toc li { counter-increment: toc; }
+  .toc a { display: flex; gap: 8px; padding: 3px 0; font-size: 14px; color: var(--muted); text-decoration: none; }
+  .toc a::before { content: counter(toc, decimal-leading-zero); font-family: var(--font-mono); font-size: 11.5px; padding-top: 2px; color: var(--line-strong); }
+  .toc a:hover { color: var(--ink); }
+  article { min-width: 0; max-width: 760px; }
+  section { padding-bottom: 36px; margin-bottom: 36px; border-bottom: 1px solid var(--line); scroll-margin-top: 20px; }
+  section:last-child { border-bottom: 0; }
+  h2 { margin: 0 0 10px; font-family: var(--font-display); font-weight: 700; font-size: 28px; line-height: 1.15; text-wrap: balance; }
+  h3 { margin: 26px 0 6px; font-family: var(--font-display); font-weight: 600; font-size: 19px; line-height: 1.25; }
+  p { margin: 0 0 14px; }
+  .lead { font-size: 18px; }
+  ul.plain, ol.plain { margin: 0 0 16px; padding-left: 22px; display: grid; gap: 6px; }
+  code { font-family: var(--font-mono); font-size: 0.88em; background: var(--code-bg); padding: 1px 5px; border-radius: 4px; }
+  pre { margin: 0 0 16px; padding: 14px 16px; background: var(--code-bg); border-radius: 10px; overflow-x: auto; font-size: 13px; line-height: 1.55; }
+  pre code { background: none; padding: 0; font-size: inherit; }
+  .table { overflow-x: auto; margin: 0 0 18px; }
+  table { width: 100%; border-collapse: collapse; font-size: 14.5px; line-height: 1.45; }
+  th, td { text-align: left; vertical-align: top; padding: 8px 10px; border-bottom: 1px solid var(--line); }
+  th { font-family: var(--font-mono); font-size: 11.5px; font-weight: 500; letter-spacing: .05em; text-transform: uppercase; color: var(--muted); }
+  td.num { font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .note { border-left: 3px solid var(--accent); background: var(--paper); padding: 12px 16px; border-radius: 0 10px 10px 0; margin: 0 0 18px; }
+  .note p:last-child { margin: 0; }
+  .formula { font-family: var(--font-mono); font-size: 14px; background: var(--paper); border: 1px solid var(--line); border-radius: 10px; padding: 12px 16px; margin: 0 0 16px; overflow-x: auto; white-space: nowrap; }
+  .related { display: flex; flex-wrap: wrap; gap: 8px; margin: 0; padding: 0; list-style: none; }
+  .related a { display: inline-block; padding: 4px 12px; border: 1px solid var(--line); border-radius: 999px; font-size: 14px; color: var(--ink); text-decoration: none; background: var(--paper); }
+  .related a:hover { border-color: var(--ink); }
+  .pager { display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; font-size: 14px; }
+  footer.site { border-top: 1px solid var(--line); padding-block: 20px 40px; font-size: 13px; color: var(--muted); }
+  a:focus-visible, input:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+  /* home */
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 16px; margin: 0 0 40px; padding: 0; list-style: none; }
+  .card { display: grid; gap: 8px; height: 100%; padding: 18px; background: var(--paper); border: 1px solid var(--line); border-radius: 14px; color: var(--ink); text-decoration: none; }
+  .card:hover { border-color: var(--ink); }
+  .card .k { font-family: var(--font-mono); font-size: 11px; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
+  .card h3 { margin: 0; font-size: 20px; }
+  .card p { margin: 0; font-size: 14.5px; color: var(--muted); }
+  .card svg { width: 100%; height: auto; display: block; }
+  .card.feature svg { max-width: 420px; justify-self: center; }
+  .card.feature { grid-column: 1 / -1; grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr); align-items: center; gap: 24px; }
+  .home-h { margin: 28px 0 12px; font-family: var(--font-display); font-size: 24px; }
+
+  /* glossary */
+  .gl-tools { position: sticky; top: 0; z-index: 2; background: var(--bg); padding-block: 12px; display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+  .gl-tools input { flex: 1 1 260px; min-width: 0; font: 15px var(--font-body); padding: 9px 12px; border-radius: 10px; border: 1px solid var(--line-strong); background: #fff; color: var(--ink); }
+  .gl-letters { display: flex; flex-wrap: wrap; gap: 4px; font-family: var(--font-mono); font-size: 13px; }
+  .gl-letters a { padding: 2px 6px; border-radius: 6px; text-decoration: none; color: var(--muted); }
+  .gl-letters a:hover { background: var(--paper); color: var(--ink); }
+  .gl { max-width: 860px; }
+  .gl-item { margin: 0; }
+  .gl-item { display: grid; grid-template-columns: 220px minmax(0, 1fr); gap: 16px; padding: 12px 0; border-bottom: 1px solid var(--line); scroll-margin-top: 70px; }
+  .gl-item dt { font-weight: 600; }
+  .gl-item dt small { display: block; font-weight: 400; font-family: var(--font-mono); font-size: 11px; color: var(--muted); letter-spacing: .04em; text-transform: uppercase; margin-top: 2px; }
+  .gl-item dd { margin: 0; }
+  .gl-item dd .see { font-size: 13.5px; }
+  .gl-letter { margin: 26px 0 4px; font-family: var(--font-display); font-size: 22px; scroll-margin-top: 70px; }
+
+  @media (max-width: 900px) {
+    .doc { grid-template-columns: minmax(0, 1fr); gap: 24px; padding-block: 28px 56px; }
+    .toc { position: static; }
+    .toc ol { grid-template-columns: repeat(2, minmax(0, 1fr)); column-gap: 12px; }
+    .card.feature { grid-template-columns: minmax(0, 1fr); }
+  }
+  @media (max-width: 640px) {
+    .gl-item { grid-template-columns: minmax(0, 1fr); gap: 4px; }
+    h2 { font-size: 24px; }
+    .intro .lead, .lead { font-size: 16.5px; }
+  }
+
+  /* diagrams */
+  .fig { margin: 6px 0 24px; overflow-x: auto; }
+  .fig svg { display: block; width: 100%; height: auto; min-width: 600px; }
+  .fig figcaption { margin-top: 8px; font-size: 13px; line-height: 1.45; color: var(--muted); }
+  .dg text { font-family: var(--font-body); font-size: 13px; fill: var(--ink); }
+  .dg .sm { font-size: 11.5px; fill: var(--muted); }
+  .dg .small { font-size: 12px; }
+  .dg .b { font-weight: 600; }
+  .dg .mono { font-family: var(--font-mono); }
+  .dg .it { font-style: italic; }
+  .dg .mute { fill: var(--muted); }
+  .dg .gov { fill: var(--c-gov); font-weight: 600; }
+  .dg .okt { fill: var(--c-ok); font-weight: 600; }
+  .dg .bad { fill: var(--c-dlq); font-weight: 600; }
+  .dg .cap { font-family: var(--font-mono); font-size: 11px; letter-spacing: .06em; fill: var(--muted); }
+  .dg .big { font-family: var(--font-display); font-size: 30px; font-weight: 700; fill: var(--ink); }
+  .dg .box { fill: var(--paper); stroke: var(--line-strong); stroke-width: 1.25; }
+  .dg .ghost { fill: none; stroke: var(--line-strong); stroke-width: 1.25; stroke-dasharray: 5 5; }
+  .dg .track { fill: var(--track); }
+  .dg .rule { stroke: var(--line); stroke-width: 1; }
+  .dg .axis { stroke: var(--line-strong); stroke-width: 1.25; }
+  .dg .wire { fill: none; stroke: var(--wire); stroke-width: 1.4; }
+  .dg .wire.dash { stroke-dasharray: 4 4; }
+  .dg .wire.hot { stroke: var(--accent); stroke-width: 2; }
+  .dg .wire.red { stroke: var(--c-dlq); }
+  .dg .ah { fill: var(--wire); }
+  .dg .xmark { stroke: var(--c-dlq); stroke-width: 1.8; fill: none; }
+  .dg .tick { stroke: var(--c-ok); stroke-width: 2; fill: none; }
+  .dg .k-src { fill: var(--t-src); stroke: #8795a3; stroke-width: 1.5; }
+  .dg .k-ingest { fill: var(--t-ingest); stroke: var(--c-ingest); stroke-width: 1.5; }
+  .dg .k-kb { fill: var(--t-kb); stroke: var(--c-kb); stroke-width: 1.5; }
+  .dg .k-serve { fill: var(--t-serve); stroke: var(--c-serve); stroke-width: 1.5; }
+  .dg .k-model { fill: var(--t-model); stroke: var(--c-model); stroke-width: 1.5; }
+  .dg .k-gov { fill: var(--t-gov); stroke: var(--c-gov); stroke-width: 1.5; }
+  .dg .k-cross { fill: var(--t-cross); stroke: var(--c-cross); stroke-width: 1.5; }
+  .dg .k-dlq { fill: var(--t-dlq); stroke: var(--c-dlq); stroke-width: 1.5; }
+  .dg .k-user { fill: #ffffff; stroke: var(--line-strong); stroke-width: 1.5; }
+  .dg .f-serve { fill: var(--c-serve); } .dg .f-kb { fill: var(--c-kb); } .dg .f-model { fill: var(--c-model); } .dg .f-gov { fill: var(--c-gov); } .dg .f-ingest { fill: var(--c-ingest); } .dg .f-cross { fill: #b8c0c9; } .dg .f-dlq { fill: var(--c-dlq); } .dg .f-ok { fill: var(--c-ok); }
+  .dg .cell { fill: var(--paper); stroke: var(--line-strong); stroke-width: 1; }
+  .dg .cell.hot { fill: var(--t-ingest); stroke: var(--c-ingest); stroke-width: 1.5; }
+  .dg .cell.old { fill: var(--t-kb); stroke: var(--c-kb); }
+  .dg .cell.new { fill: var(--t-ingest); stroke: var(--c-ingest); stroke-width: 1.5; }
+  .dg .cell.gone { fill: var(--paper); stroke: var(--line); }
+  .dg .dot-hr { fill: var(--c-gov); } .dg .dot-it { fill: var(--c-kb); } .dg .dot-eng { fill: var(--c-ingest); } .dg .dot-q { fill: var(--c-serve); stroke: var(--ink); stroke-width: 1.5; }
+  .dg .halo { fill: none; stroke: var(--c-serve); stroke-width: 1.5; stroke-dasharray: 4 4; }
+  .dg .zone { fill: var(--paper); stroke: var(--line); stroke-width: 1; }
+</style>
+
+<style>
+  .lab { margin: 6px 0 26px; padding: 14px 16px 16px; background: var(--paper); border: 1px solid var(--line); border-radius: 14px; }
+  .lab-row { display: flex; flex-wrap: wrap; gap: 10px 18px; align-items: center; margin: 0 0 12px; }
+  .lab-k { font-family: var(--font-mono); font-size: 11px; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
+  .lab label { display: inline-flex; gap: 8px; align-items: center; font-size: 14px; }
+  .lab input[type=range] { width: 150px; accent-color: var(--accent); }
+  .lab input[type=checkbox] { width: 16px; height: 16px; accent-color: var(--accent); }
+  .lab input[type=text] { flex: 1 1 260px; min-width: 0; font: 15px var(--font-body); padding: 8px 11px; border-radius: 9px; border: 1px solid var(--line-strong); background: #fff; color: var(--ink); }
+  .lab output { font-family: var(--font-mono); font-size: 12.5px; min-width: 6ch; font-variant-numeric: tabular-nums; }
+  .seg { display: inline-flex; flex-wrap: wrap; gap: 6px; }
+  .seg button, .chips button { font: 600 13px var(--font-body); color: var(--ink); background: #fff; border: 1px solid var(--line); border-radius: 8px; padding: 6px 12px; cursor: pointer; }
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; }
+  .chips button { font-weight: 500; border-radius: 999px; padding: 4px 11px; font-size: 13px; }
+  .seg button:hover, .chips button:hover { border-color: var(--ink); }
+  .seg button[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+  .seg button:focus-visible, .chips button:focus-visible, .lab input:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .lab-out { margin: 12px 0 0; padding: 10px 12px; background: #fff; border: 1px solid var(--line); border-radius: 10px; font-size: 14.5px; line-height: 1.5; font-variant-numeric: tabular-nums; }
+  .chunks { display: grid; gap: 8px; max-height: 470px; overflow: auto; padding-right: 4px; }
+  .chunk { min-width: 0; padding: 8px 11px; background: #fff; border: 1px solid var(--line); border-left: 4px solid var(--c-kb); border-radius: 8px; font-size: 14px; line-height: 1.5; overflow-wrap: anywhere; }
+  .chunk:nth-child(even) { border-left-color: var(--c-ingest); }
+  .chunk.ans { box-shadow: 0 0 0 2px var(--c-serve); }
+  .chunk .ch { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-bottom: 4px; font-family: var(--font-mono); font-size: 11px; color: var(--muted); }
+  .chunk .pfx { display: block; font-family: var(--font-mono); font-size: 11.5px; color: var(--c-kb); }
+  .chunk .ov { background: var(--track); border-radius: 3px; }
+  .chunk mark { background: #ffe9b3; border-radius: 3px; padding: 0 2px; }
+  .chunk table { width: auto; font-size: 13px; margin: 4px 0; }
+  .chunk td { padding: 2px 10px 2px 0; border-bottom: 1px solid var(--line); }
+  .badge { display: inline-block; padding: 0 7px; border-radius: 999px; border: 1px solid; font-family: var(--font-mono); font-size: 10.5px; line-height: 1.6; }
+  .badge.bad { color: var(--c-dlq); border-color: var(--c-dlq); background: var(--t-dlq); }
+  .badge.ok { color: var(--c-ok); border-color: var(--c-ok); background: #e3f3ea; }
+  .badge.info { color: var(--c-kb); border-color: var(--c-kb); background: var(--t-kb); }
+  .bars { display: grid; gap: 8px; margin: 4px 0 0; }
+  .bar-row { display: grid; grid-template-columns: minmax(0, 150px) minmax(0, 1fr) 46px; gap: 10px; align-items: center; font-size: 14px; }
+  .bar { position: relative; height: 14px; border-radius: 7px; background: var(--track); }
+  .bar i { position: absolute; inset: 0 auto 0 0; border-radius: 7px; background: var(--c-kb); transition: width .3s; }
+  .bar b { position: absolute; top: -4px; bottom: -4px; width: 2px; background: var(--c-dlq); }
+  .bar-row .v { font-family: var(--font-mono); font-size: 12.5px; text-align: right; }
+  .stages { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 10px; padding: 0; list-style: none; font-size: 13px; }
+  .stages li { padding: 2px 10px; border-radius: 999px; border: 1px solid var(--line); color: var(--muted); background: #fff; }
+  .stages li.hit { border-color: var(--accent); color: var(--accent-ink); background: var(--accent); }
+  .stages li.skip { text-decoration: line-through; }
+  .rlist { display: grid; gap: 6px; margin: 0; padding: 0; list-style: none; counter-reset: r; }
+  .rlist li { counter-increment: r; display: grid; grid-template-columns: 28px minmax(0, 1fr) auto; gap: 10px; align-items: center; padding: 6px 10px; background: #fff; border: 1px solid var(--line); border-radius: 8px; font-size: 14px; }
+  .rlist li::before { content: counter(r); font-family: var(--font-mono); font-size: 12px; color: var(--muted); }
+  .rlist li.rel { border-color: var(--c-ok); background: #f0f8f3; }
+  .rlist button { font: 600 12px var(--font-body); padding: 3px 10px; border-radius: 999px; border: 1px solid var(--line-strong); background: #fff; color: var(--ink); cursor: pointer; white-space: nowrap; }
+  .rlist li.rel button { background: var(--c-ok); border-color: var(--c-ok); color: #fff; }
+  .metrics { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 8px; margin: 12px 0 0; }
+  .metric { padding: 8px 10px; background: #fff; border: 1px solid var(--line); border-radius: 10px; }
+  .metric .n { display: block; font-family: var(--font-display); font-size: 24px; font-weight: 700; font-variant-numeric: tabular-nums; }
+  .metric .l { font-family: var(--font-mono); font-size: 11px; letter-spacing: .04em; text-transform: uppercase; color: var(--muted); }
+  .metric small { display: block; font-size: 12px; color: var(--muted); line-height: 1.35; margin-top: 2px; }
+  td.pass { color: var(--c-ok); font-weight: 600; } td.fail { color: var(--c-dlq); font-weight: 600; }
+  .say { border-left: 3px solid var(--c-serve); background: var(--paper); padding: 12px 16px; border-radius: 0 10px 10px 0; margin: 0 0 16px; font-size: 15.5px; }
+  .say p:last-child { margin: 0; }
+</style>
+
+<style>
+  .lab-chart { display: block; width: 100%; height: auto; margin: 4px 0 0; }
+  .lab-chart text { font-family: var(--font-body); font-size: 12px; fill: var(--muted); }
+  .grid-cells { display: grid; gap: 4px; }
+  .srv { display: grid; grid-template-columns: 92px minmax(0,1fr) 70px; gap: 10px; align-items: center; font-size: 14px; }
+  .muted { color: var(--muted); }
+  .lab select { font: 14px var(--font-body); padding: 6px 8px; border-radius: 8px; border: 1px solid var(--line-strong); background: #fff; color: var(--ink); }
+  .lab input[type=number] { width: 9ch; font: 14px var(--font-mono); padding: 6px 8px; border-radius: 8px; border: 1px solid var(--line-strong); background: #fff; color: var(--ink); }
+</style>
+<body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs><marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" class="ah" style="fill:#7d8996"/></marker></defs></svg>
+<header class="sitebar"><div class="wrap"><a class="brand" href="index.html">Classic System Design</a><nav aria-label="Site"><a href="index.html">Home</a><a href="index.html#blocks" aria-current="page">Building blocks</a><a href="index.html#designs">Designs</a><a href="https://devlcodes.github.io/agentic-ai-notebook/system-design/index.html">Agentic designs ↗</a></nav></div></header>
+<main>
+<div class="wrap"><div class="intro"><p class="eyebrow">Building block · data</p><h1>Hot partitions, sub-sharding and write buffering</h1><p class="lead">What to do when one key gets more traffic than a whole shard can take, even though your hash spreads every other key evenly.</p></div></div>
+<div class="wrap doc">
+  <nav class="toc" aria-label="On this page"><p>On this page</p><ol><li><a href="#what">How hot keys happen</a></li><li><a href="#salting">Key salting</a></li><li><a href="#dynamic">Dynamic sub-sharding</a></li><li><a href="#lab">Try it: a celebrity key</a></li><li><a href="#buffer">Write-ahead buffering</a></li><li><a href="#ryw">Read-your-writes trade-offs</a></li><li><a href="#failure">How it goes wrong</a></li><li><a href="#interview">Saying it in an interview</a></li><li><a href="#real-world">In the real world</a></li><li><a href="#related">Related</a></li></ol></nav>
+  <article>
+<section id="what"><h2>How hot keys happen</h2>
+<p class="lead">Hashing spreads <em>keys</em> evenly. It does nothing for traffic that piles onto <em>one</em> key. Every write for that key goes to the same shard, so adding shards does not help.</p>
+<figure class="fig"><svg viewBox="0 0 722 200" class="dg" role="img" aria-label="Four shards: three are lightly loaded, one holds a celebrity key and is far over its capacity line">
+<text x="361" y="22" class="cap" text-anchor="middle">SAME HASH, ONE HOT KEY · ILLUSTRATIVE</text>
+<line x1="60" y1="70" x2="680" y2="70" class="wire red dash"/><text x="684" y="74" class="sm bad">capacity</text>
+<rect x="80" y="130" width="100" height="40" rx="6" class="k-kb"/><text x="130" y="186" class="sm" text-anchor="middle">shard 1 · 30%</text>
+<rect x="230" y="122" width="100" height="48" rx="6" class="k-kb"/><text x="280" y="186" class="sm" text-anchor="middle">shard 2 · 35%</text>
+<rect x="380" y="40" width="100" height="130" rx="6" class="k-dlq"/><text x="430" y="186" class="sm bad" text-anchor="middle">shard 3 · 530%</text><text x="430" y="100" class="small b" text-anchor="middle">user:celeb</text><text x="430" y="116" class="sm" text-anchor="middle">5,000 writes/s</text>
+<rect x="530" y="128" width="100" height="42" rx="6" class="k-kb"/><text x="580" y="186" class="sm" text-anchor="middle">shard 4 · 31%</text>
+<line x1="60" y1="170" x2="680" y2="170" class="axis"/>
+</svg><figcaption>Illustrative: a shard rated for 1,000 writes a second gets 5,000 for one key. Doubling the shard count leaves shard 3 exactly as overloaded.</figcaption></figure>
+<p>Common sources of hot keys:</p>
+<ul class="plain">
+<li><strong>Celebrities and viral items.</strong> A star's profile, a post with millions of likes, a product on a flash sale. Traffic follows people, not hashes.</li>
+<li><strong>Counters.</strong> One like count or view count that every request increments. Each increment is a write to the same row.</li>
+<li><strong>Time-ordered keys on range shards.</strong> If the key starts with a timestamp or an auto-increment ID, all new writes land on the last range. See <a href="sharding.html#strategies">range vs hash</a>.</li>
+<li><strong>Big tenants.</strong> In a multi-tenant system keyed by <code>tenant_id</code>, one large customer can outweigh thousands of small ones.</li>
+<li><strong>Default values.</strong> A key like <code>country=unknown</code> or <code>user_id=0</code> that a bug or a missing field sends everything to.</li>
+</ul>
+<p>To act on hot keys you first have to find them. Shards can count requests per key and report the top few (a heavy-hitters sketch such as count-min keeps this cheap). Managed stores expose it too: Redis has <code>redis-cli --hotkeys</code> when using an LFU policy, and DynamoDB has CloudWatch Contributor Insights.</p>
+<div class="note"><p>A hot key is a <strong>per-key</strong> limit, not a cluster limit. In DynamoDB each partition serves at most 3,000 reads and 1,000 writes per second (in capacity units). A table can take millions of writes a second while one key is throttled at 1,000.</p></div></section>
+
+<section id="salting"><h2>Key salting</h2>
+<p>The simplest fix is to split one logical key into <strong>k</strong> physical keys by adding a suffix, often called a salt. Writes pick one suffix; reads gather all of them and merge.</p>
+<figure class="fig"><svg viewBox="0 0 722 230" class="dg" role="img" aria-label="Writes to post:123 go to one of four sub-keys post:123#0 to #3 on different shards; a read fans out to all four and sums them">
+<text x="20" y="22" class="cap">WRITE · PICK ONE SUB-KEY</text>
+<rect x="20" y="92" width="110" height="44" rx="8" class="k-user"/><text x="75" y="112" class="small b" text-anchor="middle">Writers</text><text x="75" y="128" class="sm" text-anchor="middle">like post:123</text>
+<path d="M130 102 L270 50" class="wire" marker-end="url(#ah)"/><path d="M130 110 L270 98" class="wire hot" marker-end="url(#ah)"/><path d="M130 120 L270 146" class="wire" marker-end="url(#ah)"/><path d="M130 128 L270 194" class="wire" marker-end="url(#ah)"/>
+<text x="150" y="70" class="sm">random suffix</text>
+<rect x="272" y="30" width="170" height="38" rx="8" class="k-kb"/><text x="357" y="54" class="mono small" text-anchor="middle">post:123#0 → shard 2</text>
+<rect x="272" y="78" width="170" height="38" rx="8" class="k-kb"/><text x="357" y="102" class="mono small" text-anchor="middle">post:123#1 → shard 5</text>
+<rect x="272" y="126" width="170" height="38" rx="8" class="k-kb"/><text x="357" y="150" class="mono small" text-anchor="middle">post:123#2 → shard 7</text>
+<rect x="272" y="174" width="170" height="38" rx="8" class="k-kb"/><text x="357" y="198" class="mono small" text-anchor="middle">post:123#3 → shard 1</text>
+<path d="M442 49 L582 102" class="wire dash" marker-end="url(#ah)"/><path d="M442 97 L582 110" class="wire dash" marker-end="url(#ah)"/><path d="M442 145 L582 120" class="wire dash" marker-end="url(#ah)"/><path d="M442 193 L582 128" class="wire dash" marker-end="url(#ah)"/>
+<rect x="584" y="92" width="122" height="44" rx="8" class="k-serve"/><text x="645" y="112" class="small b" text-anchor="middle">Reader</text><text x="645" y="128" class="sm" text-anchor="middle">read all 4, sum</text>
+<text x="702" y="22" class="cap" text-anchor="end">READ · FAN OUT AND MERGE</text>
+</svg><figcaption>Writes for one post now spread over four shards. The price is that every read of the total does four reads.</figcaption></figure>
+<h3>Random or calculated suffix</h3>
+<div class="table"><table><thead><tr><th>Suffix</th><th>How it is picked</th><th>Good for</th><th>Cost</th></tr></thead><tbody>
+<tr><td>Random</td><td><code>rand() % k</code> on every write</td><td>Counters and append-only data where you always read the total</td><td>Reading one item means reading all k sub-keys</td></tr>
+<tr><td>Calculated</td><td>From another field, like <code>hash(user_id) % k</code></td><td>"Did user 42 like post 123?": you know which sub-key to check</td><td>Spread is only as even as that field; one heavy user still lands on one sub-key</td></tr>
+</tbody></table></div>
+<h3>Merging reads</h3>
+<p>How you merge depends on the data. A <strong>counter</strong> sums the sub-counts. A <strong>list</strong>, such as comments on a post, needs a k-way merge by timestamp, then a limit. A <strong>set</strong> unions the parts, or checks just one part when the suffix is calculated. Merging is only cheap if each sub-read is cheap, so keep the parts small and read them in parallel.</p>
+<div class="formula">writes per sub-key = W / k &nbsp;·&nbsp; reads per key read = k &nbsp;·&nbsp; P(read waits on a slow part) = 1 − (1 − p)<sup>k</sup></div>
+<p>The last formula is why you do not salt every key. If 1% of reads to any one shard are slow (p = 0.01), a read that touches 16 parts hits a slow one about 15% of the time. Salting moves the hot spot off writes and puts a tail-latency tax on reads.</p></section>
+
+<section id="dynamic"><h2>Dynamic sub-sharding</h2>
+<p>Salting everything wastes read capacity on the millions of keys that are never hot. The better pattern splits keys <strong>only when they get hot</strong> and folds them back when they cool.</p>
+<figure class="fig"><svg viewBox="0 0 722 210" class="dg" role="img" aria-label="A detector watches per-key load, writes the split factor for hot keys into a split table, and writers and readers both consult it">
+<rect x="20" y="20" width="150" height="50" rx="8" class="k-cross"/><text x="95" y="42" class="small b" text-anchor="middle">Shards</text><text x="95" y="58" class="sm" text-anchor="middle">report top keys</text>
+<path d="M170 45 L250 45" class="wire" marker-end="url(#ah)"/>
+<rect x="252" y="20" width="150" height="50" rx="8" class="k-gov"/><text x="327" y="42" class="small b" text-anchor="middle">Hot-key detector</text><text x="327" y="58" class="sm" text-anchor="middle">over 50% of a shard?</text>
+<path d="M402 45 L482 45" class="wire" marker-end="url(#ah)"/>
+<rect x="484" y="14" width="218" height="62" rx="8" class="k-ingest"/><text x="593" y="34" class="small b" text-anchor="middle">Split table</text><text x="593" y="51" class="mono sm" text-anchor="middle">user:celeb → k=16</text><text x="593" y="66" class="mono sm" text-anchor="middle">post:123 → k=4</text>
+<path d="M593 76 L593 112 L470 140" class="wire dash" marker-end="url(#ah)"/><path d="M593 112 L640 140" class="wire dash" marker-end="url(#ah)"/>
+<rect x="330" y="142" width="200" height="50" rx="8" class="k-user"/><text x="430" y="164" class="small b" text-anchor="middle">Writers</text><text x="430" y="180" class="sm" text-anchor="middle">k=1 unless listed; else random #i</text>
+<rect x="560" y="142" width="142" height="50" rx="8" class="k-serve"/><text x="631" y="164" class="small b" text-anchor="middle">Readers</text><text x="631" y="180" class="sm" text-anchor="middle">fan out to k parts</text>
+<text x="20" y="120" class="cap">CACHED IN EVERY CLIENT</text><text x="20" y="138" class="sm">a few hundred entries at most,</text><text x="20" y="154" class="sm">pushed on change, polled as backup</text>
+</svg><figcaption>Only listed keys pay the read fan-out. Everything else stays a single key on a single shard.</figcaption></figure>
+<ol class="plain">
+<li><strong>Detect.</strong> Each shard counts writes per key over a short window. A key above a threshold, say half of one shard's capacity, is flagged.</li>
+<li><strong>Publish the split.</strong> Write <code>key → k</code> to a small split table (in a config store like etcd or ZooKeeper, or a tiny replicated table). Clients cache it.</li>
+<li><strong>Readers first, then writers.</strong> Readers must start reading all k parts before any writer uses part #k−1, or a reader will miss data. Roll the change out to readers, wait for the cache TTL, then let writers spread.</li>
+<li><strong>Grow by doubling.</strong> Go 1 → 2 → 4 → 8 while the key stays hot. Placing parts on different shards matters more than the number: beyond one part per shard, more parts add read cost without spreading writes further.</li>
+<li><strong>Merge back.</strong> When the key cools, stop writing to the high parts, fold their values into part #0, keep readers reading all parts for a grace period, then drop the entry.</li>
+</ol>
+<p>Some stores do this for you at the partition level. DynamoDB's adaptive capacity can isolate a hot item and split a partition "for heat", and Bigtable and Spanner split ranges by load. None of them can split a <em>single item</em> that one key maps to; that part is always your job.</p></section>
+
+<section id="lab"><h2>Try it: a celebrity key</h2>
+<p>Eight shards, each rated for 1,000 writes a second, already carry 300 writes a second of normal traffic. One celebrity key gets a burst of writes. Split it into sub-keys, and optionally put a write-ahead buffer in front.</p>
+<div class="lab" id="hplab">
+  <div class="lab-row"><label for="hp-w">Writes/s to the hot key <input type="range" id="hp-w" min="0" max="7" step="1" value="3"><output id="hp-w-o"></output></label><label for="hp-k">Sub-keys k <input type="range" id="hp-k" min="0" max="5" step="1" value="0"><output id="hp-k-o"></output></label></div>
+  <div class="lab-row"><label><input type="checkbox" id="hp-buf"> Write-ahead buffer</label><label for="hp-win">Flush every <input type="range" id="hp-win" min="0" max="4" step="1" value="2"><output id="hp-win-o"></output></label><span class="muted" style="font-size:13.5px">4 aggregator workers</span></div>
+  <div class="bars" id="hp-bars" aria-label="Load per shard"></div>
+  <div class="metrics" id="hp-m"></div>
+  <p class="lab-out" id="hp-out" aria-live="polite"></p>
+</div>
+<p class="muted" style="font-size:13.5px">Sub-keys are placed one per shard, wrapping around after eight. The slow-read odds assume 1% of reads to any one shard are slow and that the key's parts are read in parallel. With the buffer on, each worker sends one combined write per sub-key it touched per flush. The red tick on each bar is the 1,000 writes/s capacity.</p></section>
+
+<section id="buffer"><h2>Write-ahead buffering</h2>
+<p>Salting spreads writes. Buffering <strong>removes</strong> them. Instead of writing each like straight to the database, append it to a durable log, then let a small set of workers read the log, add up changes per key, and write one combined update per flush.</p>
+<figure class="fig"><svg viewBox="0 0 722 180" class="dg" role="img" aria-label="Writers append to a log spread over partitions; aggregator workers sum per key and flush one update every 100 ms to the database">
+<rect x="10" y="66" width="100" height="44" rx="8" class="k-user"/><text x="60" y="86" class="small b" text-anchor="middle">Writers</text><text x="60" y="102" class="sm" text-anchor="middle">5,000/s</text>
+<path d="M110 88 L170 88" class="wire hot" marker-end="url(#ah)"/>
+<rect x="172" y="20" width="170" height="136" rx="8" class="k-cross"/><text x="257" y="40" class="small b" text-anchor="middle">Log (e.g. Kafka)</text>
+<rect x="186" y="52" width="142" height="20" rx="4" class="cell"/><text x="257" y="66" class="mono sm" text-anchor="middle">partition 0</text>
+<rect x="186" y="78" width="142" height="20" rx="4" class="cell"/><text x="257" y="92" class="mono sm" text-anchor="middle">partition 1</text>
+<rect x="186" y="104" width="142" height="20" rx="4" class="cell"/><text x="257" y="118" class="mono sm" text-anchor="middle">partition 2</text>
+<rect x="186" y="130" width="142" height="20" rx="4" class="cell"/><text x="257" y="144" class="mono sm" text-anchor="middle">partition 3</text>
+<path d="M342 88 L402 88" class="wire" marker-end="url(#ah)"/>
+<rect x="404" y="54" width="150" height="68" rx="8" class="k-ingest"/><text x="479" y="76" class="small b" text-anchor="middle">Aggregators ×4</text><text x="479" y="92" class="mono sm" text-anchor="middle">post:123 += 487</text><text x="479" y="108" class="sm" text-anchor="middle">flush every 100 ms</text>
+<path d="M554 88 L614 88" class="wire" marker-end="url(#ah)"/><text x="584" y="78" class="sm" text-anchor="middle">40/s</text>
+<rect x="616" y="66" width="96" height="44" rx="8" class="k-kb"/><text x="664" y="92" class="small b" text-anchor="middle">Database</text>
+</svg><figcaption>4 workers × 10 flushes a second = 40 writes a second for the hot key, whether 500 or 50,000 likes arrive. Spread the log by event ID, not by the hot key, or one log partition becomes the new hot spot.</figcaption></figure>
+<ul class="plain">
+<li><strong>Durability comes from the log.</strong> The write is acknowledged once it is in the replicated log, so a worker crash loses nothing: a new worker replays from the last committed offset.</li>
+<li><strong>Replays must be safe.</strong> A worker can crash after writing to the database but before committing its offset. Store the last applied offset with the row, or make the update idempotent, so the replay is skipped instead of counted twice. See <a href="queues.html">queues</a>.</li>
+<li><strong>It fits commutative updates.</strong> Increments, appends and set-adds can be combined in any order. "Set price to X" or "reserve the last seat" cannot be batched blindly; those need a single writer or a transaction.</li>
+<li><strong>It is the same idea as an LSM tree or a write-back cache</strong>, one level up: absorb writes in a fast append-only structure, then fold them into the slow store in batches. See <a href="databases.html">databases</a> and <a href="caching.html#patterns">write-back caching</a>.</li>
+</ul></section>
+
+<section id="ryw"><h2>Read-your-writes trade-offs</h2>
+<p>Both fixes make it harder for someone to see their own change right away. Pick per feature, not for the whole system.</p>
+<div class="table"><table><thead><tr><th>Technique</th><th>What a reader sees</th><th>Fix if users notice</th></tr></thead><tbody>
+<tr><td>Salting, strong reads</td><td>Exact, once all k parts are read</td><td>Nothing to fix, but each read costs k</td></tr>
+<tr><td>Salting, replica reads</td><td>Each part can lag by a different amount</td><td>Read the writer's own part from the leader</td></tr>
+<tr><td>Write-ahead buffer</td><td>Up to one flush window plus log lag behind</td><td>Overlay the user's own pending change in the app ("you liked this", count + 1)</td></tr>
+<tr><td>Buffer plus a cache</td><td>A cached total, refreshed every few seconds</td><td>Show approximate numbers ("1.2M likes"), which nobody can check</td></tr>
+</tbody></table></div>
+<div class="note"><p>For a like counter, a few seconds of lag is invisible. For a bank balance or seat inventory, it is a bug. Those keys are rarely hot in the celebrity sense, and when they are (a flash sale), the answer is a queue in front of a single writer, as in <a href="ticket-booking.html">ticket booking</a>, not batching.</p></div></section>
+
+<section id="failure"><h2>How it goes wrong</h2>
+<h3>Stale split table</h3>
+<p>A writer that learned <code>k=8</code> before a reader that still thinks <code>k=4</code> puts data in parts the reader never reads. Always widen readers before writers, and narrow writers before readers.</p>
+<h3>Sub-keys on the same shard</h3>
+<p>With plain hashing, two sub-keys can land on the same node and you get less spread than k suggests. Check where parts land, or place them through a directory.</p>
+<h3>The hot spot moves</h3>
+<p>Key the log by the hot key and one log partition takes all the traffic. Cache the hot key in one Redis node and that node melts instead. Every layer on the path needs its own spread.</p>
+<h3>Read amplification</h3>
+<p>Salting a key read 50,000 times a second into 16 parts creates 800,000 sub-reads a second. Pair it with a short-lived cache of the merged result, or the read side becomes the hot spot.</p>
+<h3>Lost or double counts</h3>
+<p>Buffered counters drift if replays double-apply or a worker drops a batch. Run a periodic job that recounts from the log or source rows and corrects the total.</p></section>
+
+<section id="interview"><h2>Saying it in an interview</h2>
+<div class="say"><p>"Likes are keyed by post ID, which spreads well until a post goes viral. One shard handles about 1,000 writes a second, and a viral post can see 20,000. I'd do two things. First, writes go to a Kafka topic partitioned by event ID, and four aggregators sum likes per post and flush every 100 ms, so the database sees about 40 writes a second for that post no matter how many likes arrive. Second, for keys still too hot, a detector adds them to a split table and we salt them into up to 8 sub-keys, one per shard; readers sum the parts, and we cache the total for a few seconds. The trade-off is that a liker might not see their own like in the count for a moment, so the app adds it locally."</p></div></section>
+
+<section id="real-world"><h2>In the real world</h2>
+<div class="table"><table><thead><tr><th>System</th><th>Hot-key tools</th><th>Notes</th></tr></thead><tbody>
+<tr><td>Amazon DynamoDB</td><td>Write sharding with random or calculated suffixes, adaptive capacity, split for heat</td><td>AWS docs recommend suffixes for keys that exceed one partition's limits</td></tr>
+<tr><td>Bigtable, Spanner, CockroachDB</td><td>Automatic load-based range splits</td><td>Helps a hot range, not a single hot row</td></tr>
+<tr><td>Cassandra, ScyllaDB</td><td>Partition-key design; buckets in the key</td><td>No automatic split; a hot partition stays on its replicas</td></tr>
+<tr><td>Redis Cluster</td><td>Replicated copies of a key, client-side caching</td><td>One hash slot lives on one primary</td></tr>
+<tr><td>Kafka</td><td>Custom partitioners, keys with a salt</td><td>A hot message key makes a hot partition and a lagging consumer</td></tr>
+</tbody></table></div>
+<p class="muted" style="font-size:13.5px;color:var(--muted)">Products change quickly; names here are examples, not endorsements. Check current docs before relying on a specific limit.</p></section>
+
+<section id="related"><h2>Related</h2><ul class="related"><li><a href="sharding.html">Sharding and consistent hashing</a></li><li><a href="caching.html">Caching</a></li><li><a href="queues.html">Message queues and streams</a></li><li><a href="databases.html">Databases and indexes</a></li><li><a href="consistency.html">Consistency</a></li><li><a href="news-feed.html">News feed</a></li><li><a href="live-comments.html">Live comments</a></li></ul></section>
+  </article>
+</div>
+</main>
+<footer class="site"><div class="wrap">Part of Classic System Design, a companion to the <a href="https://devlcodes.github.io/agentic-ai-notebook/system-design/index.html">agentic system designs</a>. Figures marked illustrative show the shape of a system, not measured numbers. Check vendor docs before relying on a specific product limit.</div></footer>
+<script>
+(function(){
+  var $ = function(id){ return document.getElementById(id); };
+  var WS = [500, 1000, 2000, 5000, 10000, 20000, 40000, 80000], KS = [1, 2, 4, 8, 16, 32], WINS = [10, 50, 100, 500, 1000];
+  var S = 8, CAP = 1000, BASE = 300, WORKERS = 4, HOME = 2, P_SLOW = 0.01;
+  function fmt(n){ return Math.round(n).toLocaleString('en-US'); }
+  function run(){
+    var W = WS[+$('hp-w').value], k = KS[+$('hp-k').value], buf = $('hp-buf').checked, win = WINS[+$('hp-win').value];
+    $('hp-w-o').textContent = fmt(W); $('hp-k-o').textContent = k; $('hp-win-o').textContent = win + ' ms';
+    $('hp-win').disabled = !buf;
+    // writes per second reaching the database for the hot key
+    var flushes = 1000 / win, dbW = W;
+    if (buf) dbW = Math.min(W, WORKERS * flushes * k);
+    var load = [], parts = [];
+    for (var i = 0; i < S; i++){ load.push(BASE); parts.push(0); }
+    for (var j = 0; j < k; j++) parts[(HOME + j) % S]++;
+    for (i = 0; i < S; i++) load[i] += dbW * parts[i] / k;
+    var mx = Math.max.apply(null, load), scale = Math.max(2 * CAP, mx), hot = 0;
+    var html = '';
+    for (i = 0; i < S; i++){
+      if (load[i] > CAP) hot++;
+      var w = Math.min(100, load[i] / scale * 100), col = load[i] > CAP ? 'var(--c-dlq)' : (parts[i] ? 'var(--c-ingest)' : 'var(--c-kb)');
+      html += '<div class="bar-row"><span>Shard ' + (i + 1) + (parts[i] ? ' <span class="muted">· ' + parts[i] + ' part' + (parts[i] > 1 ? 's' : '') + '</span>' : '') + '</span><span class="bar"><i style="width:' + w.toFixed(1) + '%;background:' + col + '"></i><b style="left:' + (CAP / scale * 100).toFixed(1) + '%"></b></span><span class="v">' + Math.round(load[i] / CAP * 100) + '%</span></div>';
+    }
+    $('hp-bars').innerHTML = html;
+    var slow = 1 - Math.pow(1 - P_SLOW, k), stale = buf ? win + 20 : 0;
+    $('hp-m').innerHTML =
+      '<div class="metric"><span class="n">' + Math.round(mx / CAP * 100) + '%</span><span class="l">busiest shard</span><small>' + fmt(mx) + ' writes/s of ' + fmt(CAP) + '</small></div>' +
+      '<div class="metric"><span class="n">' + fmt(dbW) + '</span><span class="l">hot-key writes/s to DB</span><small>' + (buf ? 'down from ' + fmt(W) + ' by batching' : 'every write goes straight in') + '</small></div>' +
+      '<div class="metric"><span class="n">' + k + '×</span><span class="l">reads per key read</span><small>' + (slow * 100).toFixed(1) + '% of reads wait on a slow part</small></div>' +
+      '<div class="metric"><span class="n">' + (buf ? '~' + stale + ' ms' : '0 ms') + '</span><span class="l">extra staleness</span><small>' + (buf ? 'flush window + ~20 ms log lag' : 'writes are visible at once') + '</small></div>';
+    var used = Math.min(k, S), msg;
+    if (mx <= CAP){
+      msg = 'Every shard is under its limit. ';
+      if (buf && !(W > CAP)) msg += 'This much traffic did not need the buffer; it only adds staleness. ';
+      else if (buf) msg += 'Batching turns ' + fmt(W) + ' writes a second into ' + fmt(dbW) + ' combined updates, the cheapest fix for a counter. ';
+      else if (k > 1) msg += 'Splitting into ' + k + ' sub-keys spreads ' + fmt(W) + ' writes a second over ' + used + ' shard' + (used > 1 ? 's' : '') + '. ';
+      if (k > S) msg += 'Note that ' + k + ' parts on ' + S + ' shards gives no more write spread than ' + S + ' parts, but each read now touches ' + k + ' parts.';
+      else if (k >= 8) msg += 'The read side pays: each read of the key is ' + k + ' sub-reads.';
+    } else {
+      msg = hot + ' shard' + (hot > 1 ? 's are' : ' is') + ' over capacity and will throttle or slow down. ';
+      if (k < S && !buf) msg += 'Try more sub-keys, or turn on the buffer.';
+      else if (k >= S && !buf) msg += 'Even one part per shard is not enough at ' + fmt(W) + ' writes a second. More parts cannot help beyond the shard count; batch the writes instead.';
+      else msg += 'Use a longer flush window so each worker sends fewer combined writes.';
+    }
+    $('hp-out').textContent = msg;
+  }
+  ['hp-w', 'hp-k', 'hp-win'].forEach(function(id){ $(id).addEventListener('input', run); });
+  $('hp-buf').addEventListener('change', run);
+  run();
+})();
+</script>
+</body>
+</html>
