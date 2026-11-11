@@ -192,7 +192,7 @@
 <p class="lead">The building blocks behind every large web system, before any AI is involved: how traffic is spread, data is stored and copied, work is queued, and systems stay correct under load. Each page has a hands-on lab.</p></div></div>
 <div class="wrap" style="padding-bottom:56px">
   <ul class="doors">
-    <li><a class="door" href="#blocks"><span class="k">14 topic pages · 14 labs · 6 walkthroughs</span><h2>Building blocks →</h2><p>Requirements, networking and DNS, load balancing, caching, databases, sharding, queues, consistency, consensus and the numbers to size them.</p></a></li>
+    <li><a class="door" href="#blocks"><span class="k">14 topic pages · 14 labs · 14 walkthroughs</span><h2>Building blocks →</h2><p>Requirements, networking and DNS, load balancing, caching, databases, sharding, queues, consistency, consensus and the numbers to size them.</p></a></li>
     <li><a class="door" href="https://devlcodes.github.io/agentic-ai-notebook/system-design/index.html"><span class="k">AI systems</span><h2>Agentic designs →</h2><p>The companion section: RAG, agents with actions, text-to-SQL and evals, built on top of these same blocks.</p></a></li>
   </ul>
 
@@ -244,6 +244,10 @@
     <li><a class="card" href="live-comments.html"><span class="k">Walkthrough · 50M viewers · 11k comments/s</span><h3>Live comments</h3><p>Push over WebSockets, a stream-to-gateway registry with TTLs, fan-out through Kafka, and ranking, batching and sub-sharding for hot streams. Two 3D scenes and a fan-out lab.</p></a></li>
     <li><a class="card" href="web-crawler.html"><span class="k">Walkthrough · 15B pages in 4 weeks · 6,200 pages/s</span><h3>Web crawler</h3><p>A URL frontier with priority and per-host queues, robots.txt and DNS caching, URL and content dedupe, crawler traps, and partitioning by host. Two 3D scenes and a Bloom-filter lab.</p></a></li>
     <li><a class="card" href="nearby-places.html"><span class="k">Walkthrough · 500M places · 100k searches/s</span><h3>Nearby places</h3><p>SQL ranges vs fixed grids vs quadtrees, geohash and S2, an in-memory geo index fed by change data capture, ranking, and scatter-gather shards. Two 3D scenes and a quadtree lab.</p></a></li>
+    <li><a class="card" href="file-sync.html"><span class="k">Walkthrough · files up to 50 GB · 4 MB blocks</span><h3>File sync</h3><p>Content-addressed blocks, dedupe and resumable uploads, a change journal with cursors, change notifications, and conflicted copies. Two 3D scenes and a chunking lab.</p></a></li>
+    <li><a class="card" href="ecommerce.html"><span class="k">Walkthrough · 100M shoppers · 10× sale days</span><h3>E-commerce store</h3><p>Cached catalog and search, an always-writable cart, checkout as a saga with stock reservations, and flash sales with a waiting room. Two 3D scenes and a flash-sale lab.</p></a></li>
+    <li><a class="card" href="call-insights.html"><span class="k">Walkthrough · 50k sales calls a day</span><h3>Call insights</h3><p>Vendor webhooks, a workflow engine, GPU transcription, insight models, CRM matching, and retries with a dead-letter queue. Two 3D scenes and a GPU sizing lab.</p></a></li>
+    <li><a class="card" href="ticket-booking.html"><span class="k">Walkthrough · 1M users for 50k seats</span><h3>Ticket booking</h3><p>Seat maps as bitmaps, expiring seat holds with SET NX, a unique key on show and seat, blockbuster waiting rooms, and the restaurant reservation variant. Two 3D scenes and a hold-timeout lab.</p></a></li>
   </ul>
 </div>
 </main>

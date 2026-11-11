@@ -33,6 +33,10 @@ Interactive pages on how large web systems are built, before any AI is involved:
 - [Live comments](https://devlcodes.github.io/classic-system-designs/live-comments.html): 50M viewers, 11k comments/s
 - [Web crawler](https://devlcodes.github.io/classic-system-designs/web-crawler.html): 15B pages in 4 weeks
 - [Nearby places](https://devlcodes.github.io/classic-system-designs/nearby-places.html): 500M places, 100k searches/s
+- [File sync](https://devlcodes.github.io/classic-system-designs/file-sync.html): files up to 50 GB synced across devices
+- [E-commerce store](https://devlcodes.github.io/classic-system-designs/ecommerce.html): 100M daily shoppers with 10× sale days
+- [Call insights](https://devlcodes.github.io/classic-system-designs/call-insights.html): 50k recorded sales calls a day, insights in 30 minutes
+- [Ticket booking](https://devlcodes.github.io/classic-system-designs/ticket-booking.html): 1M users racing for 50k seats, plus restaurant reservations
 
 The companion site, [agentic system designs](https://devlcodes.github.io/agentic-ai-notebook/system-design/), builds RAG, agents and evals on top of these same blocks.
 

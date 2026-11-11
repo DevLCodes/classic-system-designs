@@ -1,0 +1,648 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Ticket Booking · Classic System Design</title>
+<meta name="description" content="Design a movie and event ticketing site with live seat maps, seat holds that expire, safe payments and fair blockbuster releases, plus the restaurant reservation variant.">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700&family=Instrument+Sans:ital,wght@0,400;0,500;0,600;1,400&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+  /* Layout: a slim site bar, then either a card grid (home), a sticky contents rail + reading column (articles), or a filterable term list (glossary). Light, single look. */
+  :root {
+    color-scheme: light;
+    --bg: #e9ecef; --paper: #f7f8f9; --ink: #1c2530; --muted: #586473; --line: #cdd4dc; --line-strong: #9aa5b1;
+    --accent: #4255d4; --accent-ink: #ffffff; --track: #d3d9e0; --code-bg: #eef1f4; --wire: #7d8996;
+    --c-ingest: #2a9d8f; --c-kb: #4d5fd8; --c-serve: #d7932a; --c-model: #e2674f; --c-gov: #b2456e; --c-cross: #4a5562; --c-dlq: #b23a3a; --c-ok: #2f8f5b;
+    --t-src: #e4e8ec; --t-ingest: #d8eeea; --t-kb: #dfe3fa; --t-serve: #f8ead2; --t-model: #fbe1da; --t-gov: #f3dde6; --t-cross: #dfe2e6; --t-dlq: #f6dddb;
+    --font-display: "Bricolage Grotesque", "Avenir Next", "Segoe UI", system-ui, sans-serif;
+    --font-body: "Instrument Sans", "Helvetica Neue", "Segoe UI", system-ui, sans-serif;
+    --font-mono: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  @media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
+  body { margin: 0; background: var(--bg); color: var(--ink); font-family: var(--font-body); font-size: 16px; line-height: 1.6; }
+  a { color: var(--accent); }
+  .wrap { max-width: 1240px; margin: 0 auto; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
+
+  .sitebar { border-bottom: 1px solid var(--line); background: var(--paper); }
+  .sitebar .wrap { display: flex; align-items: center; gap: 18px; flex-wrap: wrap; padding-block: 12px; }
+  .brand { font-family: var(--font-display); font-weight: 700; font-size: 17px; color: var(--ink); text-decoration: none; margin-right: auto; }
+  .sitebar nav { display: flex; gap: 16px; flex-wrap: wrap; font-size: 14px; }
+  .sitebar nav a { color: var(--muted); text-decoration: none; }
+  .sitebar nav a:hover, .sitebar nav a[aria-current="page"] { color: var(--ink); }
+  .sitebar nav a[aria-current="page"] { font-weight: 600; }
+
+  .intro { padding-block: 40px 8px; display: grid; gap: 10px; max-width: 820px; }
+  .eyebrow { margin: 0; font-family: var(--font-mono); font-size: 12px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+  h1 { margin: 0; font-family: var(--font-display); font-weight: 700; font-size: clamp(30px, 5vw, 46px); line-height: 1.05; text-wrap: balance; }
+  .intro .lead { font-size: 18px; margin: 0; }
+
+  .doc { display: grid; grid-template-columns: 220px minmax(0, 1fr); gap: 48px; padding-block: 36px 72px; }
+  .toc { position: sticky; top: calc(env(safe-area-inset-top, 0px) + 20px); align-self: start; }
+  .toc p { margin: 0 0 8px; font-family: var(--font-mono); font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+  .toc ol { margin: 0; padding: 0; list-style: none; display: grid; gap: 2px; counter-reset: toc; }
+  .toc li { counter-increment: toc; }
+  .toc a { display: flex; gap: 8px; padding: 3px 0; font-size: 14px; color: var(--muted); text-decoration: none; }
+  .toc a::before { content: counter(toc, decimal-leading-zero); font-family: var(--font-mono); font-size: 11.5px; padding-top: 2px; color: var(--line-strong); }
+  .toc a:hover { color: var(--ink); }
+  article { min-width: 0; max-width: 760px; }
+  section { padding-bottom: 36px; margin-bottom: 36px; border-bottom: 1px solid var(--line); scroll-margin-top: 20px; }
+  section:last-child { border-bottom: 0; }
+  h2 { margin: 0 0 10px; font-family: var(--font-display); font-weight: 700; font-size: 28px; line-height: 1.15; text-wrap: balance; }
+  h3 { margin: 26px 0 6px; font-family: var(--font-display); font-weight: 600; font-size: 19px; line-height: 1.25; }
+  p { margin: 0 0 14px; }
+  .lead { font-size: 18px; }
+  ul.plain, ol.plain { margin: 0 0 16px; padding-left: 22px; display: grid; gap: 6px; }
+  code { font-family: var(--font-mono); font-size: 0.88em; background: var(--code-bg); padding: 1px 5px; border-radius: 4px; }
+  pre { margin: 0 0 16px; padding: 14px 16px; background: var(--code-bg); border-radius: 10px; overflow-x: auto; font-size: 13px; line-height: 1.55; }
+  pre code { background: none; padding: 0; font-size: inherit; }
+  .table { overflow-x: auto; margin: 0 0 18px; }
+  table { width: 100%; border-collapse: collapse; font-size: 14.5px; line-height: 1.45; }
+  th, td { text-align: left; vertical-align: top; padding: 8px 10px; border-bottom: 1px solid var(--line); }
+  th { font-family: var(--font-mono); font-size: 11.5px; font-weight: 500; letter-spacing: .05em; text-transform: uppercase; color: var(--muted); }
+  td.num { font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .note { border-left: 3px solid var(--accent); background: var(--paper); padding: 12px 16px; border-radius: 0 10px 10px 0; margin: 0 0 18px; }
+  .note p:last-child { margin: 0; }
+  .formula { font-family: var(--font-mono); font-size: 14px; background: var(--paper); border: 1px solid var(--line); border-radius: 10px; padding: 12px 16px; margin: 0 0 16px; overflow-x: auto; white-space: nowrap; }
+  .related { display: flex; flex-wrap: wrap; gap: 8px; margin: 0; padding: 0; list-style: none; }
+  .related a { display: inline-block; padding: 4px 12px; border: 1px solid var(--line); border-radius: 999px; font-size: 14px; color: var(--ink); text-decoration: none; background: var(--paper); }
+  .related a:hover { border-color: var(--ink); }
+  .pager { display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; font-size: 14px; }
+  footer.site { border-top: 1px solid var(--line); padding-block: 20px 40px; font-size: 13px; color: var(--muted); }
+  a:focus-visible, input:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+  /* home */
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 16px; margin: 0 0 40px; padding: 0; list-style: none; }
+  .card { display: grid; gap: 8px; height: 100%; padding: 18px; background: var(--paper); border: 1px solid var(--line); border-radius: 14px; color: var(--ink); text-decoration: none; }
+  .card:hover { border-color: var(--ink); }
+  .card .k { font-family: var(--font-mono); font-size: 11px; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
+  .card h3 { margin: 0; font-size: 20px; }
+  .card p { margin: 0; font-size: 14.5px; color: var(--muted); }
+  .card svg { width: 100%; height: auto; display: block; }
+  .card.feature svg { max-width: 420px; justify-self: center; }
+  .card.feature { grid-column: 1 / -1; grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr); align-items: center; gap: 24px; }
+  .home-h { margin: 28px 0 12px; font-family: var(--font-display); font-size: 24px; }
+
+  /* glossary */
+  .gl-tools { position: sticky; top: 0; z-index: 2; background: var(--bg); padding-block: 12px; display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+  .gl-tools input { flex: 1 1 260px; min-width: 0; font: 15px var(--font-body); padding: 9px 12px; border-radius: 10px; border: 1px solid var(--line-strong); background: #fff; color: var(--ink); }
+  .gl-letters { display: flex; flex-wrap: wrap; gap: 4px; font-family: var(--font-mono); font-size: 13px; }
+  .gl-letters a { padding: 2px 6px; border-radius: 6px; text-decoration: none; color: var(--muted); }
+  .gl-letters a:hover { background: var(--paper); color: var(--ink); }
+  .gl { max-width: 860px; }
+  .gl-item { margin: 0; }
+  .gl-item { display: grid; grid-template-columns: 220px minmax(0, 1fr); gap: 16px; padding: 12px 0; border-bottom: 1px solid var(--line); scroll-margin-top: 70px; }
+  .gl-item dt { font-weight: 600; }
+  .gl-item dt small { display: block; font-weight: 400; font-family: var(--font-mono); font-size: 11px; color: var(--muted); letter-spacing: .04em; text-transform: uppercase; margin-top: 2px; }
+  .gl-item dd { margin: 0; }
+  .gl-item dd .see { font-size: 13.5px; }
+  .gl-letter { margin: 26px 0 4px; font-family: var(--font-display); font-size: 22px; scroll-margin-top: 70px; }
+
+  @media (max-width: 900px) {
+    .doc { grid-template-columns: minmax(0, 1fr); gap: 24px; padding-block: 28px 56px; }
+    .toc { position: static; }
+    .toc ol { grid-template-columns: repeat(2, minmax(0, 1fr)); column-gap: 12px; }
+    .card.feature { grid-template-columns: minmax(0, 1fr); }
+  }
+  @media (max-width: 640px) {
+    .gl-item { grid-template-columns: minmax(0, 1fr); gap: 4px; }
+    h2 { font-size: 24px; }
+    .intro .lead, .lead { font-size: 16.5px; }
+  }
+
+  /* diagrams */
+  .fig { margin: 6px 0 24px; overflow-x: auto; }
+  .fig svg { display: block; width: 100%; height: auto; min-width: 600px; }
+  .fig figcaption { margin-top: 8px; font-size: 13px; line-height: 1.45; color: var(--muted); }
+  .dg text { font-family: var(--font-body); font-size: 13px; fill: var(--ink); }
+  .dg .sm { font-size: 11.5px; fill: var(--muted); }
+  .dg .small { font-size: 12px; }
+  .dg .b { font-weight: 600; }
+  .dg .mono { font-family: var(--font-mono); }
+  .dg .it { font-style: italic; }
+  .dg .mute { fill: var(--muted); }
+  .dg .gov { fill: var(--c-gov); font-weight: 600; }
+  .dg .okt { fill: var(--c-ok); font-weight: 600; }
+  .dg .bad { fill: var(--c-dlq); font-weight: 600; }
+  .dg .cap { font-family: var(--font-mono); font-size: 11px; letter-spacing: .06em; fill: var(--muted); }
+  .dg .big { font-family: var(--font-display); font-size: 30px; font-weight: 700; fill: var(--ink); }
+  .dg .box { fill: var(--paper); stroke: var(--line-strong); stroke-width: 1.25; }
+  .dg .ghost { fill: none; stroke: var(--line-strong); stroke-width: 1.25; stroke-dasharray: 5 5; }
+  .dg .track { fill: var(--track); }
+  .dg .rule { stroke: var(--line); stroke-width: 1; }
+  .dg .axis { stroke: var(--line-strong); stroke-width: 1.25; }
+  .dg .wire { fill: none; stroke: var(--wire); stroke-width: 1.4; }
+  .dg .wire.dash { stroke-dasharray: 4 4; }
+  .dg .wire.hot { stroke: var(--accent); stroke-width: 2; }
+  .dg .wire.red { stroke: var(--c-dlq); }
+  .dg .ah { fill: var(--wire); }
+  .dg .xmark { stroke: var(--c-dlq); stroke-width: 1.8; fill: none; }
+  .dg .tick { stroke: var(--c-ok); stroke-width: 2; fill: none; }
+  .dg .k-src { fill: var(--t-src); stroke: #8795a3; stroke-width: 1.5; }
+  .dg .k-ingest { fill: var(--t-ingest); stroke: var(--c-ingest); stroke-width: 1.5; }
+  .dg .k-kb { fill: var(--t-kb); stroke: var(--c-kb); stroke-width: 1.5; }
+  .dg .k-serve { fill: var(--t-serve); stroke: var(--c-serve); stroke-width: 1.5; }
+  .dg .k-model { fill: var(--t-model); stroke: var(--c-model); stroke-width: 1.5; }
+  .dg .k-gov { fill: var(--t-gov); stroke: var(--c-gov); stroke-width: 1.5; }
+  .dg .k-cross { fill: var(--t-cross); stroke: var(--c-cross); stroke-width: 1.5; }
+  .dg .k-dlq { fill: var(--t-dlq); stroke: var(--c-dlq); stroke-width: 1.5; }
+  .dg .k-user { fill: #ffffff; stroke: var(--line-strong); stroke-width: 1.5; }
+  .dg .f-serve { fill: var(--c-serve); } .dg .f-kb { fill: var(--c-kb); } .dg .f-model { fill: var(--c-model); } .dg .f-gov { fill: var(--c-gov); } .dg .f-ingest { fill: var(--c-ingest); } .dg .f-cross { fill: #b8c0c9; } .dg .f-dlq { fill: var(--c-dlq); } .dg .f-ok { fill: var(--c-ok); }
+  .dg .cell { fill: var(--paper); stroke: var(--line-strong); stroke-width: 1; }
+  .dg .cell.hot { fill: var(--t-ingest); stroke: var(--c-ingest); stroke-width: 1.5; }
+  .dg .cell.old { fill: var(--t-kb); stroke: var(--c-kb); }
+  .dg .cell.new { fill: var(--t-ingest); stroke: var(--c-ingest); stroke-width: 1.5; }
+  .dg .cell.gone { fill: var(--paper); stroke: var(--line); }
+  .dg .dot-hr { fill: var(--c-gov); } .dg .dot-it { fill: var(--c-kb); } .dg .dot-eng { fill: var(--c-ingest); } .dg .dot-q { fill: var(--c-serve); stroke: var(--ink); stroke-width: 1.5; }
+  .dg .halo { fill: none; stroke: var(--c-serve); stroke-width: 1.5; stroke-dasharray: 4 4; }
+  .dg .zone { fill: var(--paper); stroke: var(--line); stroke-width: 1; }
+</style>
+
+<style>
+  .lab { margin: 6px 0 26px; padding: 14px 16px 16px; background: var(--paper); border: 1px solid var(--line); border-radius: 14px; }
+  .lab-row { display: flex; flex-wrap: wrap; gap: 10px 18px; align-items: center; margin: 0 0 12px; }
+  .lab-k { font-family: var(--font-mono); font-size: 11px; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
+  .lab label { display: inline-flex; gap: 8px; align-items: center; font-size: 14px; }
+  .lab input[type=range] { width: 150px; accent-color: var(--accent); }
+  .lab input[type=checkbox] { width: 16px; height: 16px; accent-color: var(--accent); }
+  .lab input[type=text] { flex: 1 1 260px; min-width: 0; font: 15px var(--font-body); padding: 8px 11px; border-radius: 9px; border: 1px solid var(--line-strong); background: #fff; color: var(--ink); }
+  .lab output { font-family: var(--font-mono); font-size: 12.5px; min-width: 6ch; font-variant-numeric: tabular-nums; }
+  .seg { display: inline-flex; flex-wrap: wrap; gap: 6px; }
+  .seg button, .chips button { font: 600 13px var(--font-body); color: var(--ink); background: #fff; border: 1px solid var(--line); border-radius: 8px; padding: 6px 12px; cursor: pointer; }
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; }
+  .chips button { font-weight: 500; border-radius: 999px; padding: 4px 11px; font-size: 13px; }
+  .seg button:hover, .chips button:hover { border-color: var(--ink); }
+  .seg button[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+  .seg button:focus-visible, .chips button:focus-visible, .lab input:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .lab-out { margin: 12px 0 0; padding: 10px 12px; background: #fff; border: 1px solid var(--line); border-radius: 10px; font-size: 14.5px; line-height: 1.5; font-variant-numeric: tabular-nums; }
+  .chunks { display: grid; gap: 8px; max-height: 470px; overflow: auto; padding-right: 4px; }
+  .chunk { min-width: 0; padding: 8px 11px; background: #fff; border: 1px solid var(--line); border-left: 4px solid var(--c-kb); border-radius: 8px; font-size: 14px; line-height: 1.5; overflow-wrap: anywhere; }
+  .chunk:nth-child(even) { border-left-color: var(--c-ingest); }
+  .chunk.ans { box-shadow: 0 0 0 2px var(--c-serve); }
+  .chunk .ch { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-bottom: 4px; font-family: var(--font-mono); font-size: 11px; color: var(--muted); }
+  .chunk .pfx { display: block; font-family: var(--font-mono); font-size: 11.5px; color: var(--c-kb); }
+  .chunk .ov { background: var(--track); border-radius: 3px; }
+  .chunk mark { background: #ffe9b3; border-radius: 3px; padding: 0 2px; }
+  .chunk table { width: auto; font-size: 13px; margin: 4px 0; }
+  .chunk td { padding: 2px 10px 2px 0; border-bottom: 1px solid var(--line); }
+  .badge { display: inline-block; padding: 0 7px; border-radius: 999px; border: 1px solid; font-family: var(--font-mono); font-size: 10.5px; line-height: 1.6; }
+  .badge.bad { color: var(--c-dlq); border-color: var(--c-dlq); background: var(--t-dlq); }
+  .badge.ok { color: var(--c-ok); border-color: var(--c-ok); background: #e3f3ea; }
+  .badge.info { color: var(--c-kb); border-color: var(--c-kb); background: var(--t-kb); }
+  .bars { display: grid; gap: 8px; margin: 4px 0 0; }
+  .bar-row { display: grid; grid-template-columns: minmax(0, 150px) minmax(0, 1fr) 46px; gap: 10px; align-items: center; font-size: 14px; }
+  .bar { position: relative; height: 14px; border-radius: 7px; background: var(--track); }
+  .bar i { position: absolute; inset: 0 auto 0 0; border-radius: 7px; background: var(--c-kb); transition: width .3s; }
+  .bar b { position: absolute; top: -4px; bottom: -4px; width: 2px; background: var(--c-dlq); }
+  .bar-row .v { font-family: var(--font-mono); font-size: 12.5px; text-align: right; }
+  .stages { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 10px; padding: 0; list-style: none; font-size: 13px; }
+  .stages li { padding: 2px 10px; border-radius: 999px; border: 1px solid var(--line); color: var(--muted); background: #fff; }
+  .stages li.hit { border-color: var(--accent); color: var(--accent-ink); background: var(--accent); }
+  .stages li.skip { text-decoration: line-through; }
+  .rlist { display: grid; gap: 6px; margin: 0; padding: 0; list-style: none; counter-reset: r; }
+  .rlist li { counter-increment: r; display: grid; grid-template-columns: 28px minmax(0, 1fr) auto; gap: 10px; align-items: center; padding: 6px 10px; background: #fff; border: 1px solid var(--line); border-radius: 8px; font-size: 14px; }
+  .rlist li::before { content: counter(r); font-family: var(--font-mono); font-size: 12px; color: var(--muted); }
+  .rlist li.rel { border-color: var(--c-ok); background: #f0f8f3; }
+  .rlist button { font: 600 12px var(--font-body); padding: 3px 10px; border-radius: 999px; border: 1px solid var(--line-strong); background: #fff; color: var(--ink); cursor: pointer; white-space: nowrap; }
+  .rlist li.rel button { background: var(--c-ok); border-color: var(--c-ok); color: #fff; }
+  .metrics { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 8px; margin: 12px 0 0; }
+  .metric { padding: 8px 10px; background: #fff; border: 1px solid var(--line); border-radius: 10px; }
+  .metric .n { display: block; font-family: var(--font-display); font-size: 24px; font-weight: 700; font-variant-numeric: tabular-nums; }
+  .metric .l { font-family: var(--font-mono); font-size: 11px; letter-spacing: .04em; text-transform: uppercase; color: var(--muted); }
+  .metric small { display: block; font-size: 12px; color: var(--muted); line-height: 1.35; margin-top: 2px; }
+  td.pass { color: var(--c-ok); font-weight: 600; } td.fail { color: var(--c-dlq); font-weight: 600; }
+  .say { border-left: 3px solid var(--c-serve); background: var(--paper); padding: 12px 16px; border-radius: 0 10px 10px 0; margin: 0 0 16px; font-size: 15.5px; }
+  .say p:last-child { margin: 0; }
+</style>
+
+<style>
+  .lab-chart { display: block; width: 100%; height: auto; margin: 4px 0 0; }
+  .lab-chart text { font-family: var(--font-body); font-size: 12px; fill: var(--muted); }
+  .grid-cells { display: grid; gap: 4px; }
+  .srv { display: grid; grid-template-columns: 92px minmax(0,1fr) 70px; gap: 10px; align-items: center; font-size: 14px; }
+  .muted { color: var(--muted); }
+  .lab select { font: 14px var(--font-body); padding: 6px 8px; border-radius: 8px; border: 1px solid var(--line-strong); background: #fff; color: var(--ink); }
+  .lab input[type=number] { width: 9ch; font: 14px var(--font-mono); padding: 6px 8px; border-radius: 8px; border: 1px solid var(--line-strong); background: #fff; color: var(--ink); }
+</style><style>
+  .prompt { margin: 0; font-size: 18px; line-height: 1.5; color: var(--ink); }
+  .prompt q { font-style: italic; }
+  .legend { display: flex; flex-wrap: wrap; gap: 6px 14px; margin: 4px 0 0; padding: 0; list-style: none; font-size: 13px; color: var(--muted); }
+  .legend li { display: flex; align-items: center; gap: 6px; }
+  .legend i { width: 11px; height: 11px; border-radius: 3px; display: inline-block; }
+  .tags { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 16px; padding: 0; list-style: none; }
+  .tags li { font-family: var(--font-mono); font-size: 11px; letter-spacing: .04em; padding: 2px 8px; border-radius: 6px; border: 1px solid var(--line); color: var(--muted); }
+  @media (max-width: 640px) { .prompt { font-size: 16.5px; } }
+</style>
+<link rel="stylesheet" href="assets/scene3d.css">
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs><marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" class="ah" style="fill:#7d8996"/></marker></defs></svg>
+<header class="sitebar"><div class="wrap"><a class="brand" href="index.html">Classic System Design</a><nav aria-label="Site"><a href="index.html">Home</a><a href="index.html#blocks">Building blocks</a><a href="index.html#designs" aria-current="page">Designs</a><a href="https://devlcodes.github.io/agentic-ai-notebook/system-design/index.html">Agentic designs ↗</a></nav></div></header>
+<main>
+<header class="wrap"><div class="intro"><p class="eyebrow">Classic system design walkthrough</p><h1>Ticket Booking</h1><p class="prompt"><q>Design a movie and event ticketing site like BookMyShow or Ticketmaster: users find a show, see a live seat map, pick seats, pay, and get a ticket. Two people must never get the same seat, and a seat someone abandons must come back for sale. Plan for 50 million daily users, about a million bookings a day, and blockbuster releases where a million people arrive in the first minute for 50,000 seats.</q></p><ul class="legend" aria-label="Colour key"><li><i style="background:var(--c-ingest)"></i>Booking path</li><li><i style="background:var(--c-serve)"></i>Browse and seat map</li><li><i style="background:var(--c-kb)"></i>Storage</li><li><i style="background:var(--c-cross)"></i>Events and async</li><li><i style="background:var(--c-gov)"></i>Payments and admission</li></ul></div></header>
+<div class="wrap"><figure class="fig3d hero" id="hero">
+  <div class="stage3d" role="img" aria-label="Animated 3D view: a user opens a show and the seat map comes from a cache. They pick two seats; the booking service places a hold on each seat in Redis with a 10-minute expiry. The user pays through the payment service. On success the booking service writes the booking to the database, where a unique key on show and seat makes a double booking impossible, and publishes an event that sends the ticket by email and updates the seat map cache."><p class="hint3">3D · drag to turn</p><button class="reset3 ghost" type="button" hidden>Reset view</button><p class="nogl">The 3D view needs WebGL and a connection, because Three.js loads from a CDN. The sections below cover the same ground.</p></div>
+  <div class="ctl3"><button class="pp" type="button">Pause</button><span class="k">Step</span><div class="steps3"></div><span class="meta3"></span></div>
+  <div class="track3"><div class="fill3"></div></div>
+  <p class="out3" aria-live="polite"></p>
+  <figcaption>Illustrative. Browsing reads cached, slightly stale availability; the hold and the booking are the only strongly consistent steps.</figcaption>
+</figure></div>
+<div class="wrap doc">
+  <nav class="toc" aria-label="Sections"><p>The solution</p><ol><li><a href="#requirements">Requirements</a></li><li><a href="#success">Success metrics</a></li><li><a href="#estimates">Estimates</a></li><li><a href="#api">API</a></li><li><a href="#architecture">Architecture</a></li><li><a href="#seatmap">Shows and seat maps</a></li><li><a href="#holds">Seat holds</a></li><li><a href="#lab">Try it: tune the hold timeout</a></li><li><a href="#booking">Booking and payment</a></li><li><a href="#hot">Blockbuster releases</a></li><li><a href="#restaurant">Variant: restaurant reservations</a></li><li><a href="#storage">Storage</a></li><li><a href="#observability">Observability</a></li><li><a href="#risks">Risks and v2</a></li><li><a href="#presenting">Presenting it in 45 minutes</a></li><li><a href="#numbers">Numbers to remember</a></li></ol></nav>
+  <article>
+
+<section id="requirements">
+  <h2>Requirements</h2>
+  <ul class="tags"><li>Clarify</li><li><a href="requirements.html">Non-functional requirements</a></li></ul>
+  <p class="lead">Ticketing is an inventory problem where every unit is unique. A phone is a phone; seat F7 at the 7 pm show is one specific thing that exactly one person may own.</p>
+  <div class="table"><table>
+    <thead><tr><th>Question</th><th>Assumption</th><th>Why it matters</th></tr></thead>
+    <tbody>
+      <tr><td>Features</td><td>Search by city, movie, venue; show times; live seat map; hold, pay, ticket; cancel</td><td>Browse path and booking path are separate</td></tr>
+      <tr><td>Users</td><td class="num">50M a day</td><td>Seat map and search load</td></tr>
+      <tr><td>Bookings</td><td class="num">~1M a day, ~2.5 seats each</td><td>Booking and payment throughput</td></tr>
+      <tr><td>Inventory</td><td class="num">10k venues, ~250k shows a day, ~200 seats each</td><td>~50M sellable seats a day</td></tr>
+      <tr><td>Hot events</td><td class="num">1M users in a minute for 50k seats</td><td>Waiting room, contention on the same seats</td></tr>
+      <tr><td>Correctness</td><td>No seat sold twice; no charge without a ticket</td><td>Holds, unique keys, payment reconciliation</td></tr>
+      <tr><td>Latency</td><td class="num">seat map under 500 ms; hold under 200 ms</td><td>Users click fast and give up fast</td></tr>
+    </tbody>
+  </table></div>
+  <p>Out of scope: venue onboarding, pricing rules, food add-ons and recommendations. Payments has its own walkthrough: <a href="payments.html">Payments</a>.</p>
+</section>
+
+<section id="success">
+  <h2>Success metrics</h2>
+  <ul class="tags"><li>Define success</li></ul>
+  <div class="table"><table>
+    <thead><tr><th>Kind</th><th>Metric</th><th>Target</th></tr></thead>
+    <tbody>
+      <tr><td>Product</td><td>Seat-select → paid conversion; share of shows that sell out vs empty seats left</td><td class="num">rising</td></tr>
+      <tr><td>Reliability</td><td>Hold and booking success rate; seat map p99</td><td class="num">&gt; 99.9%; &lt; 500 ms</td></tr>
+      <tr><td>Correctness</td><td>Double-booked seats; charges without tickets after reconciliation</td><td class="num">0; 0</td></tr>
+      <tr><td>Fairness</td><td>Bot share of hot-event bookings; tickets per account</td><td class="num">low; within limit</td></tr>
+    </tbody>
+  </table></div>
+</section>
+
+<section id="estimates">
+  <h2>Estimates</h2>
+  <ul class="tags"><li>Back of the envelope</li><li><a href="numbers.html">Numbers</a></li></ul>
+  <figure class="fig"><svg viewBox="0 0 722 150" class="dg" role="img" aria-label="Key numbers: 6,000 seat map views a second on average and over 100,000 at a hot release, 12 bookings a second on average, 50 million seat rows a day, and 1 million users for 50,000 seats at a hot release">
+    <rect x="10" y="10" width="134" height="92" rx="8" class="k-serve"/><text x="24" y="52" class="big">6k/s</text><text x="24" y="78" class="sm">seat map views</text><text x="24" y="94" class="sm">100k+/s at releases</text>
+    <rect x="154" y="10" width="134" height="92" rx="8" class="k-ingest"/><text x="168" y="52" class="big">12/s</text><text x="168" y="78" class="sm">bookings</text><text x="168" y="94" class="sm">~1M a day</text>
+    <rect x="298" y="10" width="134" height="92" rx="8" class="k-ingest"/><text x="312" y="52" class="big">1M → 50k</text><text x="312" y="78" class="sm">users per seats</text><text x="312" y="94" class="sm">at a hot release</text>
+    <rect x="442" y="10" width="134" height="92" rx="8" class="k-kb"/><text x="456" y="52" class="big">50M</text><text x="456" y="78" class="sm">seat rows a day</text><text x="456" y="94" class="sm">~2.5 GB at 50 B each</text>
+    <rect x="586" y="10" width="126" height="92" rx="8" class="k-kb"/><text x="600" y="52" class="big">~1 TB</text><text x="600" y="78" class="sm">bookings a year</text><text x="600" y="94" class="sm">365M × ~2 KB</text>
+    <text x="10" y="132" class="small">Average load is tiny. The design is driven by the peak: many people wanting the same few seats at once.</text>
+  </svg></figure>
+  <ul class="plain">
+    <li><strong>Browsing:</strong> 50M users × ~10 seat map or show views ≈ 500M a day ≈ 6k a second, with release-day spikes of 100k+ a second on a handful of shows.</li>
+    <li><strong>Bookings:</strong> 1M a day ≈ 12 a second on average, maybe 10× in the evening. Tiny for one database, except when they all target the same show.</li>
+    <li><strong>Seat inventory:</strong> 250k shows × 200 seats = 50M seat rows a day. Keep only upcoming shows hot (say 2 weeks, ~700M rows) and archive the rest.</li>
+    <li><strong>Hot release:</strong> 1M people for 50k seats means 95% of them leave without tickets. The job is to tell them quickly and fairly, not to serve them all.</li>
+  </ul>
+</section>
+
+<section id="api">
+  <h2>API</h2>
+  <ul class="tags"><li>Interface</li></ul>
+<pre><code>GET  /api/shows?city=BLR&amp;movie=…&amp;date=…       (cacheable)
+GET  /api/shows/{show_id}/seats                → { layout_version, seats: [{id:"F7", state:"free|held|sold", tier}] }
+
+POST /api/shows/{show_id}/holds   Idempotency-Key: 9a2e…
+  { seat_ids: ["F7","F8"] }
+→ 201 { hold_id, expires_at }  |  409 { taken: ["F8"] }
+DELETE /api/holds/{hold_id}                    (user changes their mind)
+
+POST /api/holds/{hold_id}/booking { payment_method_id }
+→ 202 { booking_id, status: "PENDING_PAYMENT" }
+GET  /api/bookings/{booking_id}  → { status: PENDING_PAYMENT | CONFIRMED | EXPIRED | REFUNDED, ticket_url }</code></pre>
+  <p>The seat map is served from a cache that can be a second or two stale; the hold call is the real check. A hold either gets all requested seats or none, so a family is never split across a row they didn't choose.</p>
+</section>
+
+<section id="architecture">
+  <h2>Architecture</h2>
+  <ul class="tags"><li>Whole system</li></ul>
+  <figure class="fig"><svg viewBox="0 0 722 300" class="dg" role="img" aria-label="Architecture: users reach a CDN and API gateway, with a waiting room for hot events. The browse path uses a show catalog and search plus a seat map cache. The booking path goes through the booking service, which places holds in Redis, charges through the payment service, and writes bookings to a sharded Postgres with a unique key on show and seat. Booking events go to Kafka, which feeds tickets, notifications and the seat map cache.">
+    <text x="10" y="22" class="cap">EDGE</text>
+    <rect x="10" y="34" width="110" height="40" rx="8" class="k-user"/><text x="65" y="52" class="small b" text-anchor="middle">Users</text><text x="65" y="67" class="sm" text-anchor="middle">web · app</text>
+    <path d="M120 54 L150 54" class="wire" marker-end="url(#ah)"/>
+    <rect x="152" y="34" width="130" height="40" rx="8" class="k-gov"/><text x="217" y="52" class="small b" text-anchor="middle">CDN + gateway</text><text x="217" y="67" class="sm" text-anchor="middle">waiting room for hot shows</text>
+    <path d="M282 54 L312 54" class="wire" marker-end="url(#ah)"/>
+    <rect x="314" y="34" width="120" height="40" rx="8" class="k-serve"/><text x="374" y="52" class="small b" text-anchor="middle">Catalog + search</text><text x="374" y="67" class="sm" text-anchor="middle">movies, venues, shows</text>
+    <path d="M434 54 L464 54" class="wire" marker-end="url(#ah)"/>
+    <rect x="466" y="34" width="130" height="40" rx="18" class="k-serve"/><text x="531" y="52" class="small b" text-anchor="middle">Seat map cache</text><text x="531" y="67" class="sm" text-anchor="middle">bitmap per show</text>
+    <path d="M217 74 L217 120" class="wire hot" marker-end="url(#ah)"/><text x="225" y="102" class="sm">hold · book</text>
+    <text x="10" y="116" class="cap">BOOKING</text>
+    <rect x="152" y="122" width="130" height="40" rx="8" class="k-ingest"/><text x="217" y="140" class="small b" text-anchor="middle">Booking service</text><text x="217" y="155" class="sm" text-anchor="middle">holds · state machine</text>
+    <path d="M282 142 L312 142" class="wire hot" marker-end="url(#ah)"/>
+    <rect x="314" y="122" width="120" height="40" rx="18" class="k-kb"/><text x="374" y="140" class="small b" text-anchor="middle">Holds (Redis)</text><text x="374" y="155" class="sm" text-anchor="middle">SET NX · 10 min TTL</text>
+    <path d="M152 142 L122 142" class="wire" marker-end="url(#ah)"/>
+    <rect x="10" y="122" width="110" height="40" rx="8" class="k-gov"/><text x="65" y="140" class="small b" text-anchor="middle">Payments</text><text x="65" y="155" class="sm" text-anchor="middle">idempotent</text>
+    <path d="M217 162 L217 216" class="wire hot" marker-end="url(#ah)"/>
+    <text x="10" y="210" class="cap">STORAGE AND EVENTS</text>
+    <rect x="152" y="218" width="150" height="40" rx="18" class="k-kb"/><text x="227" y="236" class="small b" text-anchor="middle">Bookings (Postgres)</text><text x="227" y="251" class="sm" text-anchor="middle">UNIQUE (show_id, seat_id)</text>
+    <path d="M302 238 L342 238" class="wire" marker-end="url(#ah)"/><text x="322" y="230" class="sm" text-anchor="middle">outbox</text>
+    <rect x="344" y="218" width="90" height="40" rx="8" class="k-cross"/><text x="389" y="243" class="small b" text-anchor="middle">Kafka</text>
+    <path d="M434 238 L464 238" class="wire" marker-end="url(#ah)"/>
+    <rect x="466" y="218" width="130" height="40" rx="8" class="k-cross"/><text x="531" y="236" class="small b" text-anchor="middle">Tickets · email</text><text x="531" y="251" class="sm" text-anchor="middle">QR, SMS, push</text>
+    <path d="M531 218 L531 74" class="wire dash" marker-end="url(#ah)"/><text x="539" y="150" class="sm">seat sold → update map</text>
+    <text x="10" y="290" class="sm">Redis holds are fast and expire on their own; the database's unique key is the final guard against a double sale.</text>
+  </svg><figcaption>Two layers of protection: the hold decides who gets to pay, and the unique key on (show, seat) makes it impossible to record two bookings for one seat, even if the hold layer fails.</figcaption></figure>
+</section>
+
+<section id="seatmap">
+  <h2>Shows and seat maps</h2>
+  <ul class="tags"><li>Deep dive 1</li><li><a href="caching.html">Caching</a></li></ul>
+  <p class="lead">Most traffic is people looking, not buying. Serve it without touching the booking database.</p>
+  <ul class="plain">
+    <li><strong>Catalog:</strong> movies, venues, screens and show times change rarely. Store them in Postgres, index them in Elasticsearch for "movies near me tonight", and cache responses at the CDN for minutes.</li>
+    <li><strong>Layout vs state:</strong> a screen's layout (rows, aisles, tiers, prices) is static and versioned, so it is cached forever by <code>layout_version</code>. Only the state of each seat changes.</li>
+    <li><strong>Seat state as a bitmap:</strong> 200 seats × 2 bits (free, held, sold) is 50 bytes per show. Keep it in Redis, update it from hold and booking events, and let clients poll it every few seconds or subscribe over a WebSocket during a hot release.</li>
+    <li><strong>Stale is fine here:</strong> a seat that looks free but was just taken costs the user one "sorry, pick another" from the hold call. That is much cheaper than making 100k viewers a second read the source of truth.</li>
+  </ul>
+</section>
+
+<section id="holds">
+  <h2>Seat holds</h2>
+  <ul class="tags"><li>Deep dive 2</li><li><a href="consistency.html">Consistency</a></li><li><a href="databases.html">Databases</a></li></ul>
+  <p class="lead">Paying takes minutes. Without a hold, two people pay for F7 and one of them gets a refund and an angry email. With a hold, the first to click gets F7 for 10 minutes and everyone else sees it as taken.</p>
+  <figure class="fig3d" id="race3d">
+    <div class="stage3d" role="img" aria-label="Two users click seat F7 at the same moment. Both requests reach the booking service, which tries SET NX on the key for F7 in Redis. The first succeeds and gets a 10-minute hold; the second is told the seat is taken. The first user abandons the payment page; after 10 minutes the key expires and the seat map shows F7 free again. A third user holds it, pays, and the booking is written to the database with the unique key on show and seat. A late payment from the first user arrives after the expiry and is refunded automatically."><p class="hint3">3D · drag to turn</p><button class="reset3 ghost" type="button" hidden>Reset view</button><p class="nogl">The 3D view needs WebGL and a connection.</p></div>
+    <div class="ctl3"><button class="pp" type="button">Pause</button><span class="k">Step</span><div class="steps3"></div><span class="meta3"></span></div>
+    <div class="track3"><div class="fill3"></div></div>
+    <p class="out3" aria-live="polite"></p>
+    <figcaption>Illustrative. One atomic operation decides each race; the expiry returns abandoned seats without any cleanup job.</figcaption>
+  </figure>
+  <p>Three ways to place a hold, from simplest to most scalable:</p>
+  <div class="table"><table>
+    <thead><tr><th>Option</th><th>How</th><th>Trade-off</th></tr></thead>
+    <tbody>
+      <tr><td>Database row lock</td><td><code>SELECT … FOR UPDATE</code> on the seat rows, then update to HELD</td><td>Correct but holds locks while users dither; never keep a lock open across a payment page</td></tr>
+      <tr><td>Conditional update</td><td><code>UPDATE seats SET state='HELD', hold_id=?, expires_at=now()+10m WHERE show_id=? AND seat_id IN (…) AND (state='FREE' OR expires_at &lt; now())</code>; succeed only if every row changed</td><td>Correct, no long locks; needs a sweeper (or the <code>expires_at</code> check) to free old holds</td></tr>
+      <tr><td>Redis key per seat</td><td><code>SET hold:{show}:{seat} {hold_id} NX EX 600</code> for each seat in a Lua script, all or nothing</td><td>Fastest, expires by itself; Redis is not the system of record, so the database still has the final say</td></tr>
+    </tbody>
+  </table></div>
+  <p>Whichever you pick, the booking is finally written to a table with <code>UNIQUE (show_id, seat_id)</code>. If a Redis failover ever lets two holds through, the second insert fails and that payment is refunded: an annoyance, never a double sale.</p>
+</section>
+
+<section id="lab">
+  <h2>Try it: tune the hold timeout</h2>
+  <ul class="tags"><li>Lab</li></ul>
+  <p>A stadium show with 50,000 seats opens for sale. Set how fast the waiting room admits buyers, how long a hold lasts, and how many buyers abandon at the payment page. Little's law (seats on hold = holds started per minute × minutes each hold lasts) shows how many seats are locked away at any moment.</p>
+  <div class="lab" id="tblab">
+    <div class="lab-row"><label for="tb-r">Buyers admitted a minute <input type="range" id="tb-r" min="0" max="4" step="1" value="2"><output id="tb-r-o"></output></label><label for="tb-a">Abandon at payment <input type="range" id="tb-a" min="0" max="60" step="5" value="30"><output id="tb-a-o"></output></label></div>
+    <div class="lab-row"><span class="lab-k">Hold timeout</span><span class="seg" role="group" aria-label="Hold timeout" id="tb-h"><button type="button" data-v="2" aria-pressed="false">2 min</button><button type="button" data-v="5" aria-pressed="false">5 min</button><button type="button" data-v="10" aria-pressed="true">10 min</button><button type="button" data-v="20" aria-pressed="false">20 min</button></span></div>
+    <div class="metrics" id="tb-m"></div>
+    <p class="lab-out" id="tb-out" aria-live="polite"></p>
+  </div>
+  <p class="muted" style="font-size:13.5px">Rough model: each buyer holds 2.5 seats; buyers who pay take between 2 and 6 minutes (uniform), and fail if the hold expires first; abandoners keep their seats until the hold expires.</p>
+</section>
+
+<section id="booking">
+  <h2>Booking and payment</h2>
+  <ul class="tags"><li>Deep dive 3</li><li><a href="payments.html">Payments</a></li><li><a href="queues.html">Outbox</a></li></ul>
+  <ol class="plain">
+    <li><strong>Start payment:</strong> create a booking in <code>PENDING_PAYMENT</code> tied to the hold, and charge through the payment service with the booking id as the idempotency key.</li>
+    <li><strong>Confirm:</strong> on the payment webhook, in one transaction insert the booked seats (the unique key guards them), mark the booking <code>CONFIRMED</code>, and write a <code>SeatsBooked</code> event to the outbox. Then delete the Redis hold.</li>
+    <li><strong>Late payment:</strong> if the hold expired and someone else booked the seat, the insert fails. Mark the booking <code>EXPIRED</code> and refund automatically. Extending the hold by a minute or two while a payment is in flight makes this rare.</li>
+    <li><strong>Unknown payment:</strong> a timeout from the provider is not a failure. Keep the hold, ask the provider, and decide; a reconciliation job checks every booking stuck in <code>PENDING_PAYMENT</code>.</li>
+    <li><strong>After booking:</strong> consumers of the event issue the QR ticket, send email and SMS, update the seat bitmap, and tell the venue's box office system.</li>
+  </ol>
+</section>
+
+<section id="hot">
+  <h2>Blockbuster releases</h2>
+  <ul class="tags"><li>Deep dive 4</li><li><a href="rate-limiting.html">Rate limiting</a></li><li><a href="ecommerce.html#flash">Flash sales</a></li></ul>
+  <ul class="plain">
+    <li><strong>Waiting room:</strong> everyone who arrives before opening gets a random place in line (fairer than "first to refresh"); after that, first come first served. The room admits buyers at the rate the hold service can take and shows everyone else their position and wait.</li>
+    <li><strong>Sold-out fast path:</strong> once available + held seats reach zero, the waiting room says "sold out, join the waitlist" without letting anyone further in.</li>
+    <li><strong>Partition by show:</strong> holds and bookings are sharded by <code>show_id</code>, so one hot show lives on one shard and can't slow down the other 250k shows. Give known blockbusters their own capacity.</li>
+    <li><strong>Limits and bots:</strong> a maximum number of seats per account and per card, verified accounts or a presale code for the hottest events, and challenges for suspicious traffic.</li>
+    <li><strong>Best available:</strong> for stadiums, let users pick a tier and quantity and have the server pick adjacent seats. Fewer people fight over the same seat, and holds succeed on the first try.</li>
+  </ul>
+</section>
+
+<section id="restaurant">
+  <h2>Variant: restaurant reservations</h2>
+  <ul class="tags"><li>Interview twist</li></ul>
+  <p class="lead">"A table for four at a grill around 6 pm today; show me 6:00, 6:30 and 7:30." Same shape, different inventory.</p>
+  <ul class="plain">
+    <li><strong>Inventory is slots, not seats:</strong> each restaurant has tables (2-, 4-, 6-tops) and a seating length (say 90 minutes for four). A slot is free if some table that fits the party is free for that whole window. Precompute availability per restaurant per day into 15-minute buckets and cache it.</li>
+    <li><strong>Search:</strong> "around 6 pm" becomes a window (5:00–7:30), and the service returns the free slots nearest to 6. Across many restaurants this is a geo plus availability query, like <a href="nearby-places.html">Nearby places</a> with a time filter.</li>
+    <li><strong>Booking:</strong> a conditional insert into <code>reservations(table_id, start, end)</code> that fails if it overlaps an existing one (an exclusion constraint in Postgres does exactly this). No payment step, so a short hold of a minute or two is enough, or none at all.</li>
+    <li><strong>Different risks:</strong> no-shows instead of bots. Card guarantees, reminders and an easy cancel matter more than a waiting room. Scale is small: even a big platform does a few hundred bookings a second, so one sharded Postgres by restaurant is plenty.</li>
+    <li><strong>MVP for a startup CTO:</strong> one web app, one Postgres, Redis for cached availability, and a job queue for reminders. Split services only when traffic or teams demand it.</li>
+  </ul>
+</section>
+
+<section id="storage">
+  <h2>Storage</h2>
+  <ul class="tags"><li><a href="databases.html">Databases</a></li><li><a href="sharding.html">Sharding</a></li></ul>
+  <div class="table"><table>
+    <thead><tr><th>Data</th><th>Store</th><th>Why</th></tr></thead>
+    <tbody>
+      <tr><td>Movies, venues, layouts, shows</td><td>Postgres, Elasticsearch, CDN</td><td>Relational, read-heavy, searchable</td></tr>
+      <tr><td>Seat state bitmap</td><td>Redis</td><td>Tiny, very hot, rebuilt from bookings if lost</td></tr>
+      <tr><td>Holds</td><td>Redis with TTL (or the seats table with <code>expires_at</code>)</td><td>Atomic set-if-absent, expires by itself</td></tr>
+      <tr><td>Bookings, booked seats</td><td>Postgres sharded by <code>show_id</code>, outbox table</td><td>Transactions and the unique key live on one shard</td></tr>
+      <tr><td>Bookings by user</td><td>Secondary table or index sharded by <code>user_id</code></td><td>"My tickets" without a cross-shard query</td></tr>
+      <tr><td>Events</td><td>Kafka</td><td>Tickets, notifications, analytics, seat map updates</td></tr>
+    </tbody>
+  </table></div>
+</section>
+
+<section id="observability">
+  <h2>Observability</h2>
+  <ul class="tags"><li>Production</li></ul>
+  <div class="table"><table>
+    <thead><tr><th>Signal</th><th>Why</th><th>Alert when</th></tr></thead>
+    <tbody>
+      <tr><td>Hold success rate and 409s per show</td><td>Contention and stale seat maps</td><td>409 rate jumps outside a hot release</td></tr>
+      <tr><td>Hold → paid conversion; holds expiring</td><td>Payment trouble or a bad timeout</td><td>Expiry share rises sharply</td></tr>
+      <tr><td>Bookings in PENDING_PAYMENT</td><td>Stuck payments, missing webhooks</td><td>Any older than 15 minutes</td></tr>
+      <tr><td>Unique-key violations on insert</td><td>The hold layer let a race through</td><td>Any, outside known late payments</td></tr>
+      <tr><td>Waiting room depth and admit rate</td><td>Release health</td><td>Admit rate falls below plan</td></tr>
+    </tbody>
+  </table></div>
+</section>
+
+<section id="risks">
+  <h2>Risks and v2</h2>
+  <ul class="tags"><li>Wrap-up</li></ul>
+  <div class="table"><table>
+    <thead><tr><th>Risk</th><th>How you detect it</th><th>Mitigation</th></tr></thead>
+    <tbody>
+      <tr><td>Double booking</td><td>Unique-key violations, venue complaints</td><td>Atomic holds plus <code>UNIQUE (show_id, seat_id)</code></td></tr>
+      <tr><td>Charged but no ticket</td><td>Payment reconciliation</td><td>Idempotency keys, auto refunds for expired holds</td></tr>
+      <tr><td>Holds hide seats (show looks sold out but isn't)</td><td>Held share vs sold share</td><td>Shorter holds at hot releases, release on tab close</td></tr>
+      <tr><td>Redis loses holds on failover</td><td>Sudden drop in held seats</td><td>The database unique key; rebuild holds from pending bookings</td></tr>
+      <tr><td>Bots and scalpers</td><td>Many seats per card or device</td><td>Limits, verified fans, non-transferable tickets</td></tr>
+    </tbody>
+  </table></div>
+  <p><strong>v2 ideas:</strong> dynamic pricing by demand, a waitlist that offers seats from cancellations automatically, resale with price caps, and group bookings that hold a block of seats.</p>
+</section>
+
+<section id="presenting">
+  <h2>Presenting it in 45 minutes</h2>
+  <ul class="tags"><li>Interview script</li></ul>
+  <div class="table"><table>
+    <thead><tr><th>Step</th><th>Time</th><th>What to cover</th></tr></thead>
+    <tbody>
+      <tr><td>1. Clarify</td><td class="num">5 min</td><td>Movies or stadiums, pick-your-seat or best available, scale, hot events</td></tr>
+      <tr><td>2. Estimate</td><td class="num">3 min</td><td>6k seat map views/s, 12 bookings/s, 1M users for 50k seats</td></tr>
+      <tr><td>3. API</td><td class="num">3 min</td><td>Seat map, hold (all or nothing), booking, status</td></tr>
+      <tr><td>4. Draw the whole system</td><td class="num">8 min</td><td>Catalog and seat map cache; booking, holds, payments; bookings DB; Kafka</td></tr>
+      <tr><td>5. Deep dive: holds</td><td class="num">12 min</td><td>Row lock vs conditional update vs Redis NX + TTL, unique key, late payments</td></tr>
+      <tr><td>6. Deep dive: hot release</td><td class="num">9 min</td><td>Waiting room, shard by show, sold-out fast path, bots</td></tr>
+      <tr><td>7. Risks and v2</td><td class="num">5 min</td><td>Double booking, charged without ticket, holds hiding seats</td></tr>
+    </tbody>
+  </table></div>
+  <div class="say"><p>"Browsing and booking are separate paths. Shows and layouts are cached at the CDN, and each show's seat state is a tiny bitmap in Redis, slightly stale. When a user picks seats, the booking service places an all-or-nothing hold with SET NX and a 10-minute TTL, so the first click wins and abandoned seats come back on their own. Payment uses the booking id as its idempotency key, and confirmation inserts the seats into a Postgres table with a unique key on show and seat, sharded by show, plus an outbox event for tickets and the seat map. For blockbusters a waiting room admits buyers at the rate holds can be served and says 'sold out' the moment nothing is left."</p></div>
+</section>
+
+<section id="numbers">
+  <h2>Numbers to remember</h2>
+  <ul class="tags"><li>Cheat sheet</li></ul>
+  <div class="table"><table><tbody>
+    <tr><td>Seat state for 200 seats at 2 bits</td><td class="num">50 bytes</td></tr>
+    <tr><td>1M bookings a day</td><td class="num">≈ 12 a second</td></tr>
+    <tr><td>Hold timeout</td><td class="num">~5–10 minutes</td></tr>
+    <tr><td>Seats on hold (Little's law)</td><td class="num">holds per minute × minutes held</td></tr>
+    <tr><td>Hot release</td><td class="num">1M users, 50k seats, sold out in minutes</td></tr>
+    <tr><td>Restaurant seating for four</td><td class="num">~90 minutes, 15-minute buckets</td></tr>
+  </tbody></table></div>
+</section>
+  </article>
+</div>
+</main>
+
+<footer class="site"><div class="wrap">Part of Classic System Design, a companion to the <a href="https://devlcodes.github.io/agentic-ai-notebook/system-design/index.html">agentic system designs</a>. The 3D views use Three.js loaded from a CDN, so they need a connection; the text and tables cover the same ground. Figures marked illustrative show the shape of a system, not measured numbers. Check vendor docs before relying on a specific product limit.</div></footer>
+<script>
+(function(){
+  var $ = function(id){ return document.getElementById(id); }, T = 10, SEATS = 50000, PER = 2.5;
+  var RS = [100, 250, 500, 1000, 2500];
+  function fmt(n){ if (n >= 1e6) return +(n/1e6).toFixed(1) + 'M'; if (n >= 1e3) return +(n/1e3).toFixed(n < 1e4 ? 1 : 0) + 'k'; return String(Math.round(n)); }
+  function dur(m){ if (m < 1) return Math.round(m * 60) + ' s'; if (m < 120) return +m.toFixed(m < 10 ? 1 : 0) + ' min'; return +(m/60).toFixed(1) + ' h'; }
+  function run(){
+    var r = RS[+$('tb-r').value], a = +$('tb-a').value / 100;
+    $('tb-r-o').textContent = fmt(r) + '/min'; $('tb-a-o').textContent = Math.round(a * 100) + '%';
+    var ps = Math.max(0, Math.min(1, (T - 2) / 4));
+    var meanS = T >= 6 ? 4 : (2 + T) / 2;
+    var w = (1 - a) * (ps * meanS + (1 - ps) * T) + a * T;
+    var held = Math.min(SEATS, r * PER * w), share = held / SEATS;
+    var sold = r * (1 - a) * ps * PER, out = sold > 0 ? SEATS / sold : Infinity;
+    var lost = Math.round((1 - ps) * 100), ab = Math.min(held, r * PER * a * T), abShare = ab / SEATS;
+    $('tb-m').innerHTML = '<div class="metric"><span class="n"' + (abShare > 0.1 ? ' style="color:var(--c-dlq)"' : '') + '>' + fmt(held) + '</span><span class="l">seats on hold at once</span><small>' + Math.round(share * 100) + '% of the venue; ' + fmt(ab) + ' by buyers who won\'t pay</small></div>' +
+      '<div class="metric"><span class="n">' + fmt(sold) + '/min</span><span class="l">seats sold</span></div>' +
+      '<div class="metric"><span class="n">' + (isFinite(out) ? dur(out) : 'never') + '</span><span class="l">to sell out</span></div>' +
+      '<div class="metric"><span class="n"' + (lost >= 25 ? ' style="color:var(--c-dlq)"' : '') + '>' + lost + '%</span><span class="l">payers who time out</span></div>';
+    var msg;
+    if (lost >= 50) msg = 'Too short: ' + lost + '% of buyers who want to pay run out of time and lose their seats, then rejoin the line. Holds need to cover a normal payment, including OTPs and UPI app switches.';
+    else if (abShare > 0.1) msg = 'Buyers who will never pay are sitting on ' + fmt(ab) + ' seats (' + Math.round(abShare * 100) + '% of the venue) at any moment. Near the end the show looks sold out while seats keep coming back, so people leave. Shorten the hold for hot shows or admit buyers more slowly.';
+    else if (lost >= 25) msg = 'Workable, but ' + lost + '% of paying buyers time out. A slightly longer hold, or extending it while a payment is in flight, keeps them.';
+    else msg = 'Balanced: ' + fmt(held) + ' seats are on hold at any moment, nearly every paying buyer finishes in time, and the 50,000 seats sell out in about ' + dur(out) + '.';
+    if (a > 0 && abShare <= 0.1 && lost < 50) msg += ' Abandoned holds return their seats after ' + T + ' minutes and are sold again.';
+    $('tb-out').textContent = msg;
+  }
+  $('tb-h').addEventListener('click', function(e){ var b = e.target.closest('button'); if (!b) return; T = +b.dataset.v; this.querySelectorAll('button').forEach(function(x){ x.setAttribute('aria-pressed', x === b); }); run(); });
+  ['tb-r','tb-a'].forEach(function(id){ $(id).addEventListener('input', run); });
+  run();
+})();
+
+</script>
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+  }
+}
+</script>
+<script type="module">
+import { boot } from './assets/scene3d.js';
+const D = {};
+D.hero = {
+  hero: true,
+  loop: 16,
+  view: { target: [-0.5, 0, 0.6], w: 30, d: 20, el: 52 },
+  steps: [
+    { t: 0.0, text: 'A user opens the 7 pm show. The seat map comes from the cache: a static layout plus a 50-byte bitmap of seat states.' },
+    { t: 1.8, text: 'They pick F7 and F8. The booking service sets a hold on both seats in Redis with SET NX and a 10-minute expiry: all or nothing.' },
+    { t: 4.0, text: 'The hold succeeds. The user goes to pay; the booking service charges the card with the booking id as the idempotency key.' },
+    { t: 6.6, text: 'Payment succeeds. In one transaction the seats are inserted into the bookings table, where UNIQUE (show_id, seat_id) rules out a double sale, and an event goes to the outbox.' },
+    { t: 9.0, text: 'Kafka fans the event out: the ticket service sends the QR ticket, and the seat map cache marks F7 and F8 as sold.' },
+  ],
+  build(c) {
+    const { V, C, P } = c;
+    const u = c.obj(c.SHAPES.browser(0xd7932a), -13, 4, 'User');
+    const gw = c.obj(c.SHAPES.signpost(C.gov), -7.5, 4, 'Gateway', 'waiting room');
+    const map = c.obj(c.SHAPES.database(C.serve, { r: 0.9, tiers: 2 }), -1.5, 4, 'Seat map cache', 'bitmap per show');
+    const bk = c.obj(c.SHAPES.server({ emi: C.ingest, h: 1.3 }), -7.5, -3, 'Booking service');
+    const hold = c.obj(c.SHAPES.database(C.kb, { r: 0.9 }), -1.5, -6.5, 'Holds (Redis)', 'NX · 10 min');
+    const pay = c.obj(c.SHAPES.shield(C.gov), -1.5, -0.5, 'Payments');
+    const db = c.obj(c.SHAPES.database(C.kb, { r: 1.0, tiers: 2 }), 4, -3, 'Bookings', 'UNIQUE show+seat');
+    const kf = c.obj(c.SHAPES.topic({ parts: 1, len: 3, color: C.cross }), 9.5, -3, 'Kafka');
+    const tk = c.obj(c.SHAPES.server({ emi: C.cross }), 9.5, 4, 'Tickets · email');
+    c.lane([V(-13, 4), V(-1.5, 4)]);
+    c.lane([V(-7.5, 4), V(-7.5, -3), V(4, -3), V(9.5, -3), V(9.5, 4), V(-1.5, 4)]);
+    c.lane([V(-7.5, -3), V(-4.5, -3), V(-4.5, -6.5), V(-1.5, -6.5)]);
+    c.lane([V(-4.5, -3), V(-4.5, -0.5), V(-1.5, -0.5)]);
+    c.packet({ pts: [V(-13, 4), V(-1.5, 4)], t0: 0.2, t1: 1.1, kind: 'ask', from: u, to: map, label: 'seats for 7 pm' });
+    c.packet({ pts: [V(-1.5, 4), V(-13, 4)], t0: 1.1, t1: 1.7, kind: 'doc', color: P.ship, to: u });
+    c.packet({ pts: [V(-13, 4), V(-7.5, 4), V(-7.5, -3)], t0: 1.9, t1: 2.8, kind: 'env', to: bk, label: 'hold F7, F8' });
+    c.packet({ pts: [V(-7.5, -3), V(-4.5, -3), V(-4.5, -6.5), V(-1.5, -6.5)], t0: 2.9, t1: 3.6, kind: 'span', to: hold, label: 'SET NX EX 600' });
+    c.packet({ pts: [V(-1.5, -6.5), V(-4.5, -6.5), V(-4.5, -3), V(-7.5, -3)], t0: 3.7, t1: 4.3, kind: 'span', color: P.ship, to: bk, label: 'held' });
+    c.packet({ pts: [V(-7.5, -3), V(-4.5, -3), V(-4.5, -0.5), V(-1.5, -0.5)], t0: 4.6, t1: 5.4, kind: 'span', to: pay, label: 'charge ₹640' });
+    c.packet({ pts: [V(-1.5, -0.5), V(-4.5, -0.5), V(-4.5, -3), V(-7.5, -3)], t0: 5.7, t1: 6.4, kind: 'span', color: P.ship, to: bk, label: 'paid' });
+    c.packet({ pts: [V(-7.5, -3), V(4, -3)], t0: 6.7, t1: 7.8, kind: 'env', color: P.ship, to: db, label: 'insert seats + outbox' });
+    c.packet({ pts: [V(4, -3), V(9.5, -3)], t0: 9.1, t1: 9.8, kind: 'env', to: kf, label: 'SeatsBooked' });
+    c.packet({ pts: [V(9.5, -3), V(9.5, 4)], t0: 9.9, t1: 10.7, kind: 'env', to: tk, label: 'QR ticket' });
+    c.packet({ pts: [V(9.5, 4), V(-1.5, 4)], t0: 10.8, t1: 12.0, kind: 'env', color: P.ask, to: map, label: 'F7, F8 sold' });
+    c.note('browse · cached', -4.6, 6.4);
+    c.note('book · consistent', -10.2, -0.6);
+  },
+};
+D.race3d = {
+  loop: 17,
+  view: { target: [-0.5, 0, 0], w: 29, d: 17, el: 50 },
+  steps: [
+    { t: 0.0, text: 'Asha and Ravi both click seat F7 within the same few milliseconds.' },
+    { t: 1.6, text: 'Both requests reach the booking service, which runs SET hold:show42:F7 NX EX 600 for each. Redis runs commands one at a time, so only one can win.' },
+    { t: 3.2, text: 'Asha\'s SET succeeds: she holds F7 for 10 minutes. Ravi\'s returns nothing, and he is told to pick another seat.' },
+    { t: 5.4, text: 'Asha gets distracted and never pays. Nobody has to clean up: after 10 minutes the key simply expires.' },
+    { t: 7.8, text: 'F7 shows as free again. Meera holds it, pays, and the booking is inserted under UNIQUE (show_id, seat_id).' },
+    { t: 11.0, text: 'Asha\'s payment finally arrives after her hold expired. Inserting F7 again would break the unique key, so her booking expires and she is refunded automatically.' },
+  ],
+  build(c) {
+    const { V, C, P } = c;
+    const asha = c.obj('person', -12, -4, 'Asha');
+    const ravi = c.obj('person', -12, 0, 'Ravi');
+    const meera = c.obj('person', -12, 4, 'Meera');
+    const bk = c.obj(c.SHAPES.server({ emi: C.ingest, h: 1.3 }), -5, 0, 'Booking service');
+    const hold = c.obj(c.SHAPES.database(C.kb, { r: 0.9 }), 2, -3, 'Redis', 'hold:show42:F7');
+    const db = c.obj(c.SHAPES.database(C.kb, { r: 1.0, tiers: 2 }), 2, 3.5, 'Bookings', 'UNIQUE show+seat');
+    const pay = c.obj(c.SHAPES.shield(C.gov), 9, 3.5, 'Refund');
+    [-4, 0, 4].forEach((z) => c.lane([V(-12, z), V(-8.5, z), V(-8.5, 0), V(-5, 0)]));
+    c.lane([V(-5, 0), V(-1.5, 0), V(-1.5, -3), V(2, -3)]);
+    c.lane([V(-1.5, 0), V(-1.5, 3.5), V(2, 3.5), V(9, 3.5)]);
+    c.packet({ pts: [V(-12, -4), V(-8.5, -4), V(-8.5, 0), V(-5, 0)], t0: 0.2, t1: 1.3, kind: 'ask', from: asha, to: bk, label: 'F7' });
+    c.packet({ pts: [V(-12, 0), V(-5, 0)], t0: 0.25, t1: 1.3, kind: 'ask', from: ravi, to: bk, label: 'F7' });
+    c.packet({ pts: [V(-5, 0), V(-1.5, 0), V(-1.5, -3), V(2, -3)], t0: 1.7, t1: 2.6, n: 2, st: 0.25, kind: 'span', to: hold, label: 'SET NX' });
+    c.packet({ pts: [V(-5, 0), V(-8.5, 0), V(-8.5, -4), V(-12, -4)], t0: 3.3, t1: 4.3, kind: 'env', color: P.ship, to: asha, label: 'held 10 min' });
+    c.packet({ pts: [V(-5, 0), V(-12, 0)], t0: 3.4, t1: 4.3, kind: 'span', s: 1.3, color: P.bad, to: ravi, label: 'taken' });
+    c.pulse(hold, 5.6, 6.6);
+    c.note('TTL runs out · key gone', 7.5, -3);
+    c.packet({ pts: [V(-12, 4), V(-8.5, 4), V(-8.5, 0), V(-5, 0)], t0: 7.9, t1: 8.8, kind: 'ask', from: meera, to: bk, label: 'F7' });
+    c.packet({ pts: [V(-5, 0), V(-1.5, 0), V(-1.5, -3), V(2, -3)], t0: 8.9, t1: 9.5, kind: 'span', color: P.ship, to: hold, label: 'held' });
+    c.packet({ pts: [V(-5, 0), V(-1.5, 0), V(-1.5, 3.5), V(2, 3.5)], t0: 9.8, t1: 10.7, kind: 'env', color: P.ship, to: db, label: 'Meera: F7' });
+    c.packet({ pts: [V(-12, -4), V(-8.5, -4), V(-8.5, 0), V(-5, 0), V(-1.5, 0), V(-1.5, 3.5), V(2, 3.5)], t0: 11.1, t1: 12.6, kind: 'env', color: P.bad, to: db, label: 'late: Asha F7' });
+    c.packet({ pts: [V(2, 3.5), V(9, 3.5)], t0: 12.8, t1: 13.6, kind: 'span', color: P.ask, to: pay, label: 'duplicate key → refund' });
+  },
+};
+
+boot(D);
+</script>
+</body>
+</html>

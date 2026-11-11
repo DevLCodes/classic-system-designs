@@ -1,0 +1,665 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Call Insights · Classic System Design</title>
+<meta name="description" content="Design a pipeline that collects sales-call recordings, transcribes them on GPUs, extracts insights and links each call to a CRM deal within 30 minutes.">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700&family=Instrument+Sans:ital,wght@0,400;0,500;0,600;1,400&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+  /* Layout: a slim site bar, then either a card grid (home), a sticky contents rail + reading column (articles), or a filterable term list (glossary). Light, single look. */
+  :root {
+    color-scheme: light;
+    --bg: #e9ecef; --paper: #f7f8f9; --ink: #1c2530; --muted: #586473; --line: #cdd4dc; --line-strong: #9aa5b1;
+    --accent: #4255d4; --accent-ink: #ffffff; --track: #d3d9e0; --code-bg: #eef1f4; --wire: #7d8996;
+    --c-ingest: #2a9d8f; --c-kb: #4d5fd8; --c-serve: #d7932a; --c-model: #e2674f; --c-gov: #b2456e; --c-cross: #4a5562; --c-dlq: #b23a3a; --c-ok: #2f8f5b;
+    --t-src: #e4e8ec; --t-ingest: #d8eeea; --t-kb: #dfe3fa; --t-serve: #f8ead2; --t-model: #fbe1da; --t-gov: #f3dde6; --t-cross: #dfe2e6; --t-dlq: #f6dddb;
+    --font-display: "Bricolage Grotesque", "Avenir Next", "Segoe UI", system-ui, sans-serif;
+    --font-body: "Instrument Sans", "Helvetica Neue", "Segoe UI", system-ui, sans-serif;
+    --font-mono: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  @media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
+  body { margin: 0; background: var(--bg); color: var(--ink); font-family: var(--font-body); font-size: 16px; line-height: 1.6; }
+  a { color: var(--accent); }
+  .wrap { max-width: 1240px; margin: 0 auto; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
+
+  .sitebar { border-bottom: 1px solid var(--line); background: var(--paper); }
+  .sitebar .wrap { display: flex; align-items: center; gap: 18px; flex-wrap: wrap; padding-block: 12px; }
+  .brand { font-family: var(--font-display); font-weight: 700; font-size: 17px; color: var(--ink); text-decoration: none; margin-right: auto; }
+  .sitebar nav { display: flex; gap: 16px; flex-wrap: wrap; font-size: 14px; }
+  .sitebar nav a { color: var(--muted); text-decoration: none; }
+  .sitebar nav a:hover, .sitebar nav a[aria-current="page"] { color: var(--ink); }
+  .sitebar nav a[aria-current="page"] { font-weight: 600; }
+
+  .intro { padding-block: 40px 8px; display: grid; gap: 10px; max-width: 820px; }
+  .eyebrow { margin: 0; font-family: var(--font-mono); font-size: 12px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+  h1 { margin: 0; font-family: var(--font-display); font-weight: 700; font-size: clamp(30px, 5vw, 46px); line-height: 1.05; text-wrap: balance; }
+  .intro .lead { font-size: 18px; margin: 0; }
+
+  .doc { display: grid; grid-template-columns: 220px minmax(0, 1fr); gap: 48px; padding-block: 36px 72px; }
+  .toc { position: sticky; top: calc(env(safe-area-inset-top, 0px) + 20px); align-self: start; }
+  .toc p { margin: 0 0 8px; font-family: var(--font-mono); font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+  .toc ol { margin: 0; padding: 0; list-style: none; display: grid; gap: 2px; counter-reset: toc; }
+  .toc li { counter-increment: toc; }
+  .toc a { display: flex; gap: 8px; padding: 3px 0; font-size: 14px; color: var(--muted); text-decoration: none; }
+  .toc a::before { content: counter(toc, decimal-leading-zero); font-family: var(--font-mono); font-size: 11.5px; padding-top: 2px; color: var(--line-strong); }
+  .toc a:hover { color: var(--ink); }
+  article { min-width: 0; max-width: 760px; }
+  section { padding-bottom: 36px; margin-bottom: 36px; border-bottom: 1px solid var(--line); scroll-margin-top: 20px; }
+  section:last-child { border-bottom: 0; }
+  h2 { margin: 0 0 10px; font-family: var(--font-display); font-weight: 700; font-size: 28px; line-height: 1.15; text-wrap: balance; }
+  h3 { margin: 26px 0 6px; font-family: var(--font-display); font-weight: 600; font-size: 19px; line-height: 1.25; }
+  p { margin: 0 0 14px; }
+  .lead { font-size: 18px; }
+  ul.plain, ol.plain { margin: 0 0 16px; padding-left: 22px; display: grid; gap: 6px; }
+  code { font-family: var(--font-mono); font-size: 0.88em; background: var(--code-bg); padding: 1px 5px; border-radius: 4px; }
+  pre { margin: 0 0 16px; padding: 14px 16px; background: var(--code-bg); border-radius: 10px; overflow-x: auto; font-size: 13px; line-height: 1.55; }
+  pre code { background: none; padding: 0; font-size: inherit; }
+  .table { overflow-x: auto; margin: 0 0 18px; }
+  table { width: 100%; border-collapse: collapse; font-size: 14.5px; line-height: 1.45; }
+  th, td { text-align: left; vertical-align: top; padding: 8px 10px; border-bottom: 1px solid var(--line); }
+  th { font-family: var(--font-mono); font-size: 11.5px; font-weight: 500; letter-spacing: .05em; text-transform: uppercase; color: var(--muted); }
+  td.num { font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .note { border-left: 3px solid var(--accent); background: var(--paper); padding: 12px 16px; border-radius: 0 10px 10px 0; margin: 0 0 18px; }
+  .note p:last-child { margin: 0; }
+  .formula { font-family: var(--font-mono); font-size: 14px; background: var(--paper); border: 1px solid var(--line); border-radius: 10px; padding: 12px 16px; margin: 0 0 16px; overflow-x: auto; white-space: nowrap; }
+  .related { display: flex; flex-wrap: wrap; gap: 8px; margin: 0; padding: 0; list-style: none; }
+  .related a { display: inline-block; padding: 4px 12px; border: 1px solid var(--line); border-radius: 999px; font-size: 14px; color: var(--ink); text-decoration: none; background: var(--paper); }
+  .related a:hover { border-color: var(--ink); }
+  .pager { display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; font-size: 14px; }
+  footer.site { border-top: 1px solid var(--line); padding-block: 20px 40px; font-size: 13px; color: var(--muted); }
+  a:focus-visible, input:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+  /* home */
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 16px; margin: 0 0 40px; padding: 0; list-style: none; }
+  .card { display: grid; gap: 8px; height: 100%; padding: 18px; background: var(--paper); border: 1px solid var(--line); border-radius: 14px; color: var(--ink); text-decoration: none; }
+  .card:hover { border-color: var(--ink); }
+  .card .k { font-family: var(--font-mono); font-size: 11px; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
+  .card h3 { margin: 0; font-size: 20px; }
+  .card p { margin: 0; font-size: 14.5px; color: var(--muted); }
+  .card svg { width: 100%; height: auto; display: block; }
+  .card.feature svg { max-width: 420px; justify-self: center; }
+  .card.feature { grid-column: 1 / -1; grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr); align-items: center; gap: 24px; }
+  .home-h { margin: 28px 0 12px; font-family: var(--font-display); font-size: 24px; }
+
+  /* glossary */
+  .gl-tools { position: sticky; top: 0; z-index: 2; background: var(--bg); padding-block: 12px; display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+  .gl-tools input { flex: 1 1 260px; min-width: 0; font: 15px var(--font-body); padding: 9px 12px; border-radius: 10px; border: 1px solid var(--line-strong); background: #fff; color: var(--ink); }
+  .gl-letters { display: flex; flex-wrap: wrap; gap: 4px; font-family: var(--font-mono); font-size: 13px; }
+  .gl-letters a { padding: 2px 6px; border-radius: 6px; text-decoration: none; color: var(--muted); }
+  .gl-letters a:hover { background: var(--paper); color: var(--ink); }
+  .gl { max-width: 860px; }
+  .gl-item { margin: 0; }
+  .gl-item { display: grid; grid-template-columns: 220px minmax(0, 1fr); gap: 16px; padding: 12px 0; border-bottom: 1px solid var(--line); scroll-margin-top: 70px; }
+  .gl-item dt { font-weight: 600; }
+  .gl-item dt small { display: block; font-weight: 400; font-family: var(--font-mono); font-size: 11px; color: var(--muted); letter-spacing: .04em; text-transform: uppercase; margin-top: 2px; }
+  .gl-item dd { margin: 0; }
+  .gl-item dd .see { font-size: 13.5px; }
+  .gl-letter { margin: 26px 0 4px; font-family: var(--font-display); font-size: 22px; scroll-margin-top: 70px; }
+
+  @media (max-width: 900px) {
+    .doc { grid-template-columns: minmax(0, 1fr); gap: 24px; padding-block: 28px 56px; }
+    .toc { position: static; }
+    .toc ol { grid-template-columns: repeat(2, minmax(0, 1fr)); column-gap: 12px; }
+    .card.feature { grid-template-columns: minmax(0, 1fr); }
+  }
+  @media (max-width: 640px) {
+    .gl-item { grid-template-columns: minmax(0, 1fr); gap: 4px; }
+    h2 { font-size: 24px; }
+    .intro .lead, .lead { font-size: 16.5px; }
+  }
+
+  /* diagrams */
+  .fig { margin: 6px 0 24px; overflow-x: auto; }
+  .fig svg { display: block; width: 100%; height: auto; min-width: 600px; }
+  .fig figcaption { margin-top: 8px; font-size: 13px; line-height: 1.45; color: var(--muted); }
+  .dg text { font-family: var(--font-body); font-size: 13px; fill: var(--ink); }
+  .dg .sm { font-size: 11.5px; fill: var(--muted); }
+  .dg .small { font-size: 12px; }
+  .dg .b { font-weight: 600; }
+  .dg .mono { font-family: var(--font-mono); }
+  .dg .it { font-style: italic; }
+  .dg .mute { fill: var(--muted); }
+  .dg .gov { fill: var(--c-gov); font-weight: 600; }
+  .dg .okt { fill: var(--c-ok); font-weight: 600; }
+  .dg .bad { fill: var(--c-dlq); font-weight: 600; }
+  .dg .cap { font-family: var(--font-mono); font-size: 11px; letter-spacing: .06em; fill: var(--muted); }
+  .dg .big { font-family: var(--font-display); font-size: 30px; font-weight: 700; fill: var(--ink); }
+  .dg .box { fill: var(--paper); stroke: var(--line-strong); stroke-width: 1.25; }
+  .dg .ghost { fill: none; stroke: var(--line-strong); stroke-width: 1.25; stroke-dasharray: 5 5; }
+  .dg .track { fill: var(--track); }
+  .dg .rule { stroke: var(--line); stroke-width: 1; }
+  .dg .axis { stroke: var(--line-strong); stroke-width: 1.25; }
+  .dg .wire { fill: none; stroke: var(--wire); stroke-width: 1.4; }
+  .dg .wire.dash { stroke-dasharray: 4 4; }
+  .dg .wire.hot { stroke: var(--accent); stroke-width: 2; }
+  .dg .wire.red { stroke: var(--c-dlq); }
+  .dg .ah { fill: var(--wire); }
+  .dg .xmark { stroke: var(--c-dlq); stroke-width: 1.8; fill: none; }
+  .dg .tick { stroke: var(--c-ok); stroke-width: 2; fill: none; }
+  .dg .k-src { fill: var(--t-src); stroke: #8795a3; stroke-width: 1.5; }
+  .dg .k-ingest { fill: var(--t-ingest); stroke: var(--c-ingest); stroke-width: 1.5; }
+  .dg .k-kb { fill: var(--t-kb); stroke: var(--c-kb); stroke-width: 1.5; }
+  .dg .k-serve { fill: var(--t-serve); stroke: var(--c-serve); stroke-width: 1.5; }
+  .dg .k-model { fill: var(--t-model); stroke: var(--c-model); stroke-width: 1.5; }
+  .dg .k-gov { fill: var(--t-gov); stroke: var(--c-gov); stroke-width: 1.5; }
+  .dg .k-cross { fill: var(--t-cross); stroke: var(--c-cross); stroke-width: 1.5; }
+  .dg .k-dlq { fill: var(--t-dlq); stroke: var(--c-dlq); stroke-width: 1.5; }
+  .dg .k-user { fill: #ffffff; stroke: var(--line-strong); stroke-width: 1.5; }
+  .dg .f-serve { fill: var(--c-serve); } .dg .f-kb { fill: var(--c-kb); } .dg .f-model { fill: var(--c-model); } .dg .f-gov { fill: var(--c-gov); } .dg .f-ingest { fill: var(--c-ingest); } .dg .f-cross { fill: #b8c0c9; } .dg .f-dlq { fill: var(--c-dlq); } .dg .f-ok { fill: var(--c-ok); }
+  .dg .cell { fill: var(--paper); stroke: var(--line-strong); stroke-width: 1; }
+  .dg .cell.hot { fill: var(--t-ingest); stroke: var(--c-ingest); stroke-width: 1.5; }
+  .dg .cell.old { fill: var(--t-kb); stroke: var(--c-kb); }
+  .dg .cell.new { fill: var(--t-ingest); stroke: var(--c-ingest); stroke-width: 1.5; }
+  .dg .cell.gone { fill: var(--paper); stroke: var(--line); }
+  .dg .dot-hr { fill: var(--c-gov); } .dg .dot-it { fill: var(--c-kb); } .dg .dot-eng { fill: var(--c-ingest); } .dg .dot-q { fill: var(--c-serve); stroke: var(--ink); stroke-width: 1.5; }
+  .dg .halo { fill: none; stroke: var(--c-serve); stroke-width: 1.5; stroke-dasharray: 4 4; }
+  .dg .zone { fill: var(--paper); stroke: var(--line); stroke-width: 1; }
+</style>
+
+<style>
+  .lab { margin: 6px 0 26px; padding: 14px 16px 16px; background: var(--paper); border: 1px solid var(--line); border-radius: 14px; }
+  .lab-row { display: flex; flex-wrap: wrap; gap: 10px 18px; align-items: center; margin: 0 0 12px; }
+  .lab-k { font-family: var(--font-mono); font-size: 11px; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
+  .lab label { display: inline-flex; gap: 8px; align-items: center; font-size: 14px; }
+  .lab input[type=range] { width: 150px; accent-color: var(--accent); }
+  .lab input[type=checkbox] { width: 16px; height: 16px; accent-color: var(--accent); }
+  .lab input[type=text] { flex: 1 1 260px; min-width: 0; font: 15px var(--font-body); padding: 8px 11px; border-radius: 9px; border: 1px solid var(--line-strong); background: #fff; color: var(--ink); }
+  .lab output { font-family: var(--font-mono); font-size: 12.5px; min-width: 6ch; font-variant-numeric: tabular-nums; }
+  .seg { display: inline-flex; flex-wrap: wrap; gap: 6px; }
+  .seg button, .chips button { font: 600 13px var(--font-body); color: var(--ink); background: #fff; border: 1px solid var(--line); border-radius: 8px; padding: 6px 12px; cursor: pointer; }
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; }
+  .chips button { font-weight: 500; border-radius: 999px; padding: 4px 11px; font-size: 13px; }
+  .seg button:hover, .chips button:hover { border-color: var(--ink); }
+  .seg button[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+  .seg button:focus-visible, .chips button:focus-visible, .lab input:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .lab-out { margin: 12px 0 0; padding: 10px 12px; background: #fff; border: 1px solid var(--line); border-radius: 10px; font-size: 14.5px; line-height: 1.5; font-variant-numeric: tabular-nums; }
+  .chunks { display: grid; gap: 8px; max-height: 470px; overflow: auto; padding-right: 4px; }
+  .chunk { min-width: 0; padding: 8px 11px; background: #fff; border: 1px solid var(--line); border-left: 4px solid var(--c-kb); border-radius: 8px; font-size: 14px; line-height: 1.5; overflow-wrap: anywhere; }
+  .chunk:nth-child(even) { border-left-color: var(--c-ingest); }
+  .chunk.ans { box-shadow: 0 0 0 2px var(--c-serve); }
+  .chunk .ch { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-bottom: 4px; font-family: var(--font-mono); font-size: 11px; color: var(--muted); }
+  .chunk .pfx { display: block; font-family: var(--font-mono); font-size: 11.5px; color: var(--c-kb); }
+  .chunk .ov { background: var(--track); border-radius: 3px; }
+  .chunk mark { background: #ffe9b3; border-radius: 3px; padding: 0 2px; }
+  .chunk table { width: auto; font-size: 13px; margin: 4px 0; }
+  .chunk td { padding: 2px 10px 2px 0; border-bottom: 1px solid var(--line); }
+  .badge { display: inline-block; padding: 0 7px; border-radius: 999px; border: 1px solid; font-family: var(--font-mono); font-size: 10.5px; line-height: 1.6; }
+  .badge.bad { color: var(--c-dlq); border-color: var(--c-dlq); background: var(--t-dlq); }
+  .badge.ok { color: var(--c-ok); border-color: var(--c-ok); background: #e3f3ea; }
+  .badge.info { color: var(--c-kb); border-color: var(--c-kb); background: var(--t-kb); }
+  .bars { display: grid; gap: 8px; margin: 4px 0 0; }
+  .bar-row { display: grid; grid-template-columns: minmax(0, 150px) minmax(0, 1fr) 46px; gap: 10px; align-items: center; font-size: 14px; }
+  .bar { position: relative; height: 14px; border-radius: 7px; background: var(--track); }
+  .bar i { position: absolute; inset: 0 auto 0 0; border-radius: 7px; background: var(--c-kb); transition: width .3s; }
+  .bar b { position: absolute; top: -4px; bottom: -4px; width: 2px; background: var(--c-dlq); }
+  .bar-row .v { font-family: var(--font-mono); font-size: 12.5px; text-align: right; }
+  .stages { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 10px; padding: 0; list-style: none; font-size: 13px; }
+  .stages li { padding: 2px 10px; border-radius: 999px; border: 1px solid var(--line); color: var(--muted); background: #fff; }
+  .stages li.hit { border-color: var(--accent); color: var(--accent-ink); background: var(--accent); }
+  .stages li.skip { text-decoration: line-through; }
+  .rlist { display: grid; gap: 6px; margin: 0; padding: 0; list-style: none; counter-reset: r; }
+  .rlist li { counter-increment: r; display: grid; grid-template-columns: 28px minmax(0, 1fr) auto; gap: 10px; align-items: center; padding: 6px 10px; background: #fff; border: 1px solid var(--line); border-radius: 8px; font-size: 14px; }
+  .rlist li::before { content: counter(r); font-family: var(--font-mono); font-size: 12px; color: var(--muted); }
+  .rlist li.rel { border-color: var(--c-ok); background: #f0f8f3; }
+  .rlist button { font: 600 12px var(--font-body); padding: 3px 10px; border-radius: 999px; border: 1px solid var(--line-strong); background: #fff; color: var(--ink); cursor: pointer; white-space: nowrap; }
+  .rlist li.rel button { background: var(--c-ok); border-color: var(--c-ok); color: #fff; }
+  .metrics { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 8px; margin: 12px 0 0; }
+  .metric { padding: 8px 10px; background: #fff; border: 1px solid var(--line); border-radius: 10px; }
+  .metric .n { display: block; font-family: var(--font-display); font-size: 24px; font-weight: 700; font-variant-numeric: tabular-nums; }
+  .metric .l { font-family: var(--font-mono); font-size: 11px; letter-spacing: .04em; text-transform: uppercase; color: var(--muted); }
+  .metric small { display: block; font-size: 12px; color: var(--muted); line-height: 1.35; margin-top: 2px; }
+  td.pass { color: var(--c-ok); font-weight: 600; } td.fail { color: var(--c-dlq); font-weight: 600; }
+  .say { border-left: 3px solid var(--c-serve); background: var(--paper); padding: 12px 16px; border-radius: 0 10px 10px 0; margin: 0 0 16px; font-size: 15.5px; }
+  .say p:last-child { margin: 0; }
+</style>
+
+<style>
+  .lab-chart { display: block; width: 100%; height: auto; margin: 4px 0 0; }
+  .lab-chart text { font-family: var(--font-body); font-size: 12px; fill: var(--muted); }
+  .grid-cells { display: grid; gap: 4px; }
+  .srv { display: grid; grid-template-columns: 92px minmax(0,1fr) 70px; gap: 10px; align-items: center; font-size: 14px; }
+  .muted { color: var(--muted); }
+  .lab select { font: 14px var(--font-body); padding: 6px 8px; border-radius: 8px; border: 1px solid var(--line-strong); background: #fff; color: var(--ink); }
+  .lab input[type=number] { width: 9ch; font: 14px var(--font-mono); padding: 6px 8px; border-radius: 8px; border: 1px solid var(--line-strong); background: #fff; color: var(--ink); }
+</style><style>
+  .prompt { margin: 0; font-size: 18px; line-height: 1.5; color: var(--ink); }
+  .prompt q { font-style: italic; }
+  .legend { display: flex; flex-wrap: wrap; gap: 6px 14px; margin: 4px 0 0; padding: 0; list-style: none; font-size: 13px; color: var(--muted); }
+  .legend li { display: flex; align-items: center; gap: 6px; }
+  .legend i { width: 11px; height: 11px; border-radius: 3px; display: inline-block; }
+  .tags { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 16px; padding: 0; list-style: none; }
+  .tags li { font-family: var(--font-mono); font-size: 11px; letter-spacing: .04em; padding: 2px 8px; border-radius: 6px; border: 1px solid var(--line); color: var(--muted); }
+  @media (max-width: 640px) { .prompt { font-size: 16.5px; } }
+</style>
+<link rel="stylesheet" href="assets/scene3d.css">
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs><marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" class="ah" style="fill:#7d8996"/></marker></defs></svg>
+<header class="sitebar"><div class="wrap"><a class="brand" href="index.html">Classic System Design</a><nav aria-label="Site"><a href="index.html">Home</a><a href="index.html#blocks">Building blocks</a><a href="index.html#designs" aria-current="page">Designs</a><a href="https://devlcodes.github.io/agentic-ai-notebook/system-design/index.html">Agentic designs ↗</a></nav></div></header>
+<main>
+<header class="wrap"><div class="intro"><p class="eyebrow">Classic system design walkthrough</p><h1>Call Insights</h1><p class="prompt"><q>A sales platform's reps make video calls all day on Zoom, Google Meet and Teams. Build a system that collects every recording, transcribes it, analyses how the call went (sentiment, objections, next steps), links it to the right account or deal, and shows the insights to the rep and their manager within 30 minutes of the call ending. 10,000 reps make 4–5 calls a day, about 50 minutes each.</q></p><ul class="legend" aria-label="Colour key"><li><i style="background:var(--c-ingest)"></i>Ingestion</li><li><i style="background:var(--c-serve)"></i>Serving insights</li><li><i style="background:var(--c-kb)"></i>Storage</li><li><i style="background:var(--c-cross)"></i>Pipeline and queues</li><li><i style="background:var(--c-gov)"></i>Security and PII</li></ul></div></header>
+<div class="wrap"><figure class="fig3d hero" id="hero">
+  <div class="stage3d" role="img" aria-label="Animated 3D view: a call ends on Zoom, which sends a webhook. The ingestion service fetches the recording into object storage and starts a workflow. Workers extract the audio, a GPU pool transcribes it with speaker labels, an insights model finds sentiment, topics and next steps, and a matcher links the call to a CRM deal by participants' email domains. Results land in the insights database, and the rep's dashboard shows them."><p class="hint3">3D · drag to turn</p><button class="reset3 ghost" type="button" hidden>Reset view</button><p class="nogl">The 3D view needs WebGL and a connection, because Three.js loads from a CDN. The sections below cover the same ground.</p></div>
+  <div class="ctl3"><button class="pp" type="button">Pause</button><span class="k">Step</span><div class="steps3"></div><span class="meta3"></span></div>
+  <div class="track3"><div class="fill3"></div></div>
+  <p class="out3" aria-live="polite"></p>
+  <figcaption>Illustrative. A batch pipeline that runs per call: each step reads from storage, writes to storage, and reports to the workflow engine.</figcaption>
+</figure></div>
+<div class="wrap doc">
+  <nav class="toc" aria-label="Sections"><p>The solution</p><ol><li><a href="#requirements">Requirements</a></li><li><a href="#success">Success metrics</a></li><li><a href="#estimates">Estimates</a></li><li><a href="#api">Interfaces</a></li><li><a href="#architecture">Architecture</a></li><li><a href="#ingest">Getting the recordings</a></li><li><a href="#pipeline">Choosing the pipeline style</a></li><li><a href="#ml">Transcription and insights</a></li><li><a href="#lab">Try it: size the GPU pool</a></li><li><a href="#matching">Linking calls to deals</a></li><li><a href="#storage">Storage and retention</a></li><li><a href="#security">Security and privacy</a></li><li><a href="#failure">Failure handling</a></li><li><a href="#observability">Observability</a></li><li><a href="#risks">Risks and v2</a></li><li><a href="#presenting">Presenting it in 45 minutes</a></li><li><a href="#numbers">Numbers to remember</a></li></ol></nav>
+  <article>
+
+<section id="requirements">
+  <h2>Requirements</h2>
+  <ul class="tags"><li>Clarify</li><li><a href="requirements.html">Non-functional requirements</a></li></ul>
+  <p class="lead">This is a data pipeline more than a web service: third-party sources, heavy media files, expensive GPU steps, and a soft deadline per item. Eventual consistency is fine; losing a call or leaking one is not.</p>
+  <div class="table"><table>
+    <thead><tr><th>Question</th><th>Assumption</th><th>Why it matters</th></tr></thead>
+    <tbody>
+      <tr><td>Sources</td><td>Zoom, Google Meet, Microsoft Teams, more later</td><td>Each has its own auth, webhooks, rate limits and formats</td></tr>
+      <tr><td>Volume</td><td class="num">10k reps × 5 calls = 50k calls a day</td><td>≈ 42k hours of recordings a day</td></tr>
+      <tr><td>Deadline</td><td class="num">insights within 30 minutes of the call ending</td><td>Sizing for the business-hours peak, not the daily average</td></tr>
+      <tr><td>Outputs</td><td>Transcript with speakers, sentiment, topics, objections, next steps, a deal risk or momentum score</td><td>Several models; new ones will be added</td></tr>
+      <tr><td>Consistency</td><td>Eventual; a few minutes of lag is fine</td><td>Asynchronous pipeline, retries</td></tr>
+      <tr><td>Security</td><td>Calls contain customer PII and confidential deals</td><td>Tenant isolation, encryption, access control, retention limits</td></tr>
+      <tr><td>Extensibility</td><td>Add new feature extractors and models without touching others</td><td>Steps communicate through contracts and storage</td></tr>
+    </tbody>
+  </table></div>
+  <p>Out of scope: live, during-the-call coaching (a streaming design with very different latency needs) and building our own speech model from scratch.</p>
+</section>
+
+<section id="success">
+  <h2>Success metrics</h2>
+  <ul class="tags"><li>Define success</li></ul>
+  <div class="table"><table>
+    <thead><tr><th>Kind</th><th>Metric</th><th>Target</th></tr></thead>
+    <tbody>
+      <tr><td>Product</td><td>Reps and managers who open insights weekly; deals with insights attached</td><td class="num">growing</td></tr>
+      <tr><td>Timeliness</td><td>Call end to insights visible, p95</td><td class="num">&lt; 30 min</td></tr>
+      <tr><td>Completeness</td><td>Share of recorded calls that produce insights</td><td class="num">&gt; 99.5%</td></tr>
+      <tr><td>Quality</td><td>Transcript word error rate; correct deal match rate</td><td class="num">&lt; 10%; &gt; 95%</td></tr>
+      <tr><td>Guardrail</td><td>Cross-tenant data access; cost per call hour</td><td class="num">0; falling</td></tr>
+    </tbody>
+  </table></div>
+</section>
+
+<section id="estimates">
+  <h2>Estimates</h2>
+  <ul class="tags"><li>Back of the envelope</li><li><a href="numbers.html">Numbers</a></li></ul>
+  <figure class="fig"><svg viewBox="0 0 722 150" class="dg" role="img" aria-label="Key numbers: 50,000 calls and 42,000 hours a day, about 21 terabytes of video a day, about 1.3 terabytes of audio, about 4,400 calls ending in the peak hour, about 1,000 GPU hours a day for transcription">
+    <rect x="10" y="10" width="134" height="92" rx="8" class="k-ingest"/><text x="24" y="52" class="big">42k h</text><text x="24" y="78" class="sm">of calls a day</text><text x="24" y="94" class="sm">50k × 50 min</text>
+    <rect x="154" y="10" width="134" height="92" rx="8" class="k-kb"/><text x="168" y="52" class="big">21 TB</text><text x="168" y="78" class="sm">video a day</text><text x="168" y="94" class="sm">at ~0.5 GB an hour</text>
+    <rect x="298" y="10" width="134" height="92" rx="8" class="k-kb"/><text x="312" y="52" class="big">1.3 TB</text><text x="312" y="78" class="sm">audio a day</text><text x="312" y="94" class="sm">~30 MB an hour</text>
+    <rect x="442" y="10" width="134" height="92" rx="8" class="k-cross"/><text x="456" y="52" class="big">4.4k</text><text x="456" y="78" class="sm">calls in the peak hour</text><text x="456" y="94" class="sm">70% in 8 business hours</text>
+    <rect x="586" y="10" width="126" height="92" rx="8" class="k-cross"/><text x="600" y="52" class="big">~1k</text><text x="600" y="78" class="sm">GPU hours a day</text><text x="600" y="94" class="sm">at ~40× real time</text>
+    <text x="10" y="132" class="small">The volume of requests is tiny. What drives the design is large files, GPU minutes, and the peak hour.</text>
+  </svg></figure>
+  <ul class="plain">
+    <li><strong>Calls:</strong> 10k reps × 5 = 50k calls a day; × 50 minutes = 2.5M minutes ≈ 42k hours of recordings.</li>
+    <li><strong>Storage:</strong> at ~0.5 GB per hour of 720p video, that is about 21 TB a day, or about 7.6 PB a year if we kept every video. Audio alone is ~30 MB an hour, about 1.3 TB a day, and transcripts are tiny (~50 KB per call). So: keep video briefly, keep audio and transcripts longer. (A rough note that worked this out as 4 TB a day was off by about 10×.)</li>
+    <li><strong>Peak:</strong> calls cluster in working hours. If 70% end in an 8-hour window, the peak hour sees ~4,400 calls, about 3,600 hours of audio to process in that hour.</li>
+    <li><strong>GPU:</strong> a modern speech model on one GPU, with batching, transcribes roughly 30–50× faster than real time. At 40×, 42k hours a day is ~1,050 GPU hours a day; covering the peak hour within the deadline takes about 90–100 GPUs (the lab shows the curve).</li>
+  </ul>
+</section>
+
+<section id="api">
+  <h2>Interfaces</h2>
+  <ul class="tags"><li>Interface</li><li><a href="protocols.html">Webhooks</a></li></ul>
+<pre><code>// inbound, from vendors
+POST /webhooks/zoom          { event: "recording.completed", meeting_id, download_url, … }
+POST /webhooks/teams | /webhooks/meet
+
+// internal workflow contract (one per step)
+step(call_id, input_uri) → { status, output_uri, metrics }   // idempotent by (call_id, step)
+
+// outbound, to the app
+GET  /api/calls?deal_id=…&amp;since=…
+GET  /api/calls/{id}         → { transcript_uri, summary, sentiment, topics[], next_steps[], deal_id }
+GET  /api/deals/{id}/signals → { risk: 0.31, momentum: "up", recent_calls: [...] }</code></pre>
+  <p>Each pipeline step takes a call id and an input location and writes an output location, so steps are independent, testable and replaceable. Making every step idempotent by <code>(call_id, step)</code> means a retry or duplicate message just overwrites the same output.</p>
+</section>
+
+<section id="architecture">
+  <h2>Architecture</h2>
+  <ul class="tags"><li>Whole system</li></ul>
+  <figure class="fig"><svg viewBox="0 0 722 300" class="dg" role="img" aria-label="Architecture: vendor webhooks reach the ingestion service, which downloads recordings to object storage and starts a workflow; the workflow engine runs audio extraction, transcription on a GPU pool, insight models and CRM matching through task queues, with a dead-letter queue for failures; results go to the insights database and search index, served by the insights API to the app">
+    <text x="10" y="22" class="cap">INGEST · ~50K CALLS/DAY</text>
+    <rect x="10" y="34" width="110" height="40" rx="8" class="k-user"/><text x="65" y="52" class="small b" text-anchor="middle">Zoom · Meet</text><text x="65" y="67" class="sm" text-anchor="middle">Teams</text>
+    <path d="M120 54 L150 54" class="wire" marker-end="url(#ah)"/><text x="135" y="46" class="sm" text-anchor="middle">webhook</text>
+    <rect x="152" y="34" width="130" height="40" rx="8" class="k-ingest"/><text x="217" y="52" class="small b" text-anchor="middle">Ingestion service</text><text x="217" y="67" class="sm" text-anchor="middle">verify · fetch · dedupe</text>
+    <path d="M282 54 L312 54" class="wire" marker-end="url(#ah)"/>
+    <rect x="314" y="34" width="120" height="40" rx="18" class="k-kb"/><text x="374" y="52" class="small b" text-anchor="middle">Object storage</text><text x="374" y="67" class="sm" text-anchor="middle">per-tenant prefix</text>
+    <path d="M217 74 L217 120" class="wire" marker-end="url(#ah)"/><text x="225" y="102" class="sm">start workflow</text>
+    <text x="10" y="116" class="cap">PIPELINE</text>
+    <rect x="152" y="122" width="130" height="40" rx="8" class="k-cross"/><text x="217" y="140" class="small b" text-anchor="middle">Workflow engine</text><text x="217" y="155" class="sm" text-anchor="middle">Temporal · Step Functions</text>
+    <path d="M282 142 L312 142" class="wire" marker-end="url(#ah)"/>
+    <rect x="314" y="122" width="90" height="40" rx="8" class="k-cross"/><text x="359" y="140" class="small b" text-anchor="middle">Extract</text><text x="359" y="155" class="sm" text-anchor="middle">audio · frames</text>
+    <path d="M404 142 L424 142" class="wire" marker-end="url(#ah)"/>
+    <rect x="426" y="122" width="96" height="40" rx="8" class="k-cross"/><text x="474" y="140" class="small b" text-anchor="middle">Transcribe</text><text x="474" y="155" class="sm" text-anchor="middle">GPU · speakers</text>
+    <path d="M522 142 L542 142" class="wire" marker-end="url(#ah)"/>
+    <rect x="544" y="122" width="80" height="40" rx="8" class="k-cross"/><text x="584" y="140" class="small b" text-anchor="middle">Insights</text><text x="584" y="155" class="sm" text-anchor="middle">models</text>
+    <path d="M624 142 L644 142" class="wire" marker-end="url(#ah)"/>
+    <rect x="646" y="122" width="66" height="40" rx="8" class="k-cross"/><text x="679" y="140" class="small b" text-anchor="middle">Match</text><text x="679" y="155" class="sm" text-anchor="middle">CRM</text>
+    <path d="M217 162 L217 192 L120 192" class="wire dash red" marker-end="url(#ah)"/>
+    <rect x="10" y="176" width="110" height="34" rx="8" class="k-dlq"/><text x="65" y="198" class="small b" text-anchor="middle">Dead letters</text>
+    <path d="M679 162 L679 216" class="wire" marker-end="url(#ah)"/>
+    <text x="10" y="236" class="cap">SERVING</text>
+    <rect x="470" y="218" width="242" height="40" rx="18" class="k-kb"/><text x="591" y="236" class="small b" text-anchor="middle">Insights DB + search index</text><text x="591" y="251" class="sm" text-anchor="middle">Postgres · OpenSearch</text>
+    <path d="M470 238 L404 238" class="wire" marker-end="url(#ah)"/>
+    <rect x="282" y="218" width="120" height="40" rx="8" class="k-serve"/><text x="342" y="236" class="small b" text-anchor="middle">Insights API</text><text x="342" y="251" class="sm" text-anchor="middle">authz per tenant</text>
+    <path d="M282 238 L192 238" class="wire" marker-end="url(#ah)"/>
+    <rect x="70" y="218" width="120" height="40" rx="8" class="k-user"/><text x="130" y="236" class="small b" text-anchor="middle">Rep · manager</text><text x="130" y="251" class="sm" text-anchor="middle">app, CRM widget</text>
+    <text x="10" y="290" class="sm">Every step reads its input from object storage and writes its output there; the engine tracks state, retries and deadlines.</text>
+  </svg><figcaption>The workflow engine owns the state of each call; workers are stateless and pull tasks from queues sized per step (CPU for extraction, GPU for transcription).</figcaption></figure>
+</section>
+
+<section id="ingest">
+  <h2>Getting the recordings</h2>
+  <ul class="tags"><li>Deep dive 1</li><li><a href="rate-limiting.html">Rate limits</a></li></ul>
+  <ul class="plain">
+    <li><strong>Connect once per tenant:</strong> an admin authorizes our app with each vendor (OAuth). Tokens are stored encrypted and refreshed automatically.</li>
+    <li><strong>Webhooks first:</strong> Zoom sends <code>recording.completed</code> with a download URL; Teams and Meet have their own notification APIs. Verify each webhook's signature, store the event, and return 200 immediately. Processing happens later.</li>
+    <li><strong>Polling as a safety net:</strong> webhooks get lost. A reconciler lists each tenant's recent recordings every 15 minutes and enqueues any we have not seen.</li>
+    <li><strong>Dedupe:</strong> the vendor's recording id is the idempotency key, so a webhook delivered three times and also found by the reconciler starts one workflow.</li>
+    <li><strong>Respect vendor limits:</strong> download with a per-tenant and per-vendor token bucket, and back off on 429s. Download URLs expire, so fetch soon, and stream straight into object storage rather than through memory.</li>
+  </ul>
+</section>
+
+<section id="pipeline">
+  <h2>Choosing the pipeline style</h2>
+  <ul class="tags"><li>Deep dive 2</li><li><a href="queues.html">Queues</a></li></ul>
+  <div class="table"><table>
+    <thead><tr><th>Option</th><th>How</th><th>Verdict</th></tr></thead>
+    <tbody>
+      <tr><td>Batch jobs over files</td><td>Recordings land in time-partitioned folders; cron jobs pick up new files for each step and write outputs next to them</td><td>Simple to build. Failure handling, per-call deadlines and visibility are hard; cron intervals add latency</td></tr>
+      <tr><td>Queues between steps</td><td>Each step consumes a queue and publishes to the next; failures go to dead-letter queues</td><td>Better visibility and retries. The overall state of one call is spread across queues</td></tr>
+      <tr><td>Monolith</td><td>One service runs every step for a call</td><td>Easy at first; can't scale GPU and CPU steps separately, one bug stalls everything</td></tr>
+      <tr><td>Event pub/sub</td><td>Steps emit events; any number of subscribers react</td><td>Easy to add new feature extractors. Contracts drift; needs schema registry and contract tests</td></tr>
+      <tr><td><strong>Workflow engine + task queues</strong></td><td>A durable workflow per call (Temporal, AWS Step Functions, Airflow for batch) calls activities that run on worker pools</td><td>My pick: per-call state, retries with backoff, timeouts and deadlines are built in, and each step's pool scales on its own</td></tr>
+    </tbody>
+  </table></div>
+  <p>The engine's workflow for a call is a few lines of code: download, extract, transcribe, then run insight models in parallel, then match and publish. Retries, timeouts and "where is call X right now?" come for free. Events still go out at the end (<code>call.insights.ready</code>), so other products can subscribe without touching the pipeline.</p>
+</section>
+
+<section id="ml">
+  <h2>Transcription and insights</h2>
+  <ul class="tags"><li>Deep dive 3</li></ul>
+  <ol class="plain">
+    <li><strong>Extract:</strong> pull the audio track with ffmpeg, normalize it to 16 kHz mono, and optionally sample video frames (for slides or engagement signals). Cheap CPU work.</li>
+    <li><strong>Transcribe:</strong> a speech recognition model on GPUs, plus <strong>diarization</strong> to label who spoke when. Vendor speaker metadata (Zoom knows who was talking) improves labels. Batch several calls per GPU for throughput; split long calls into chunks for parallelism.</li>
+    <li><strong>Analyse:</strong> on the transcript, run models for sentiment per speaker over time, talk-to-listen ratio, questions asked, competitor and pricing mentions, objections and next steps. A large language model can produce a summary and action items; smaller classifiers are cheaper for fixed labels.</li>
+    <li><strong>Score:</strong> combine signals across a deal's recent calls into risk or momentum.</li>
+  </ol>
+  <p>Store model name and version with every output. When a better model ships, reprocess recent calls in the background at low priority, without disturbing the 30-minute path for new ones.</p>
+  <div class="note"><p><strong>Build or buy?</strong> Hosted speech APIs are quick to start and charge per minute. At 2.5M minutes a day, self-hosting an open model on our own GPUs is usually much cheaper, at the cost of running a GPU fleet. A common path is to start with an API and move once volume justifies it.</p></div>
+</section>
+
+<section id="lab">
+  <h2>Try it: size the GPU pool</h2>
+  <ul class="tags"><li>Lab</li></ul>
+  <p>Transcription is the slow, expensive step. Choose call volume, how fast one GPU transcribes, and how many GPUs run during the peak hour, and see whether calls still get insights within 30 minutes.</p>
+  <div class="lab" id="cilab">
+    <div class="lab-row"><label for="ci-c">Calls a day <input type="range" id="ci-c" min="0" max="4" step="1" value="2"><output id="ci-c-o"></output></label><label for="ci-s">Speed per GPU <input type="range" id="ci-s" min="10" max="80" step="10" value="40"><output id="ci-s-o"></output></label></div>
+    <div class="lab-row"><label for="ci-g">GPUs at peak <input type="range" id="ci-g" min="10" max="400" step="10" value="100"><output id="ci-g-o"></output></label></div>
+    <div class="metrics" id="ci-m"></div>
+    <p class="lab-out" id="ci-out" aria-live="polite"></p>
+  </div>
+  <p class="muted" style="font-size:13.5px">Calls average 50 minutes; 70% end within 8 business hours. Download, extraction, insights and matching add about 6 minutes per call. Queueing uses a standard multi-server approximation, so treat the numbers as rough.</p>
+</section>
+
+<section id="matching">
+  <h2>Linking calls to deals</h2>
+  <ul class="tags"><li><a href="databases.html">Joins</a></li></ul>
+  <p>The vendor tells us the participants' names and emails. The matcher:</p>
+  <ol class="plain">
+    <li>Separates internal participants (our customer's domain) from external ones.</li>
+    <li>Looks up external emails as CRM contacts, then their accounts; falls back to matching the email domain to an account.</li>
+    <li>Among that account's open deals, picks the one the rep owns or that is in an active stage; uses the calendar event title as a tie-breaker.</li>
+    <li>Records a confidence. Low-confidence matches are shown to the rep to confirm with one click, and the confirmation trains the matcher.</li>
+  </ol>
+  <p>Keep a synced copy of the needed CRM fields (contacts, accounts, deals) rather than calling the CRM per call; CRM APIs have tight rate limits too.</p>
+</section>
+
+<section id="storage">
+  <h2>Storage and retention</h2>
+  <ul class="tags"><li><a href="databases.html">Databases</a></li></ul>
+  <div class="table"><table>
+    <thead><tr><th>Data</th><th>Store</th><th>Kept for</th></tr></thead>
+    <tbody>
+      <tr><td>Raw video</td><td>Object storage, per-tenant prefix and key</td><td>30–90 days (configurable), then deleted</td></tr>
+      <tr><td>Audio</td><td>Object storage, infrequent-access tier</td><td>~1 year, for reprocessing with better models</td></tr>
+      <tr><td>Transcripts, model outputs</td><td>Object storage (full) + Postgres (structured fields)</td><td>For the life of the account</td></tr>
+      <tr><td>Insights for the app</td><td>Postgres by tenant; OpenSearch for searching transcripts</td><td>Same</td></tr>
+      <tr><td>Workflow state</td><td>The engine's own database</td><td>Weeks, for debugging</td></tr>
+    </tbody>
+  </table></div>
+  <p>Lifecycle rules move and delete objects automatically. Deleting video after 30 days instead of keeping it cuts storage from petabytes a year to under a petabyte at any time.</p>
+</section>
+
+<section id="security">
+  <h2>Security and privacy</h2>
+  <ul class="tags"><li>Governance</li></ul>
+  <ul class="plain">
+    <li><strong>Tenant isolation:</strong> every object path, row and index document carries a tenant id; the API enforces it on every query, and large customers can get separate encryption keys.</li>
+    <li><strong>Least privilege:</strong> workers get short-lived credentials scoped to the one object they process. Vendor OAuth tokens live in a secrets manager.</li>
+    <li><strong>Who sees what:</strong> reps see their own calls, managers their team's, admins everything in their tenant. Every access is logged.</li>
+    <li><strong>Consent and regulation:</strong> recording consent rules differ by country and state; respect opt-outs, support deletion requests across every store, and keep data in the customer's region if required.</li>
+    <li><strong>PII in transcripts:</strong> optionally redact card numbers and similar before storing or sending text to any third-party model.</li>
+  </ul>
+</section>
+
+<section id="failure">
+  <h2>Failure handling</h2>
+  <ul class="tags"><li>Production</li></ul>
+  <figure class="fig3d" id="fail3d">
+    <div class="stage3d" role="img" aria-label="Three calls move through the pipeline. A GPU worker crashes mid-transcription; the workflow engine notices the missed heartbeat and retries the task on another worker. A vendor download returns 429; the engine waits with backoff and retries successfully. A corrupt file fails extraction three times and is moved to the dead-letter queue, raising an alert; after a fix, it is replayed and completes."><p class="hint3">3D · drag to turn</p><button class="reset3 ghost" type="button" hidden>Reset view</button><p class="nogl">The 3D view needs WebGL and a connection.</p></div>
+    <div class="ctl3"><button class="pp" type="button">Pause</button><span class="k">Step</span><div class="steps3"></div><span class="meta3"></span></div>
+    <div class="track3"><div class="fill3"></div></div>
+    <p class="out3" aria-live="polite"></p>
+    <figcaption>Illustrative. Transient failures retry with backoff; persistent ones go to a dead-letter queue to be fixed and replayed.</figcaption>
+  </figure>
+  <ul class="plain">
+    <li><strong>Worker crash:</strong> long tasks send heartbeats; a missed heartbeat makes the engine retry the task elsewhere. Idempotent outputs make that safe.</li>
+    <li><strong>Vendor trouble:</strong> 429s and 5xx retry with exponential backoff and jitter; the reconciler catches anything missed.</li>
+    <li><strong>Bad input:</strong> after N attempts, the call goes to a dead-letter queue with the error, an alert fires, and an operator can replay it once fixed.</li>
+    <li><strong>Backlog:</strong> if the GPU queue grows, scale out; if it can't, prioritize recent calls over reprocessing and tell users insights are delayed.</li>
+  </ul>
+</section>
+
+<section id="observability">
+  <h2>Observability</h2>
+  <ul class="tags"><li>Production</li></ul>
+  <div class="table"><table>
+    <thead><tr><th>Signal</th><th>Why</th><th>Alert when</th></tr></thead>
+    <tbody>
+      <tr><td>Call end to insights, p50 and p95</td><td>The 30-minute promise</td><td>p95 over 30 minutes</td></tr>
+      <tr><td>Queue depth and age per step</td><td>Where the backlog is</td><td>Oldest GPU task over 10 minutes</td></tr>
+      <tr><td>Recordings expected vs ingested per tenant</td><td>Lost webhooks, broken OAuth</td><td>A tenant's ingest drops to zero</td></tr>
+      <tr><td>Dead-letter count by error</td><td>New failure types</td><td>Any new error class</td></tr>
+      <tr><td>GPU utilization and cost per call hour</td><td>Efficiency</td><td>Utilization low for hours (over-provisioned)</td></tr>
+    </tbody>
+  </table></div>
+</section>
+
+<section id="risks">
+  <h2>Risks and v2</h2>
+  <ul class="tags"><li>Wrap-up</li></ul>
+  <div class="table"><table>
+    <thead><tr><th>Risk</th><th>How you detect it</th><th>Mitigation</th></tr></thead>
+    <tbody>
+      <tr><td>A vendor changes its API or rate limits</td><td>Ingest errors per vendor</td><td>Adapter per vendor, contract tests, polling fallback</td></tr>
+      <tr><td>Peak-hour backlog misses the deadline</td><td>Queue age</td><td>Autoscale GPUs ahead of the daily peak, chunk long calls</td></tr>
+      <tr><td>Cross-tenant leak</td><td>Access audits, tests</td><td>Tenant id enforced at every layer, scoped credentials</td></tr>
+      <tr><td>Model quality regresses</td><td>Word error rate on a labelled sample, user feedback</td><td>Versioned models, shadow evaluation before switching</td></tr>
+    </tbody>
+  </table></div>
+  <p><strong>v2 ideas:</strong> live in-call hints, multilingual transcription, coaching scorecards, and search across all calls ("every call where a competitor came up").</p>
+</section>
+
+<section id="presenting">
+  <h2>Presenting it in 45 minutes</h2>
+  <ul class="tags"><li>Interview script</li></ul>
+  <div class="table"><table>
+    <thead><tr><th>Step</th><th>Time</th><th>What to cover</th></tr></thead>
+    <tbody>
+      <tr><td>1. Clarify</td><td class="num">6 min</td><td>Sources, outputs, deadline, scale, PII and access control</td></tr>
+      <tr><td>2. Estimate</td><td class="num">5 min</td><td>50k calls, 42k hours, 21 TB video vs 1.3 TB audio a day, peak hour, GPU hours</td></tr>
+      <tr><td>3. Interfaces</td><td class="num">3 min</td><td>Webhooks in, idempotent step contract, insights API out</td></tr>
+      <tr><td>4. Draw the whole system</td><td class="num">8 min</td><td>Ingestion, object storage, workflow engine, steps, insights DB, API</td></tr>
+      <tr><td>5. Deep dive: pipeline style</td><td class="num">8 min</td><td>Cron vs queues vs pub/sub vs workflow engine; retries and dead letters</td></tr>
+      <tr><td>6. Deep dive: ML and sizing</td><td class="num">8 min</td><td>Transcription, diarization, insight models, GPU pool for the peak</td></tr>
+      <tr><td>7. Security and risks</td><td class="num">7 min</td><td>Tenant isolation, retention, consent, vendor changes</td></tr>
+    </tbody>
+  </table></div>
+  <div class="say"><p>"About 42,000 hours of calls a day, mostly in business hours, with a 30-minute deadline. Vendor webhooks, backed by a polling reconciler, trigger an ingestion service that streams each recording into per-tenant object storage and starts a durable workflow keyed by the recording id. The workflow runs idempotent steps on separate pools: CPU for audio extraction, GPUs for transcription and diarization, then insight models in parallel and a CRM matcher. Failures retry with backoff, and persistent ones go to a dead-letter queue for replay. I'd size about 100 GPUs for the peak hour, keep video 30 days but audio and transcripts longer, and enforce tenant isolation at every layer."</p></div>
+</section>
+
+<section id="numbers">
+  <h2>Numbers to remember</h2>
+  <ul class="tags"><li>Cheat sheet</li></ul>
+  <div class="table"><table><tbody>
+    <tr><td>50k calls × 50 min</td><td class="num">2.5M minutes ≈ 42k hours a day</td></tr>
+    <tr><td>Video at 720p</td><td class="num">~0.5 GB an hour → ~21 TB a day</td></tr>
+    <tr><td>Audio (compressed)</td><td class="num">~30 MB an hour → ~1.3 TB a day</td></tr>
+    <tr><td>Transcript</td><td class="num">~50 KB per call</td></tr>
+    <tr><td>Speech model on one GPU</td><td class="num">~30–50× real time with batching</td></tr>
+    <tr><td>Deadline</td><td class="num">30 minutes, sized for the peak hour</td></tr>
+  </tbody></table></div>
+</section>
+  </article>
+</div>
+</main>
+
+<footer class="site"><div class="wrap">Part of Classic System Design, a companion to the <a href="https://devlcodes.github.io/agentic-ai-notebook/system-design/index.html">agentic system designs</a>. The 3D views use Three.js loaded from a CDN, so they need a connection; the text and tables cover the same ground. Figures marked illustrative show the shape of a system, not measured numbers. Check vendor docs before relying on a specific product limit.</div></footer>
+<script>
+(function(){
+  var $ = function(id){ return document.getElementById(id); };
+  var CS = [5000, 20000, 50000, 100000, 250000], MIN = 50, FIXED = 6;
+  function fmt(n){ if (n >= 1e6) return +(n/1e6).toFixed(1) + 'M'; if (n >= 1e3) return +(n/1e3).toFixed(n < 1e4 ? 1 : 0) + 'k'; return String(Math.round(n)); }
+  function mins(m){ if (!isFinite(m)) return '∞'; if (m >= 120) return +(m/60).toFixed(1) + ' h'; return Math.round(m) + ' min'; }
+  function run(){
+    var C = CS[+$('ci-c').value], sp = +$('ci-s').value, G = +$('ci-g').value;
+    $('ci-c-o').textContent = fmt(C); $('ci-s-o').textContent = sp + '× real time'; $('ci-g-o').textContent = G;
+    var peakCalls = C * 0.7 / 8, load = peakCalls * MIN, cap = G * 60 * sp, rho = load / cap;
+    var S = MIN / sp, wait = rho < 1 ? Math.pow(rho, Math.sqrt(2 * (G + 1)) - 1) / (G * (1 - rho)) * S : Infinity;
+    var typical = FIXED + S + wait, p95 = FIXED + S + 3 * wait, gpuh = C * MIN / sp / 60;
+    var backlog = rho >= 1 ? (load - cap) / 60 : 0;
+    $('ci-m').innerHTML = '<div class="metric"><span class="n"' + (rho >= 1 ? ' style="color:var(--c-dlq)"' : '') + '>' + Math.round(rho * 100) + '%</span><span class="l">peak GPU use</span><small>' + fmt(load / 60) + ' audio hours in the peak hour</small></div>' +
+      '<div class="metric"><span class="n"' + (p95 > 30 ? ' style="color:var(--c-dlq)"' : '') + '>' + mins(p95) + '</span><span class="l">time to insights, p95</span><small>typical ' + mins(typical) + '</small></div>' +
+      '<div class="metric"><span class="n">' + fmt(gpuh) + '</span><span class="l">GPU hours a day</span></div>';
+    var msg;
+    if (rho >= 1) msg = 'Not enough GPUs: the peak hour brings ' + fmt(load / 60) + ' hours of audio but the pool can do ' + fmt(cap / 60) + ', so the backlog grows by about ' + fmt(backlog) + ' audio hours every peak hour and calls wait hours. Add GPUs or a faster model.';
+    else if (p95 > 30) msg = 'The pool keeps up on average, but at ' + Math.round(rho * 100) + '% busy the queue gets long enough that slow calls miss the 30-minute deadline. Running a bit below full keeps waits short.';
+    else if (rho < 0.4) msg = 'Comfortably inside the deadline, but the GPUs are only ' + Math.round(rho * 100) + '% busy at the peak and far less overnight. Autoscale down off-peak, or use the spare capacity to reprocess old calls with better models.';
+    else msg = 'A good balance: ' + Math.round(rho * 100) + '% busy at the peak, insights in about ' + mins(typical) + ' (p95 ' + mins(p95) + '). Scale down outside business hours to save most of the ' + fmt(gpuh) + ' GPU hours a day.';
+    $('ci-out').textContent = msg;
+  }
+  ['ci-c','ci-s','ci-g'].forEach(function(id){ $(id).addEventListener('input', run); });
+  run();
+})();
+
+</script>
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+  }
+}
+</script>
+<script type="module">
+import { boot } from './assets/scene3d.js';
+const D = {};
+D.hero = {
+  hero: true,
+  loop: 17,
+  view: { target: [-0.5, 0, 0.6], w: 31, d: 21, el: 52 },
+  steps: [
+    { t: 0.0, text: 'A 50-minute sales call ends on Zoom. Zoom sends a signed "recording completed" webhook.' },
+    { t: 1.6, text: 'The ingestion service verifies the signature, downloads the recording into object storage under the tenant\'s prefix, and starts one workflow for this call.' },
+    { t: 4.0, text: 'Extraction pulls the audio track (and a few video frames) out of the file. CPU workers handle this step.' },
+    { t: 5.8, text: 'The GPU pool transcribes the audio with speaker labels and word timestamps. This is the slowest and most expensive step.' },
+    { t: 8.0, text: 'Insight models read the transcript: talk ratio, sentiment, objections, competitors mentioned, next steps.' },
+    { t: 9.8, text: 'The matcher links the call to a CRM account and deal using the participants\' email domains and the meeting time.' },
+    { t: 11.6, text: 'Results land in the insights database and search index. The rep opens the dashboard and sees the call summary, about 15 minutes after hanging up.' },
+  ],
+  build(c) {
+    const { V, C, P } = c;
+    const zoom = c.obj(c.SHAPES.browser(0x3a7bd5), -13, -5, 'Zoom · Meet · Teams');
+    const ing = c.obj(c.SHAPES.server({ emi: C.ingest }), -7.5, -5, 'Ingestion', 'verify · fetch');
+    const st = c.obj('bucket', -1.5, -5, 'Object storage', 'per-tenant prefix');
+    const wf = c.obj(c.SHAPES.server({ emi: C.cross, h: 1.3 }), -7.5, 1, 'Workflow engine');
+    const ex = c.obj(c.SHAPES.server({ emi: C.cross }), -2, 1, 'Extract', 'CPU');
+    const gpu = c.obj(c.SHAPES.server({ emi: C.cross, h: 1.6, w: 1.4 }), 3, 1, 'Transcribe', 'GPU pool');
+    const ins = c.obj(c.SHAPES.server({ emi: C.cross }), 8, 1, 'Insights', 'models');
+    const mt = c.obj(c.SHAPES.signpost(C.cross), 12.5, 1, 'Match to CRM');
+    const db = c.obj(c.SHAPES.database(C.kb, { r: 1.0, tiers: 2 }), 12.5, 6.5, 'Insights DB', '+ search');
+    const dash = c.obj(c.SHAPES.monitor([C.serve, C.serve, C.kb]), 4, 6.5, 'Rep dashboard');
+    c.lane([V(-13, -5), V(-1.5, -5)]);
+    c.lane([V(-7.5, -5), V(-7.5, 1), V(12.5, 1), V(12.5, 6.5), V(4, 6.5)]);
+    c.packet({ pts: [V(-13, -5), V(-7.5, -5)], t0: 0.3, t1: 1.3, kind: 'env', from: zoom, to: ing, label: 'recording.completed' });
+    c.packet({ pts: [V(-7.5, -5), V(-1.5, -5)], t0: 1.8, t1: 3.0, kind: 'doc', to: st, label: '480 MB mp4' });
+    c.packet({ pts: [V(-7.5, -5), V(-7.5, 1)], t0: 2.8, t1: 3.7, kind: 'span', to: wf, label: 'start workflow' });
+    c.packet({ pts: [V(-7.5, 1), V(-2, 1)], t0: 4.1, t1: 5.0, kind: 'span', to: ex, label: 'extract' });
+    c.packet({ pts: [V(-2, 1), V(3, 1)], t0: 5.9, t1: 6.9, kind: 'chunk', color: P.chunk, to: gpu, label: 'audio' });
+    c.packet({ pts: [V(3, 1), V(8, 1)], t0: 8.1, t1: 9.0, kind: 'doc', to: ins, label: 'transcript' });
+    c.packet({ pts: [V(8, 1), V(12.5, 1)], t0: 9.9, t1: 10.8, kind: 'env', to: mt, label: 'insights' });
+    c.packet({ pts: [V(12.5, 1), V(12.5, 6.5)], t0: 11.7, t1: 12.5, kind: 'env', color: P.ship, to: db, label: 'deal 4471' });
+    c.packet({ pts: [V(12.5, 6.5), V(4, 6.5)], t0: 12.8, t1: 14.0, kind: 'doc', color: P.ship, to: dash, label: 'call summary' });
+    c.note('each step reads and writes object storage', 4.5, -2.6);
+  },
+};
+D.fail3d = {
+  loop: 17,
+  view: { target: [-0.5, 0, -0.4], w: 30, d: 19, el: 56 },
+  steps: [
+    { t: 0.0, text: 'The workflow engine hands a transcription task to GPU worker A. The worker sends a heartbeat every 30 seconds.' },
+    { t: 1.8, text: 'Worker A crashes halfway through. The heartbeats stop.' },
+    { t: 3.4, text: 'After the heartbeat timeout, the engine retries the task on worker B. The output is written under the same key, so a duplicate is harmless.' },
+    { t: 5.8, text: 'Another call\'s download from the vendor returns 429 Too Many Requests.' },
+    { t: 7.4, text: 'The engine waits with exponential backoff and jitter, then retries. The download succeeds.' },
+    { t: 9.6, text: 'A corrupt file fails extraction three times in a row.' },
+    { t: 11.6, text: 'The engine moves it to the dead-letter queue with the error attached, and an alert fires.' },
+    { t: 13.6, text: 'After the bug is fixed, an operator replays the call from the dead-letter queue and it completes.' },
+  ],
+  build(c) {
+    const { V, C, P } = c;
+    const wf = c.obj(c.SHAPES.server({ emi: C.cross, h: 1.3 }), -10, 0, 'Workflow engine', 'state · retries');
+    const ga = c.obj(c.SHAPES.server({ emi: C.cross, h: 1.4 }), -1, -4.5, 'GPU A');
+    const gb = c.obj(c.SHAPES.server({ emi: C.cross, h: 1.4 }), -1, -7.8, 'GPU B');
+    const vz = c.obj(c.SHAPES.browser(0x3a7bd5), 6, 0, 'Vendor API', 'rate limited');
+    const ex = c.obj(c.SHAPES.server({ emi: C.cross }), -1, 4.5, 'Extract worker');
+    const dlq = c.obj(c.SHAPES.database(C.dlq, { r: 0.9 }), 6, 4.5, 'Dead letters');
+    const al = c.obj(c.SHAPES.monitor([C.dlq, C.dlq, C.gov]), 11.5, 4.5, 'Alert');
+    c.lane([V(-10, 0), V(-5, 0), V(-5, -4.5), V(-1, -4.5)]);
+    c.lane([V(-5, -4.5), V(-5, -7.8), V(-1, -7.8)]);
+    c.lane([V(-5, 0), V(6, 0)]);
+    c.lane([V(-5, 0), V(-5, 4.5), V(11.5, 4.5)]);
+    c.lane([V(6, 4.5), V(6, 7.5), V(-1, 7.5), V(-1, 4.5)]);
+    c.packet({ pts: [V(-10, 0), V(-5, 0), V(-5, -4.5), V(-1, -4.5)], t0: 0.2, t1: 1.2, kind: 'span', from: wf, to: ga, label: 'transcribe call 88' });
+    c.packet({ pts: [V(-1, -4.5), V(-5, -4.5), V(-5, 0), V(-10, 0)], t0: 1.2, t1: 1.7, kind: 'ask', s: 0.6, to: wf, label: 'heartbeat' });
+    c.packet({ pts: [V(-1, -4.5), V(-5, -4.5)], t0: 1.9, t1: 3.0, kind: 'span', s: 1.3, color: P.bad, label: 'crash · no heartbeat' });
+    c.pulse(ga, 2.0, 2.6);
+    c.packet({ pts: [V(-10, 0), V(-5, 0), V(-5, -7.8), V(-1, -7.8)], t0: 3.5, t1: 4.7, kind: 'span', to: gb, label: 'retry on B' });
+    c.packet({ pts: [V(-1, -7.8), V(-5, -7.8), V(-5, 0), V(-10, 0)], t0: 4.8, t1: 5.6, kind: 'env', color: P.ship, to: wf, label: 'done' });
+    c.packet({ pts: [V(-10, 0), V(6, 0)], t0: 5.9, t1: 6.7, kind: 'ask', to: vz, label: 'GET recording' });
+    c.packet({ pts: [V(6, 0), V(-10, 0)], t0: 6.7, t1: 7.3, kind: 'span', color: P.bad, to: wf, label: '429' });
+    c.packet({ pts: [V(-10, 0), V(6, 0)], t0: 8.2, t1: 8.9, kind: 'ask', to: vz, label: 'retry after 4 s' });
+    c.packet({ pts: [V(6, 0), V(-10, 0)], t0: 8.9, t1: 9.5, kind: 'doc', color: P.ship, to: wf, label: '200 OK' });
+    c.packet({ pts: [V(-10, 0), V(-5, 0), V(-5, 4.5), V(-1, 4.5)], t0: 9.7, t1: 11.2, n: 3, st: 0.5, kind: 'span', to: ex, label: 'extract ×3' });
+    c.pulse(ex, 10.4, 10.9, 11.4);
+    c.packet({ pts: [V(-1, 4.5), V(6, 4.5)], t0: 11.7, t1: 12.5, kind: 'env', color: P.bad, to: dlq, label: 'corrupt moov atom' });
+    c.packet({ pts: [V(6, 4.5), V(11.5, 4.5)], t0: 12.5, t1: 13.2, kind: 'span', color: P.bad, to: al, label: 'page on-call' });
+    c.packet({ pts: [V(6, 4.5), V(6, 7.5), V(-1, 7.5), V(-1, 4.5)], t0: 13.8, t1: 15.0, kind: 'env', color: P.ask, to: ex, label: 'replay' });
+    c.note('transient: retry with backoff', -10.5, -4.5);
+    c.note('persistent: dead letter, fix, replay', -10, 5);
+  },
+};
+
+boot(D);
+</script>
+</body>
+</html>

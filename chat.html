@@ -474,6 +474,14 @@ user_conversations    -- the chat list on the home screen
     <li><strong>End-to-end encryption</strong> (Signal protocol) means the server stores and routes ciphertext it can't read. Routing, ordering and receipts all still work, because they use metadata. Server-side search and content moderation do not, so decide early.</li>
     <li><strong>Spam:</strong> rate limit sends per account and per new-conversation, require a message request before strangers can message you, and let users report and block.</li>
   </ul>
+  <h3>How WhatsApp does it</h3>
+  <p>WhatsApp takes the end-to-end route all the way, and that changes the storage design:</p>
+  <ul class="plain">
+    <li><strong>Signal protocol for every chat:</strong> keys live on the devices; the server only holds public key bundles so a sender can start a session with someone who is offline. Groups use "sender keys", so a message is encrypted once for the group instead of once per member.</li>
+    <li><strong>The server is a mailbox, not an archive:</strong> a message is stored only until every recipient device has acknowledged it, then deleted. History lives on the phones and in the user's own encrypted backup.</li>
+    <li><strong>Ticks are the receipts:</strong> one grey tick when the server has stored the message, two grey ticks when the recipient's device acknowledges it, two blue ticks when they open the chat. Each tick is a tiny encrypted control message on the same socket.</li>
+    <li><strong>Back of the envelope at WhatsApp scale:</strong> about 100 billion messages a day × ~100 bytes ≈ 10 TB a day. Undelivered messages are kept for up to 30 days, so the worst case is about 300 TB of mailbox, far less than storing every message forever.</li>
+  </ul>
 </section>
 
 <section id="deployment">
