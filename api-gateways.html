@@ -1,0 +1,396 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>API gateways and service mesh · Classic System Design</title>
+<meta name="description" content="API gateways and service meshes: reverse proxy vs load balancer vs gateway, authentication, rate limits, backends for frontends, sidecars and mTLS, timeouts, retries and circuit breakers, with a retry-storm lab.">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700&family=Instrument+Sans:ital,wght@0,400;0,500;0,600;1,400&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+  /* Layout: a slim site bar, then either a card grid (home), a sticky contents rail + reading column (articles), or a filterable term list (glossary). Light, single look. */
+  :root {
+    color-scheme: light;
+    --bg: #e9ecef; --paper: #f7f8f9; --ink: #1c2530; --muted: #586473; --line: #cdd4dc; --line-strong: #9aa5b1;
+    --accent: #4255d4; --accent-ink: #ffffff; --track: #d3d9e0; --code-bg: #eef1f4; --wire: #7d8996;
+    --c-ingest: #2a9d8f; --c-kb: #4d5fd8; --c-serve: #d7932a; --c-model: #e2674f; --c-gov: #b2456e; --c-cross: #4a5562; --c-dlq: #b23a3a; --c-ok: #2f8f5b;
+    --t-src: #e4e8ec; --t-ingest: #d8eeea; --t-kb: #dfe3fa; --t-serve: #f8ead2; --t-model: #fbe1da; --t-gov: #f3dde6; --t-cross: #dfe2e6; --t-dlq: #f6dddb;
+    --font-display: "Bricolage Grotesque", "Avenir Next", "Segoe UI", system-ui, sans-serif;
+    --font-body: "Instrument Sans", "Helvetica Neue", "Segoe UI", system-ui, sans-serif;
+    --font-mono: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  @media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
+  body { margin: 0; background: var(--bg); color: var(--ink); font-family: var(--font-body); font-size: 16px; line-height: 1.6; }
+  a { color: var(--accent); }
+  .wrap { max-width: 1240px; margin: 0 auto; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
+
+  .sitebar { border-bottom: 1px solid var(--line); background: var(--paper); }
+  .sitebar .wrap { display: flex; align-items: center; gap: 18px; flex-wrap: wrap; padding-block: 12px; }
+  .brand { font-family: var(--font-display); font-weight: 700; font-size: 17px; color: var(--ink); text-decoration: none; margin-right: auto; }
+  .sitebar nav { display: flex; gap: 16px; flex-wrap: wrap; font-size: 14px; }
+  .sitebar nav a { color: var(--muted); text-decoration: none; }
+  .sitebar nav a:hover, .sitebar nav a[aria-current="page"] { color: var(--ink); }
+  .sitebar nav a[aria-current="page"] { font-weight: 600; }
+
+  .intro { padding-block: 40px 8px; display: grid; gap: 10px; max-width: 820px; }
+  .eyebrow { margin: 0; font-family: var(--font-mono); font-size: 12px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+  h1 { margin: 0; font-family: var(--font-display); font-weight: 700; font-size: clamp(30px, 5vw, 46px); line-height: 1.05; text-wrap: balance; }
+  .intro .lead { font-size: 18px; margin: 0; }
+
+  .doc { display: grid; grid-template-columns: 220px minmax(0, 1fr); gap: 48px; padding-block: 36px 72px; }
+  .toc { position: sticky; top: calc(env(safe-area-inset-top, 0px) + 20px); align-self: start; }
+  .toc p { margin: 0 0 8px; font-family: var(--font-mono); font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+  .toc ol { margin: 0; padding: 0; list-style: none; display: grid; gap: 2px; counter-reset: toc; }
+  .toc li { counter-increment: toc; }
+  .toc a { display: flex; gap: 8px; padding: 3px 0; font-size: 14px; color: var(--muted); text-decoration: none; }
+  .toc a::before { content: counter(toc, decimal-leading-zero); font-family: var(--font-mono); font-size: 11.5px; padding-top: 2px; color: var(--line-strong); }
+  .toc a:hover { color: var(--ink); }
+  article { min-width: 0; max-width: 760px; }
+  section { padding-bottom: 36px; margin-bottom: 36px; border-bottom: 1px solid var(--line); scroll-margin-top: 20px; }
+  section:last-child { border-bottom: 0; }
+  h2 { margin: 0 0 10px; font-family: var(--font-display); font-weight: 700; font-size: 28px; line-height: 1.15; text-wrap: balance; }
+  h3 { margin: 26px 0 6px; font-family: var(--font-display); font-weight: 600; font-size: 19px; line-height: 1.25; }
+  p { margin: 0 0 14px; }
+  .lead { font-size: 18px; }
+  ul.plain, ol.plain { margin: 0 0 16px; padding-left: 22px; display: grid; gap: 6px; }
+  code { font-family: var(--font-mono); font-size: 0.88em; background: var(--code-bg); padding: 1px 5px; border-radius: 4px; }
+  pre { margin: 0 0 16px; padding: 14px 16px; background: var(--code-bg); border-radius: 10px; overflow-x: auto; font-size: 13px; line-height: 1.55; }
+  pre code { background: none; padding: 0; font-size: inherit; }
+  .table { overflow-x: auto; margin: 0 0 18px; }
+  table { width: 100%; border-collapse: collapse; font-size: 14.5px; line-height: 1.45; }
+  th, td { text-align: left; vertical-align: top; padding: 8px 10px; border-bottom: 1px solid var(--line); }
+  th { font-family: var(--font-mono); font-size: 11.5px; font-weight: 500; letter-spacing: .05em; text-transform: uppercase; color: var(--muted); }
+  td.num { font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .note { border-left: 3px solid var(--accent); background: var(--paper); padding: 12px 16px; border-radius: 0 10px 10px 0; margin: 0 0 18px; }
+  .note p:last-child { margin: 0; }
+  .formula { font-family: var(--font-mono); font-size: 14px; background: var(--paper); border: 1px solid var(--line); border-radius: 10px; padding: 12px 16px; margin: 0 0 16px; overflow-x: auto; white-space: nowrap; }
+  .related { display: flex; flex-wrap: wrap; gap: 8px; margin: 0; padding: 0; list-style: none; }
+  .related a { display: inline-block; padding: 4px 12px; border: 1px solid var(--line); border-radius: 999px; font-size: 14px; color: var(--ink); text-decoration: none; background: var(--paper); }
+  .related a:hover { border-color: var(--ink); }
+  .pager { display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; font-size: 14px; }
+  footer.site { border-top: 1px solid var(--line); padding-block: 20px 40px; font-size: 13px; color: var(--muted); }
+  a:focus-visible, input:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+  /* home */
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 16px; margin: 0 0 40px; padding: 0; list-style: none; }
+  .card { display: grid; gap: 8px; height: 100%; padding: 18px; background: var(--paper); border: 1px solid var(--line); border-radius: 14px; color: var(--ink); text-decoration: none; }
+  .card:hover { border-color: var(--ink); }
+  .card .k { font-family: var(--font-mono); font-size: 11px; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
+  .card h3 { margin: 0; font-size: 20px; }
+  .card p { margin: 0; font-size: 14.5px; color: var(--muted); }
+  .card svg { width: 100%; height: auto; display: block; }
+  .card.feature svg { max-width: 420px; justify-self: center; }
+  .card.feature { grid-column: 1 / -1; grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr); align-items: center; gap: 24px; }
+  .home-h { margin: 28px 0 12px; font-family: var(--font-display); font-size: 24px; }
+
+  /* glossary */
+  .gl-tools { position: sticky; top: 0; z-index: 2; background: var(--bg); padding-block: 12px; display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+  .gl-tools input { flex: 1 1 260px; min-width: 0; font: 15px var(--font-body); padding: 9px 12px; border-radius: 10px; border: 1px solid var(--line-strong); background: #fff; color: var(--ink); }
+  .gl-letters { display: flex; flex-wrap: wrap; gap: 4px; font-family: var(--font-mono); font-size: 13px; }
+  .gl-letters a { padding: 2px 6px; border-radius: 6px; text-decoration: none; color: var(--muted); }
+  .gl-letters a:hover { background: var(--paper); color: var(--ink); }
+  .gl { max-width: 860px; }
+  .gl-item { margin: 0; }
+  .gl-item { display: grid; grid-template-columns: 220px minmax(0, 1fr); gap: 16px; padding: 12px 0; border-bottom: 1px solid var(--line); scroll-margin-top: 70px; }
+  .gl-item dt { font-weight: 600; }
+  .gl-item dt small { display: block; font-weight: 400; font-family: var(--font-mono); font-size: 11px; color: var(--muted); letter-spacing: .04em; text-transform: uppercase; margin-top: 2px; }
+  .gl-item dd { margin: 0; }
+  .gl-item dd .see { font-size: 13.5px; }
+  .gl-letter { margin: 26px 0 4px; font-family: var(--font-display); font-size: 22px; scroll-margin-top: 70px; }
+
+  @media (max-width: 900px) {
+    .doc { grid-template-columns: minmax(0, 1fr); gap: 24px; padding-block: 28px 56px; }
+    .toc { position: static; }
+    .toc ol { grid-template-columns: repeat(2, minmax(0, 1fr)); column-gap: 12px; }
+    .card.feature { grid-template-columns: minmax(0, 1fr); }
+  }
+  @media (max-width: 640px) {
+    .gl-item { grid-template-columns: minmax(0, 1fr); gap: 4px; }
+    h2 { font-size: 24px; }
+    .intro .lead, .lead { font-size: 16.5px; }
+  }
+
+  /* diagrams */
+  .fig { margin: 6px 0 24px; overflow-x: auto; }
+  .fig svg { display: block; width: 100%; height: auto; min-width: 600px; }
+  .fig figcaption { margin-top: 8px; font-size: 13px; line-height: 1.45; color: var(--muted); }
+  .dg text { font-family: var(--font-body); font-size: 13px; fill: var(--ink); }
+  .dg .sm { font-size: 11.5px; fill: var(--muted); }
+  .dg .small { font-size: 12px; }
+  .dg .b { font-weight: 600; }
+  .dg .mono { font-family: var(--font-mono); }
+  .dg .it { font-style: italic; }
+  .dg .mute { fill: var(--muted); }
+  .dg .gov { fill: var(--c-gov); font-weight: 600; }
+  .dg .okt { fill: var(--c-ok); font-weight: 600; }
+  .dg .bad { fill: var(--c-dlq); font-weight: 600; }
+  .dg .cap { font-family: var(--font-mono); font-size: 11px; letter-spacing: .06em; fill: var(--muted); }
+  .dg .big { font-family: var(--font-display); font-size: 30px; font-weight: 700; fill: var(--ink); }
+  .dg .box { fill: var(--paper); stroke: var(--line-strong); stroke-width: 1.25; }
+  .dg .ghost { fill: none; stroke: var(--line-strong); stroke-width: 1.25; stroke-dasharray: 5 5; }
+  .dg .track { fill: var(--track); }
+  .dg .rule { stroke: var(--line); stroke-width: 1; }
+  .dg .axis { stroke: var(--line-strong); stroke-width: 1.25; }
+  .dg .wire { fill: none; stroke: var(--wire); stroke-width: 1.4; }
+  .dg .wire.dash { stroke-dasharray: 4 4; }
+  .dg .wire.hot { stroke: var(--accent); stroke-width: 2; }
+  .dg .wire.red { stroke: var(--c-dlq); }
+  .dg .ah { fill: var(--wire); }
+  .dg .xmark { stroke: var(--c-dlq); stroke-width: 1.8; fill: none; }
+  .dg .tick { stroke: var(--c-ok); stroke-width: 2; fill: none; }
+  .dg .k-src { fill: var(--t-src); stroke: #8795a3; stroke-width: 1.5; }
+  .dg .k-ingest { fill: var(--t-ingest); stroke: var(--c-ingest); stroke-width: 1.5; }
+  .dg .k-kb { fill: var(--t-kb); stroke: var(--c-kb); stroke-width: 1.5; }
+  .dg .k-serve { fill: var(--t-serve); stroke: var(--c-serve); stroke-width: 1.5; }
+  .dg .k-model { fill: var(--t-model); stroke: var(--c-model); stroke-width: 1.5; }
+  .dg .k-gov { fill: var(--t-gov); stroke: var(--c-gov); stroke-width: 1.5; }
+  .dg .k-cross { fill: var(--t-cross); stroke: var(--c-cross); stroke-width: 1.5; }
+  .dg .k-dlq { fill: var(--t-dlq); stroke: var(--c-dlq); stroke-width: 1.5; }
+  .dg .k-user { fill: #ffffff; stroke: var(--line-strong); stroke-width: 1.5; }
+  .dg .f-serve { fill: var(--c-serve); } .dg .f-kb { fill: var(--c-kb); } .dg .f-model { fill: var(--c-model); } .dg .f-gov { fill: var(--c-gov); } .dg .f-ingest { fill: var(--c-ingest); } .dg .f-cross { fill: #b8c0c9; } .dg .f-dlq { fill: var(--c-dlq); } .dg .f-ok { fill: var(--c-ok); }
+  .dg .cell { fill: var(--paper); stroke: var(--line-strong); stroke-width: 1; }
+  .dg .cell.hot { fill: var(--t-ingest); stroke: var(--c-ingest); stroke-width: 1.5; }
+  .dg .cell.old { fill: var(--t-kb); stroke: var(--c-kb); }
+  .dg .cell.new { fill: var(--t-ingest); stroke: var(--c-ingest); stroke-width: 1.5; }
+  .dg .cell.gone { fill: var(--paper); stroke: var(--line); }
+  .dg .dot-hr { fill: var(--c-gov); } .dg .dot-it { fill: var(--c-kb); } .dg .dot-eng { fill: var(--c-ingest); } .dg .dot-q { fill: var(--c-serve); stroke: var(--ink); stroke-width: 1.5; }
+  .dg .halo { fill: none; stroke: var(--c-serve); stroke-width: 1.5; stroke-dasharray: 4 4; }
+  .dg .zone { fill: var(--paper); stroke: var(--line); stroke-width: 1; }
+</style>
+
+<style>
+  .lab { margin: 6px 0 26px; padding: 14px 16px 16px; background: var(--paper); border: 1px solid var(--line); border-radius: 14px; }
+  .lab-row { display: flex; flex-wrap: wrap; gap: 10px 18px; align-items: center; margin: 0 0 12px; }
+  .lab-k { font-family: var(--font-mono); font-size: 11px; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
+  .lab label { display: inline-flex; gap: 8px; align-items: center; font-size: 14px; }
+  .lab input[type=range] { width: 150px; accent-color: var(--accent); }
+  .lab input[type=checkbox] { width: 16px; height: 16px; accent-color: var(--accent); }
+  .lab input[type=text] { flex: 1 1 260px; min-width: 0; font: 15px var(--font-body); padding: 8px 11px; border-radius: 9px; border: 1px solid var(--line-strong); background: #fff; color: var(--ink); }
+  .lab output { font-family: var(--font-mono); font-size: 12.5px; min-width: 6ch; font-variant-numeric: tabular-nums; }
+  .seg { display: inline-flex; flex-wrap: wrap; gap: 6px; }
+  .seg button, .chips button { font: 600 13px var(--font-body); color: var(--ink); background: #fff; border: 1px solid var(--line); border-radius: 8px; padding: 6px 12px; cursor: pointer; }
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; }
+  .chips button { font-weight: 500; border-radius: 999px; padding: 4px 11px; font-size: 13px; }
+  .seg button:hover, .chips button:hover { border-color: var(--ink); }
+  .seg button[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+  .seg button:focus-visible, .chips button:focus-visible, .lab input:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .lab-out { margin: 12px 0 0; padding: 10px 12px; background: #fff; border: 1px solid var(--line); border-radius: 10px; font-size: 14.5px; line-height: 1.5; font-variant-numeric: tabular-nums; }
+  .chunks { display: grid; gap: 8px; max-height: 470px; overflow: auto; padding-right: 4px; }
+  .chunk { min-width: 0; padding: 8px 11px; background: #fff; border: 1px solid var(--line); border-left: 4px solid var(--c-kb); border-radius: 8px; font-size: 14px; line-height: 1.5; overflow-wrap: anywhere; }
+  .chunk:nth-child(even) { border-left-color: var(--c-ingest); }
+  .chunk.ans { box-shadow: 0 0 0 2px var(--c-serve); }
+  .chunk .ch { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-bottom: 4px; font-family: var(--font-mono); font-size: 11px; color: var(--muted); }
+  .chunk .pfx { display: block; font-family: var(--font-mono); font-size: 11.5px; color: var(--c-kb); }
+  .chunk .ov { background: var(--track); border-radius: 3px; }
+  .chunk mark { background: #ffe9b3; border-radius: 3px; padding: 0 2px; }
+  .chunk table { width: auto; font-size: 13px; margin: 4px 0; }
+  .chunk td { padding: 2px 10px 2px 0; border-bottom: 1px solid var(--line); }
+  .badge { display: inline-block; padding: 0 7px; border-radius: 999px; border: 1px solid; font-family: var(--font-mono); font-size: 10.5px; line-height: 1.6; }
+  .badge.bad { color: var(--c-dlq); border-color: var(--c-dlq); background: var(--t-dlq); }
+  .badge.ok { color: var(--c-ok); border-color: var(--c-ok); background: #e3f3ea; }
+  .badge.info { color: var(--c-kb); border-color: var(--c-kb); background: var(--t-kb); }
+  .bars { display: grid; gap: 8px; margin: 4px 0 0; }
+  .bar-row { display: grid; grid-template-columns: minmax(0, 150px) minmax(0, 1fr) 46px; gap: 10px; align-items: center; font-size: 14px; }
+  .bar { position: relative; height: 14px; border-radius: 7px; background: var(--track); }
+  .bar i { position: absolute; inset: 0 auto 0 0; border-radius: 7px; background: var(--c-kb); transition: width .3s; }
+  .bar b { position: absolute; top: -4px; bottom: -4px; width: 2px; background: var(--c-dlq); }
+  .bar-row .v { font-family: var(--font-mono); font-size: 12.5px; text-align: right; }
+  .stages { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 10px; padding: 0; list-style: none; font-size: 13px; }
+  .stages li { padding: 2px 10px; border-radius: 999px; border: 1px solid var(--line); color: var(--muted); background: #fff; }
+  .stages li.hit { border-color: var(--accent); color: var(--accent-ink); background: var(--accent); }
+  .stages li.skip { text-decoration: line-through; }
+  .rlist { display: grid; gap: 6px; margin: 0; padding: 0; list-style: none; counter-reset: r; }
+  .rlist li { counter-increment: r; display: grid; grid-template-columns: 28px minmax(0, 1fr) auto; gap: 10px; align-items: center; padding: 6px 10px; background: #fff; border: 1px solid var(--line); border-radius: 8px; font-size: 14px; }
+  .rlist li::before { content: counter(r); font-family: var(--font-mono); font-size: 12px; color: var(--muted); }
+  .rlist li.rel { border-color: var(--c-ok); background: #f0f8f3; }
+  .rlist button { font: 600 12px var(--font-body); padding: 3px 10px; border-radius: 999px; border: 1px solid var(--line-strong); background: #fff; color: var(--ink); cursor: pointer; white-space: nowrap; }
+  .rlist li.rel button { background: var(--c-ok); border-color: var(--c-ok); color: #fff; }
+  .metrics { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 8px; margin: 12px 0 0; }
+  .metric { padding: 8px 10px; background: #fff; border: 1px solid var(--line); border-radius: 10px; }
+  .metric .n { display: block; font-family: var(--font-display); font-size: 24px; font-weight: 700; font-variant-numeric: tabular-nums; }
+  .metric .l { font-family: var(--font-mono); font-size: 11px; letter-spacing: .04em; text-transform: uppercase; color: var(--muted); }
+  .metric small { display: block; font-size: 12px; color: var(--muted); line-height: 1.35; margin-top: 2px; }
+  td.pass { color: var(--c-ok); font-weight: 600; } td.fail { color: var(--c-dlq); font-weight: 600; }
+  .say { border-left: 3px solid var(--c-serve); background: var(--paper); padding: 12px 16px; border-radius: 0 10px 10px 0; margin: 0 0 16px; font-size: 15.5px; }
+  .say p:last-child { margin: 0; }
+</style>
+
+<style>
+  .lab-chart { display: block; width: 100%; height: auto; margin: 4px 0 0; }
+  .lab-chart text { font-family: var(--font-body); font-size: 12px; fill: var(--muted); }
+  .grid-cells { display: grid; gap: 4px; }
+  .srv { display: grid; grid-template-columns: 92px minmax(0,1fr) 70px; gap: 10px; align-items: center; font-size: 14px; }
+  .muted { color: var(--muted); }
+  .lab select { font: 14px var(--font-body); padding: 6px 8px; border-radius: 8px; border: 1px solid var(--line-strong); background: #fff; color: var(--ink); }
+  .lab input[type=number] { width: 9ch; font: 14px var(--font-mono); padding: 6px 8px; border-radius: 8px; border: 1px solid var(--line-strong); background: #fff; color: var(--ink); }
+</style>
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs><marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" class="ah" style="fill:#7d8996"/></marker></defs></svg>
+<header class="sitebar"><div class="wrap"><a class="brand" href="index.html">Classic System Design</a><nav aria-label="Site"><a href="index.html">Home</a><a href="index.html#blocks" aria-current="page">Building blocks</a><a href="index.html#designs">Designs</a><a href="https://devlcodes.github.io/agentic-ai-notebook/system-design/index.html">Agentic designs ↗</a></nav></div></header>
+<main>
+<div class="wrap"><div class="intro"><p class="eyebrow">Building block · traffic</p><h1>API gateways and service mesh</h1><p class="lead">The front door and the hallways. A gateway is the one place every outside request enters, where you check who it is, how much it may do, and where it goes. A service mesh does the same jobs for the calls services make to each other, without changing their code.</p></div></div>
+<div class="wrap doc">
+  <nav class="toc" aria-label="On this page"><p>On this page</p><ol><li><a href="#what">Proxy, load balancer or gateway?</a></li><li><a href="#jobs">What a gateway does</a></li><li><a href="#bff">Aggregation and backends for frontends</a></li><li><a href="#mesh">Service mesh</a></li><li><a href="#resilience">Timeouts, retries and circuit breakers</a></li><li><a href="#lab">Try it: a retry storm</a></li><li><a href="#failure">How gateways fail</a></li><li><a href="#interview">Saying it in an interview</a></li><li><a href="#real-world">In the real world</a></li><li><a href="#related">Related</a></li></ol></nav>
+  <article>
+<section id="what"><h2>Proxy, load balancer or gateway?</h2>
+<p class="lead">All three sit between clients and servers and forward requests. They differ in how much they understand about each request.</p>
+<div class="table"><table><thead><tr><th>Component</th><th>Knows about</th><th>Typical jobs</th></tr></thead><tbody>
+<tr><td>Reverse proxy</td><td>HTTP requests and responses</td><td>TLS termination, compression, caching, hiding the servers behind one address</td></tr>
+<tr><td>Load balancer</td><td>A pool of identical servers and their health</td><td>Spread requests, remove unhealthy servers (<a href="load-balancing.html">L4 or L7</a>)</td></tr>
+<tr><td>API gateway</td><td>Your API: routes, users, API keys, plans</td><td>Authentication, rate limits per client, routing to many different services, request shaping, API analytics</td></tr>
+</tbody></table></div>
+<p>In practice one product often does all three. Nginx or Envoy can be a proxy, a load balancer and a gateway at once. The useful distinction is the job: a gateway applies <em>API policy</em>, the same rules for every service behind it, in one place.</p></section>
+
+<section id="jobs"><h2>What a gateway does</h2>
+<figure class="fig"><svg viewBox="0 0 722 290" class="dg" role="img" aria-label="Clients on web, mobile and partner APIs reach an API gateway. The gateway terminates TLS, authenticates the request, applies rate limits, and routes by path to the users, orders and search services. Inside the cluster each service has a sidecar proxy; sidecars talk to each other with mutual TLS and are configured by a mesh control plane.">
+<text x="10" y="20" class="cap">OUTSIDE</text>
+<rect x="10" y="30" width="120" height="34" rx="8" class="k-user"/><text x="70" y="52" class="small b" text-anchor="middle">Web app</text>
+<rect x="10" y="74" width="120" height="34" rx="8" class="k-user"/><text x="70" y="96" class="small b" text-anchor="middle">Mobile app</text>
+<rect x="10" y="118" width="120" height="34" rx="8" class="k-user"/><text x="70" y="140" class="small b" text-anchor="middle">Partner API</text>
+<path d="M130 47 L196 85" class="wire" marker-end="url(#ah)"/><path d="M130 91 L196 91" class="wire" marker-end="url(#ah)"/><path d="M130 135 L196 97" class="wire" marker-end="url(#ah)"/>
+<rect x="198" y="30" width="170" height="122" rx="10" class="k-gov"/><text x="283" y="52" class="small b" text-anchor="middle">API gateway</text>
+<text x="212" y="74" class="sm">1. TLS termination</text><text x="212" y="92" class="sm">2. Authenticate (JWT, API key)</text><text x="212" y="110" class="sm">3. Rate limit per client</text><text x="212" y="128" class="sm">4. Route by path and version</text><text x="212" y="146" class="sm">5. Log, metrics, trace ID</text>
+<path d="M368 60 L440 60" class="wire hot" marker-end="url(#ah)"/><text x="404" y="52" class="sm" text-anchor="middle">/users</text>
+<path d="M368 91 L440 106" class="wire hot" marker-end="url(#ah)"/><text x="404" y="92" class="sm" text-anchor="middle">/orders</text>
+<path d="M368 122 L440 152" class="wire hot" marker-end="url(#ah)"/><text x="400" y="146" class="sm" text-anchor="middle">/search</text>
+<text x="442" y="22" class="cap">INSIDE THE CLUSTER</text>
+<rect x="442" y="40" width="120" height="36" rx="8" class="k-serve"/><text x="502" y="63" class="small b" text-anchor="middle">Users</text>
+<rect x="442" y="88" width="120" height="36" rx="8" class="k-serve"/><text x="502" y="111" class="small b" text-anchor="middle">Orders</text>
+<rect x="442" y="136" width="120" height="36" rx="8" class="k-serve"/><text x="502" y="159" class="small b" text-anchor="middle">Search</text>
+<rect x="566" y="44" width="54" height="28" rx="6" class="k-cross"/><text x="593" y="62" class="sm" text-anchor="middle">sidecar</text>
+<rect x="566" y="92" width="54" height="28" rx="6" class="k-cross"/><text x="593" y="110" class="sm" text-anchor="middle">sidecar</text>
+<rect x="566" y="140" width="54" height="28" rx="6" class="k-cross"/><text x="593" y="158" class="sm" text-anchor="middle">sidecar</text>
+<path d="M620 72 C 660 80, 660 96, 620 104" class="wire dash" marker-end="url(#ah)"/><text x="660" y="90" class="sm">mTLS</text>
+<rect x="442" y="210" width="270" height="44" rx="10" class="k-kb"/><text x="577" y="230" class="small b" text-anchor="middle">Mesh control plane</text><text x="577" y="246" class="sm" text-anchor="middle">certificates · routing rules · retry policy</text>
+<path d="M593 208 L593 172" class="wire dash" marker-end="url(#ah)"/>
+<text x="10" y="200" class="small">North-south traffic (clients → services) goes through the gateway.</text>
+<text x="10" y="220" class="small">East-west traffic (service → service) goes through sidecars.</text>
+<text x="10" y="270" class="sm">Gateway policy is per API client; mesh policy is per service-to-service call.</text>
+</svg><figcaption>The gateway handles everything that comes from outside. Inside, each service gets a small proxy next to it (a sidecar), and the mesh configures all of them from one place.</figcaption></figure>
+<ul class="plain">
+<li><strong>Authentication:</strong> verify a JWT's signature and expiry, or look up an API key, once at the edge. Services behind it receive a trusted user ID in a header instead of each re-implementing login.</li>
+<li><strong>Rate limits and quotas:</strong> per API key, per user, per plan ("free: 100 requests a minute"). See <a href="rate-limiting.html">Rate limiting</a>.</li>
+<li><strong>Routing:</strong> by path (<code>/orders</code> → orders service), by version (<code>/v2</code>), by header (send 5% of traffic to a canary).</li>
+<li><strong>Request shaping:</strong> size limits, schema validation, header clean-up, translating REST to gRPC.</li>
+<li><strong>Observability:</strong> one access log for every API call, request counts and latency per route and client, and a trace ID that follows the request through every service.</li>
+</ul>
+<div class="note"><p>Keep business logic out of the gateway. It is shared by every team, so every change to it is risky and slow. If a rule is specific to one service, it belongs in that service.</p></div></section>
+
+<section id="bff"><h2>Aggregation and backends for frontends</h2>
+<p>A phone's home screen might need the user, their recent orders and some recommendations. Making three round trips over a mobile network is slow. Two patterns help:</p>
+<ul class="plain">
+<li><strong>Aggregation:</strong> the gateway (or a GraphQL layer) calls the three services in parallel inside the data center, where a round trip is half a millisecond, and returns one combined response.</li>
+<li><strong>Backend for frontend (BFF):</strong> a small service per client type, owned by that client's team: one for web, one for iOS and Android, one for partners. Each shapes responses for its screens, and none of them has to compromise for the others.</li>
+</ul>
+<p>The cost is one more hop and one more service to run, and the risk that a BFF slowly fills up with business logic that belongs in the core services.</p></section>
+
+<section id="mesh"><h2>Service mesh</h2>
+<p>With 200 services calling each other, every team needs timeouts, retries, mutual TLS, metrics and tracing on every call. A <strong>service mesh</strong> moves all of that out of application code into a proxy that runs beside each service instance (a <strong>sidecar</strong>, often Envoy). The application talks to <code>localhost</code>; the sidecar finds a healthy instance of the target, encrypts the connection, retries if allowed, and reports metrics.</p>
+<div class="table"><table><thead><tr><th>Mesh gives you</th><th>Without a mesh</th></tr></thead><tbody>
+<tr><td>Mutual TLS between every pair of services, with certificates rotated automatically</td><td>Each team manages certificates, or traffic inside the cluster is plain text</td></tr>
+<tr><td>Uniform retries, timeouts and circuit breaking from config</td><td>A different client library and different defaults in every language</td></tr>
+<tr><td>Golden metrics (requests, errors, latency) for every call</td><td>Instrumentation where someone remembered to add it</td></tr>
+<tr><td>Traffic shifting for canaries and blue-green deploys</td><td>Custom deploy scripts per service</td></tr>
+</tbody></table></div>
+<p>The price: an extra proxy hop on every call (about a millisecond), more memory per pod, and a complex control plane to operate. Newer designs drop the per-pod sidecar for a shared per-node proxy (Istio's ambient mode) or kernel-level networking (Cilium with eBPF). With a handful of services, a good HTTP client library is enough.</p></section>
+
+<section id="resilience"><h2>Timeouts, retries and circuit breakers</h2>
+<p class="lead">Gateways and meshes are where resilience policy lives. Getting it wrong turns a small slowdown into an outage.</p>
+<ul class="plain">
+<li><strong>Timeouts on every call.</strong> Without one, a slow dependency holds threads and connections until the caller runs out and fails too. Set each timeout from the dependency's p99.9 latency, and make the caller's timeout longer than the sum of what it waits on.</li>
+<li><strong>Retries only for safe requests.</strong> Retry reads, and writes protected by an <a href="payments.html">idempotency key</a>. Never retry a timeout on a non-idempotent write blindly.</li>
+<li><strong>Exponential backoff with jitter.</strong> Wait 100 ms, 200 ms, 400 ms, each with a random spread, so thousands of clients don't retry in the same instant.</li>
+<li><strong>Retry budgets.</strong> Allow retries up to, say, 10% of normal traffic. When most calls are failing, retrying them only adds load.</li>
+<li><strong>Retry at one layer.</strong> If the app, its sidecar and the gateway each retry 3 times, one failing call becomes 4 × 4 × 4 = 64 attempts.</li>
+<li><strong>Circuit breakers.</strong> After too many failures, stop calling the dependency for a few seconds and fail fast (or serve a fallback). Then let a few test requests through; close the breaker when they succeed.</li>
+<li><strong>Bulkheads.</strong> Give each dependency its own connection pool, so one slow service can't use up every connection the caller has.</li>
+</ul></section>
+
+<section id="lab"><h2>Try it: a retry storm</h2>
+<p>A service normally gets 10,000 requests a second and can handle 12,000. A bad deploy makes some of its calls fail. Choose how many times callers retry and what protects the service, and watch whether it recovers or melts.</p>
+<div class="lab" id="gwlab">
+  <div class="lab-row"><label for="gw-p">Calls failing from the bad deploy <input type="range" id="gw-p" min="0" max="60" step="5" value="20"><output id="gw-p-o"></output></label><label for="gw-r">Retries per call <input type="range" id="gw-r" min="0" max="4" step="1" value="3"><output id="gw-r-o"></output></label></div>
+  <div class="lab-row"><span class="lab-k">Protection</span><span class="seg" role="group" aria-label="Protection" id="gw-s"><button type="button" data-v="none" aria-pressed="true">None</button><button type="button" data-v="budget" aria-pressed="false">Retry budget 10%</button><button type="button" data-v="breaker" aria-pressed="false">Circuit breaker</button></span></div>
+  <div class="metrics" id="gw-m"></div>
+  <p class="lab-out" id="gw-out" aria-live="polite"></p>
+</div>
+<p class="muted" style="font-size:13.5px">Rough model: every failed attempt is retried up to the limit; load above 12,000 a second makes the excess fail too (overload feeds back into the failure rate); a circuit breaker opens when more than 30% of calls fail and serves a fallback while sending 5% of traffic as probes.</p></section>
+
+<section id="failure"><h2>How gateways fail</h2>
+<h3>The gateway is a single point of failure</h3>
+<p>Every request goes through it, so run it as a stateless fleet across zones behind an L4 load balancer, keep its config in version control, and roll config changes out gradually like code. Many large outages have been one bad gateway or proxy config pushed everywhere at once.</p>
+<h3>Rate-limit or auth store goes down</h3>
+<p>If the gateway checks a central Redis for every request and Redis is slow, everything is slow. Cache keys and token-validation keys locally, and decide in advance whether to fail open (allow) or closed (deny) for each check.</p>
+<h3>Retry storms</h3>
+<p>Retries multiply load exactly when a service is weakest. The lab shows how 20% failures plus 3 retries can push a service over its limit, where overload creates more failures and more retries. Budgets and breakers stop the spiral.</p>
+<h3>Head-of-line blocking from one slow route</h3>
+<p>A slow upstream can use up the gateway's worker threads or connections for every route. Per-route connection limits and timeouts keep one bad service from taking down the whole API.</p></section>
+
+<section id="interview"><h2>Saying it in an interview</h2>
+<div class="say"><p>"Clients hit a stateless gateway fleet behind an L4 load balancer. The gateway terminates TLS, validates the JWT, applies per-client rate limits, and routes by path to the services, adding a trace ID. Mobile gets its own backend-for-frontend that aggregates calls. Inside, a service mesh gives us mutual TLS and uniform timeouts. Retries happen at one layer only, with exponential backoff, jitter and a 10% retry budget, and circuit breakers fail fast with a fallback, so a sick dependency can't drag down its callers."</p></div></section>
+
+<section id="real-world"><h2>In the real world</h2>
+<div class="table"><table><thead><tr><th>Need</th><th>Real options</th><th>Notes</th></tr></thead><tbody>
+<tr><td>Managed API gateway</td><td>Amazon API Gateway, Google Apigee, Azure API Management</td><td>Keys, plans, usage analytics built in</td></tr>
+<tr><td>Self-hosted gateway</td><td>Kong, Envoy Gateway, NGINX, Traefik, Tyk</td><td>Plugins for auth and rate limits</td></tr>
+<tr><td>Service mesh</td><td>Istio, Linkerd, Consul, Cilium service mesh</td><td>Sidecar, per-node or eBPF data planes</td></tr>
+<tr><td>Resilience libraries</td><td>Resilience4j (Java), Polly (.NET), gRPC retry and hedging policies</td><td>When you don't run a mesh</td></tr>
+</tbody></table></div>
+<p class="muted" style="font-size:13.5px;color:var(--muted)">Products change quickly; names here are examples, not endorsements. Check current docs before choosing.</p></section>
+
+<section id="related"><h2>Related</h2><ul class="related"><li><a href="load-balancing.html">Load balancing</a></li><li><a href="rate-limiting.html">Rate limiting</a></li><li><a href="rate-limiter.html">Distributed rate limiter</a></li><li><a href="protocols.html">Network protocols and APIs</a></li><li><a href="cdn.html">CDNs, PoPs and IXPs</a></li></ul></section>
+  </article>
+</div>
+</main>
+
+<footer class="site"><div class="wrap">Part of Classic System Design, a companion to the <a href="https://devlcodes.github.io/agentic-ai-notebook/system-design/index.html">agentic system designs</a>. Figures marked illustrative show the shape of a system, not measured numbers. Check vendor docs before relying on a specific product limit.</div></footer>
+<script>
+(function(){
+  var $ = function(id){ return document.getElementById(id); }, S = 'none', BASE = 10000, CAP = 12000;
+  function fmt(x){ return x >= 1e6 ? (x/1e6).toFixed(1) + 'M' : x >= 1e3 ? (x/1e3).toFixed(x >= 1e4 ? 0 : 1) + 'k' : Math.round(x) + ''; }
+  function pct(x){ return x > 0.99 && x < 1 ? (Math.floor(x * 1000) / 10) + '%' : Math.round(x * 100) + '%'; }
+  function amp(p, r){ return p >= 0.999 ? r + 1 : (1 - Math.pow(p, r + 1)) / (1 - p); }
+  function solve(p, r, budget){
+    var pe = p, a = 1;
+    for (var i = 0; i < 40; i++) {
+      a = budget ? Math.min(amp(pe, r), 1.1) : amp(pe, r);
+      if (r === 0) a = 1;
+      var off = BASE * a, over = Math.max(0, (off - CAP) / off);
+      pe = Math.min(0.99, p + (1 - p) * over);
+    }
+    return { pe: pe, a: a, load: BASE * a };
+  }
+  function run(){
+    var p = +$('gw-p').value / 100, r = +$('gw-r').value;
+    $('gw-p-o').textContent = Math.round(p * 100) + '%'; $('gw-r-o').textContent = r;
+    var s = solve(p, r, S === 'budget'), load = s.load, pe = s.pe, ok, open = false;
+    if (S === 'budget') ok = (1 - pe) + Math.min(pe, 0.1) * (1 - pe);
+    else ok = 1 - Math.pow(pe, r + 1);
+    if (S === 'breaker') {
+      var raw = solve(p, r, false);
+      if (raw.pe > 0.3) { open = true; load = BASE * 0.05; pe = p; ok = 0.05 * (1 - p); }
+      else { load = raw.load; pe = raw.pe; ok = 1 - Math.pow(pe, r + 1); }
+    }
+    var hot = load > CAP;
+    $('gw-m').innerHTML = '<div class="metric"><span class="n"' + (hot ? ' style="color:var(--c-dlq)"' : '') + '>' + fmt(load) + '/s</span><span class="l">load on the service</span><small>' + (load / BASE).toFixed(2) + '× normal · limit 12k</small></div>' +
+      '<div class="metric"><span class="n">' + Math.round(pe * 100) + '%</span><span class="l">attempts failing</span><small>' + Math.round(p * 100) + '% from the deploy</small></div>' +
+      '<div class="metric"><span class="n">' + (open ? 'fallback' : pct(ok)) + '</span><span class="l">' + (open ? 'breaker open' : 'requests that succeed') + '</span></div>';
+    var msg;
+    if (open) msg = 'More than 30% of calls were failing, so the breaker opened. Users get a fallback (a cached or default answer) instead of waiting, and the service gets only ' + fmt(load) + ' probe requests a second, room to recover or be rolled back. Once probes succeed, it closes again.';
+    else if (hot && pe > p + 0.05) msg = 'Retry storm: ' + r + ' retries turn ' + Math.round(p * 100) + '% failures into ' + fmt(load) + ' requests a second, above the 12k limit. Overload makes even more calls fail, which causes more retries. A small problem has become an outage. Try a retry budget or a circuit breaker.';
+    else if (S === 'budget' && p > 0) msg = 'The retry budget caps extra load at 10%, so the service stays at ' + fmt(load) + ' a second and the failure rate stays at ' + Math.round(pe * 100) + '%. Fewer requests are rescued by retries than without a cap, but the service never tips over.';
+    else if (r === 0) msg = 'No retries: ' + Math.round(p * 100) + '% of requests fail outright, but the load stays at its normal 10k a second, so the failures don\'t spread.';
+    else if (p === 0) msg = 'No failures, so no retries: the service runs at its normal 10k a second.';
+    else msg = 'Retries rescue most failed calls (' + pct(ok) + ' succeed) and the extra load stays under the limit. This is the case retries are good for: rare, independent failures.';
+    $('gw-out').textContent = msg;
+  }
+  $('gw-s').addEventListener('click', function(e){ var b = e.target.closest('button'); if (!b) return; S = b.dataset.v; this.querySelectorAll('button').forEach(function(x){ x.setAttribute('aria-pressed', x === b); }); run(); });
+  ['gw-p','gw-r'].forEach(function(id){ $(id).addEventListener('input', run); });
+  run();
+})();
+
+</script>
+</body>
+</html>
