@@ -16,12 +16,13 @@ Interactive pages on how large web systems are built, before any AI is involved:
 8. [Caching](https://devlcodes.github.io/classic-system-designs/caching.html)
 9. [Databases, indexes and replication](https://devlcodes.github.io/classic-system-designs/databases.html)
 10. [Sharding and consistent hashing](https://devlcodes.github.io/classic-system-designs/sharding.html)
-11. [Message queues and streams](https://devlcodes.github.io/classic-system-designs/queues.html)
-12. [Consistency and CAP](https://devlcodes.github.io/classic-system-designs/consistency.html)
-13. [Consensus with Raft](https://devlcodes.github.io/classic-system-designs/raft.html)
-14. [Merkle trees](https://devlcodes.github.io/classic-system-designs/merkle-trees.html)
-15. [Cassandra vs CockroachDB](https://devlcodes.github.io/classic-system-designs/cassandra-vs-cockroachdb.html)
-16. [Numbers to know](https://devlcodes.github.io/classic-system-designs/numbers.html)
+11. [Unique IDs and sequencers](https://devlcodes.github.io/classic-system-designs/unique-ids.html)
+12. [Message queues and streams](https://devlcodes.github.io/classic-system-designs/queues.html)
+13. [Consistency and CAP](https://devlcodes.github.io/classic-system-designs/consistency.html)
+14. [Consensus with Raft](https://devlcodes.github.io/classic-system-designs/raft.html)
+15. [Merkle trees](https://devlcodes.github.io/classic-system-designs/merkle-trees.html)
+16. [Cassandra vs CockroachDB](https://devlcodes.github.io/classic-system-designs/cassandra-vs-cockroachdb.html)
+17. [Numbers to know](https://devlcodes.github.io/classic-system-designs/numbers.html)
 
 ## Worked designs
 
