@@ -21,7 +21,8 @@ Interactive pages on how large web systems are built, before any AI is involved:
 13. [Consensus with Raft](https://devlcodes.github.io/classic-system-designs/raft.html)
 14. [Merkle trees](https://devlcodes.github.io/classic-system-designs/merkle-trees.html)
 15. [Cassandra vs CockroachDB](https://devlcodes.github.io/classic-system-designs/cassandra-vs-cockroachdb.html)
-16. [Numbers to know](https://devlcodes.github.io/classic-system-designs/numbers.html)
+16. [Monitoring, logging and tracing](https://devlcodes.github.io/classic-system-designs/observability.html)
+17. [Numbers to know](https://devlcodes.github.io/classic-system-designs/numbers.html)
 
 ## Worked designs
 
