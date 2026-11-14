@@ -40,6 +40,7 @@ Interactive pages on how large web systems are built, before any AI is involved:
 - [E-commerce store](https://devlcodes.github.io/classic-system-designs/ecommerce.html): 100M daily shoppers with 10× sale days
 - [Call insights](https://devlcodes.github.io/classic-system-designs/call-insights.html): 50k recorded sales calls a day, insights in 30 minutes
 - [Ticket booking](https://devlcodes.github.io/classic-system-designs/ticket-booking.html): 1M users racing for 50k seats, plus restaurant reservations
+- [Stock trading platform](https://devlcodes.github.io/classic-system-designs/stock-trading.html): 15M orders a day, 2M live price streams at the market open
 
 The companion site, [agentic system designs](https://devlcodes.github.io/agentic-ai-notebook/system-design/), builds RAG, agents and evals on top of these same blocks.
 

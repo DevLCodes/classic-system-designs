@@ -390,7 +390,7 @@ POST /v1/media/uploads → { media_id, upload_url }                 // direct to
 
 <section id="connections">
   <h2>Millions of open connections</h2>
-  <ul class="tags"><li>Deep dive 2</li><li><a href="load-balancing.html">Load balancing</a></li></ul>
+  <ul class="tags"><li>Deep dive 2</li><li><a href="load-balancing.html">Load balancing</a></li><li><a href="stock-trading.html#marketdata">Price streams to 2M phones</a></li></ul>
   <p class="lead">A gateway is cheap per connection, but there are 25 million connections, and they all reconnect at once when something goes wrong.</p>
   <ul class="plain">
     <li><strong>Event-driven servers.</strong> Gateways use non-blocking I/O (Netty, Go, Erlang/Elixir), so an idle connection costs a few KB of memory and no thread. Raise the OS file-descriptor limits and tune TCP buffers.</li>
