@@ -1,0 +1,852 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Maps and Navigation · Classic System Design</title>
+<meta name="description" content="Design a maps and navigation app like Google Maps: vector tiles per zoom level, geocoding, routing with Dijkstra, A* and contraction hierarchies, live traffic from phones, ETA prediction and rerouting.">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700&family=Instrument+Sans:ital,wght@0,400;0,500;0,600;1,400&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+  /* Layout: a slim site bar, then either a card grid (home), a sticky contents rail + reading column (articles), or a filterable term list (glossary). Light, single look. */
+  :root {
+    color-scheme: light;
+    --bg: #e9ecef; --paper: #f7f8f9; --ink: #1c2530; --muted: #586473; --line: #cdd4dc; --line-strong: #9aa5b1;
+    --accent: #4255d4; --accent-ink: #ffffff; --track: #d3d9e0; --code-bg: #eef1f4; --wire: #7d8996;
+    --c-ingest: #2a9d8f; --c-kb: #4d5fd8; --c-serve: #d7932a; --c-model: #e2674f; --c-gov: #b2456e; --c-cross: #4a5562; --c-dlq: #b23a3a; --c-ok: #2f8f5b;
+    --t-src: #e4e8ec; --t-ingest: #d8eeea; --t-kb: #dfe3fa; --t-serve: #f8ead2; --t-model: #fbe1da; --t-gov: #f3dde6; --t-cross: #dfe2e6; --t-dlq: #f6dddb;
+    --font-display: "Bricolage Grotesque", "Avenir Next", "Segoe UI", system-ui, sans-serif;
+    --font-body: "Instrument Sans", "Helvetica Neue", "Segoe UI", system-ui, sans-serif;
+    --font-mono: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  @media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
+  body { margin: 0; background: var(--bg); color: var(--ink); font-family: var(--font-body); font-size: 16px; line-height: 1.6; }
+  a { color: var(--accent); }
+  .wrap { max-width: 1240px; margin: 0 auto; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
+
+  .sitebar { border-bottom: 1px solid var(--line); background: var(--paper); }
+  .sitebar .wrap { display: flex; align-items: center; gap: 18px; flex-wrap: wrap; padding-block: 12px; }
+  .brand { font-family: var(--font-display); font-weight: 700; font-size: 17px; color: var(--ink); text-decoration: none; margin-right: auto; }
+  .sitebar nav { display: flex; gap: 16px; flex-wrap: wrap; font-size: 14px; }
+  .sitebar nav a { color: var(--muted); text-decoration: none; }
+  .sitebar nav a:hover, .sitebar nav a[aria-current="page"] { color: var(--ink); }
+  .sitebar nav a[aria-current="page"] { font-weight: 600; }
+
+  .intro { padding-block: 40px 8px; display: grid; gap: 10px; max-width: 820px; }
+  .eyebrow { margin: 0; font-family: var(--font-mono); font-size: 12px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+  h1 { margin: 0; font-family: var(--font-display); font-weight: 700; font-size: clamp(30px, 5vw, 46px); line-height: 1.05; text-wrap: balance; }
+  .intro .lead { font-size: 18px; margin: 0; }
+
+  .doc { display: grid; grid-template-columns: 220px minmax(0, 1fr); gap: 48px; padding-block: 36px 72px; }
+  .toc { position: sticky; top: calc(env(safe-area-inset-top, 0px) + 20px); align-self: start; }
+  .toc p { margin: 0 0 8px; font-family: var(--font-mono); font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+  .toc ol { margin: 0; padding: 0; list-style: none; display: grid; gap: 2px; counter-reset: toc; }
+  .toc li { counter-increment: toc; }
+  .toc a { display: flex; gap: 8px; padding: 3px 0; font-size: 14px; color: var(--muted); text-decoration: none; }
+  .toc a::before { content: counter(toc, decimal-leading-zero); font-family: var(--font-mono); font-size: 11.5px; padding-top: 2px; color: var(--line-strong); }
+  .toc a:hover { color: var(--ink); }
+  article { min-width: 0; max-width: 760px; }
+  section { padding-bottom: 36px; margin-bottom: 36px; border-bottom: 1px solid var(--line); scroll-margin-top: 20px; }
+  section:last-child { border-bottom: 0; }
+  h2 { margin: 0 0 10px; font-family: var(--font-display); font-weight: 700; font-size: 28px; line-height: 1.15; text-wrap: balance; }
+  h3 { margin: 26px 0 6px; font-family: var(--font-display); font-weight: 600; font-size: 19px; line-height: 1.25; }
+  p { margin: 0 0 14px; }
+  .lead { font-size: 18px; }
+  ul.plain, ol.plain { margin: 0 0 16px; padding-left: 22px; display: grid; gap: 6px; }
+  code { font-family: var(--font-mono); font-size: 0.88em; background: var(--code-bg); padding: 1px 5px; border-radius: 4px; }
+  pre { margin: 0 0 16px; padding: 14px 16px; background: var(--code-bg); border-radius: 10px; overflow-x: auto; font-size: 13px; line-height: 1.55; }
+  pre code { background: none; padding: 0; font-size: inherit; }
+  .table { overflow-x: auto; margin: 0 0 18px; }
+  table { width: 100%; border-collapse: collapse; font-size: 14.5px; line-height: 1.45; }
+  th, td { text-align: left; vertical-align: top; padding: 8px 10px; border-bottom: 1px solid var(--line); }
+  th { font-family: var(--font-mono); font-size: 11.5px; font-weight: 500; letter-spacing: .05em; text-transform: uppercase; color: var(--muted); }
+  td.num { font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .note { border-left: 3px solid var(--accent); background: var(--paper); padding: 12px 16px; border-radius: 0 10px 10px 0; margin: 0 0 18px; }
+  .note p:last-child { margin: 0; }
+  .formula { font-family: var(--font-mono); font-size: 14px; background: var(--paper); border: 1px solid var(--line); border-radius: 10px; padding: 12px 16px; margin: 0 0 16px; overflow-x: auto; white-space: nowrap; }
+  .related { display: flex; flex-wrap: wrap; gap: 8px; margin: 0; padding: 0; list-style: none; }
+  .related a { display: inline-block; padding: 4px 12px; border: 1px solid var(--line); border-radius: 999px; font-size: 14px; color: var(--ink); text-decoration: none; background: var(--paper); }
+  .related a:hover { border-color: var(--ink); }
+  .pager { display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; font-size: 14px; }
+  footer.site { border-top: 1px solid var(--line); padding-block: 20px 40px; font-size: 13px; color: var(--muted); }
+  a:focus-visible, input:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+  /* home */
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 16px; margin: 0 0 40px; padding: 0; list-style: none; }
+  .card { display: grid; gap: 8px; height: 100%; padding: 18px; background: var(--paper); border: 1px solid var(--line); border-radius: 14px; color: var(--ink); text-decoration: none; }
+  .card:hover { border-color: var(--ink); }
+  .card .k { font-family: var(--font-mono); font-size: 11px; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
+  .card h3 { margin: 0; font-size: 20px; }
+  .card p { margin: 0; font-size: 14.5px; color: var(--muted); }
+  .card svg { width: 100%; height: auto; display: block; }
+  .card.feature svg { max-width: 420px; justify-self: center; }
+  .card.feature { grid-column: 1 / -1; grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr); align-items: center; gap: 24px; }
+  .home-h { margin: 28px 0 12px; font-family: var(--font-display); font-size: 24px; }
+
+  /* glossary */
+  .gl-tools { position: sticky; top: 0; z-index: 2; background: var(--bg); padding-block: 12px; display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+  .gl-tools input { flex: 1 1 260px; min-width: 0; font: 15px var(--font-body); padding: 9px 12px; border-radius: 10px; border: 1px solid var(--line-strong); background: #fff; color: var(--ink); }
+  .gl-letters { display: flex; flex-wrap: wrap; gap: 4px; font-family: var(--font-mono); font-size: 13px; }
+  .gl-letters a { padding: 2px 6px; border-radius: 6px; text-decoration: none; color: var(--muted); }
+  .gl-letters a:hover { background: var(--paper); color: var(--ink); }
+  .gl { max-width: 860px; }
+  .gl-item { margin: 0; }
+  .gl-item { display: grid; grid-template-columns: 220px minmax(0, 1fr); gap: 16px; padding: 12px 0; border-bottom: 1px solid var(--line); scroll-margin-top: 70px; }
+  .gl-item dt { font-weight: 600; }
+  .gl-item dt small { display: block; font-weight: 400; font-family: var(--font-mono); font-size: 11px; color: var(--muted); letter-spacing: .04em; text-transform: uppercase; margin-top: 2px; }
+  .gl-item dd { margin: 0; }
+  .gl-item dd .see { font-size: 13.5px; }
+  .gl-letter { margin: 26px 0 4px; font-family: var(--font-display); font-size: 22px; scroll-margin-top: 70px; }
+
+  @media (max-width: 900px) {
+    .doc { grid-template-columns: minmax(0, 1fr); gap: 24px; padding-block: 28px 56px; }
+    .toc { position: static; }
+    .toc ol { grid-template-columns: repeat(2, minmax(0, 1fr)); column-gap: 12px; }
+    .card.feature { grid-template-columns: minmax(0, 1fr); }
+  }
+  @media (max-width: 640px) {
+    .gl-item { grid-template-columns: minmax(0, 1fr); gap: 4px; }
+    h2 { font-size: 24px; }
+    .intro .lead, .lead { font-size: 16.5px; }
+  }
+
+  /* diagrams */
+  .fig { margin: 6px 0 24px; overflow-x: auto; }
+  .fig svg { display: block; width: 100%; height: auto; min-width: 600px; }
+  .fig figcaption { margin-top: 8px; font-size: 13px; line-height: 1.45; color: var(--muted); }
+  .dg text { font-family: var(--font-body); font-size: 13px; fill: var(--ink); }
+  .dg .sm { font-size: 11.5px; fill: var(--muted); }
+  .dg .small { font-size: 12px; }
+  .dg .b { font-weight: 600; }
+  .dg .mono { font-family: var(--font-mono); }
+  .dg .it { font-style: italic; }
+  .dg .mute { fill: var(--muted); }
+  .dg .gov { fill: var(--c-gov); font-weight: 600; }
+  .dg .okt { fill: var(--c-ok); font-weight: 600; }
+  .dg .bad { fill: var(--c-dlq); font-weight: 600; }
+  .dg .cap { font-family: var(--font-mono); font-size: 11px; letter-spacing: .06em; fill: var(--muted); }
+  .dg .big { font-family: var(--font-display); font-size: 30px; font-weight: 700; fill: var(--ink); }
+  .dg .box { fill: var(--paper); stroke: var(--line-strong); stroke-width: 1.25; }
+  .dg .ghost { fill: none; stroke: var(--line-strong); stroke-width: 1.25; stroke-dasharray: 5 5; }
+  .dg .track { fill: var(--track); }
+  .dg .rule { stroke: var(--line); stroke-width: 1; }
+  .dg .axis { stroke: var(--line-strong); stroke-width: 1.25; }
+  .dg .wire { fill: none; stroke: var(--wire); stroke-width: 1.4; }
+  .dg .wire.dash { stroke-dasharray: 4 4; }
+  .dg .wire.hot { stroke: var(--accent); stroke-width: 2; }
+  .dg .wire.red { stroke: var(--c-dlq); }
+  .dg .ah { fill: var(--wire); }
+  .dg .xmark { stroke: var(--c-dlq); stroke-width: 1.8; fill: none; }
+  .dg .tick { stroke: var(--c-ok); stroke-width: 2; fill: none; }
+  .dg .k-src { fill: var(--t-src); stroke: #8795a3; stroke-width: 1.5; }
+  .dg .k-ingest { fill: var(--t-ingest); stroke: var(--c-ingest); stroke-width: 1.5; }
+  .dg .k-kb { fill: var(--t-kb); stroke: var(--c-kb); stroke-width: 1.5; }
+  .dg .k-serve { fill: var(--t-serve); stroke: var(--c-serve); stroke-width: 1.5; }
+  .dg .k-model { fill: var(--t-model); stroke: var(--c-model); stroke-width: 1.5; }
+  .dg .k-gov { fill: var(--t-gov); stroke: var(--c-gov); stroke-width: 1.5; }
+  .dg .k-cross { fill: var(--t-cross); stroke: var(--c-cross); stroke-width: 1.5; }
+  .dg .k-dlq { fill: var(--t-dlq); stroke: var(--c-dlq); stroke-width: 1.5; }
+  .dg .k-user { fill: #ffffff; stroke: var(--line-strong); stroke-width: 1.5; }
+  .dg .f-serve { fill: var(--c-serve); } .dg .f-kb { fill: var(--c-kb); } .dg .f-model { fill: var(--c-model); } .dg .f-gov { fill: var(--c-gov); } .dg .f-ingest { fill: var(--c-ingest); } .dg .f-cross { fill: #b8c0c9; } .dg .f-dlq { fill: var(--c-dlq); } .dg .f-ok { fill: var(--c-ok); }
+  .dg .cell { fill: var(--paper); stroke: var(--line-strong); stroke-width: 1; }
+  .dg .cell.hot { fill: var(--t-ingest); stroke: var(--c-ingest); stroke-width: 1.5; }
+  .dg .cell.old { fill: var(--t-kb); stroke: var(--c-kb); }
+  .dg .cell.new { fill: var(--t-ingest); stroke: var(--c-ingest); stroke-width: 1.5; }
+  .dg .cell.gone { fill: var(--paper); stroke: var(--line); }
+  .dg .dot-hr { fill: var(--c-gov); } .dg .dot-it { fill: var(--c-kb); } .dg .dot-eng { fill: var(--c-ingest); } .dg .dot-q { fill: var(--c-serve); stroke: var(--ink); stroke-width: 1.5; }
+  .dg .halo { fill: none; stroke: var(--c-serve); stroke-width: 1.5; stroke-dasharray: 4 4; }
+  .dg .zone { fill: var(--paper); stroke: var(--line); stroke-width: 1; }
+</style>
+
+<style>
+  .lab { margin: 6px 0 26px; padding: 14px 16px 16px; background: var(--paper); border: 1px solid var(--line); border-radius: 14px; }
+  .lab-row { display: flex; flex-wrap: wrap; gap: 10px 18px; align-items: center; margin: 0 0 12px; }
+  .lab-k { font-family: var(--font-mono); font-size: 11px; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
+  .lab label { display: inline-flex; gap: 8px; align-items: center; font-size: 14px; }
+  .lab input[type=range] { width: 150px; accent-color: var(--accent); }
+  .lab input[type=checkbox] { width: 16px; height: 16px; accent-color: var(--accent); }
+  .lab input[type=text] { flex: 1 1 260px; min-width: 0; font: 15px var(--font-body); padding: 8px 11px; border-radius: 9px; border: 1px solid var(--line-strong); background: #fff; color: var(--ink); }
+  .lab output { font-family: var(--font-mono); font-size: 12.5px; min-width: 6ch; font-variant-numeric: tabular-nums; }
+  .seg { display: inline-flex; flex-wrap: wrap; gap: 6px; }
+  .seg button, .chips button { font: 600 13px var(--font-body); color: var(--ink); background: #fff; border: 1px solid var(--line); border-radius: 8px; padding: 6px 12px; cursor: pointer; }
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; }
+  .chips button { font-weight: 500; border-radius: 999px; padding: 4px 11px; font-size: 13px; }
+  .seg button:hover, .chips button:hover { border-color: var(--ink); }
+  .seg button[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+  .seg button:focus-visible, .chips button:focus-visible, .lab input:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .lab-out { margin: 12px 0 0; padding: 10px 12px; background: #fff; border: 1px solid var(--line); border-radius: 10px; font-size: 14.5px; line-height: 1.5; font-variant-numeric: tabular-nums; }
+  .chunks { display: grid; gap: 8px; max-height: 470px; overflow: auto; padding-right: 4px; }
+  .chunk { min-width: 0; padding: 8px 11px; background: #fff; border: 1px solid var(--line); border-left: 4px solid var(--c-kb); border-radius: 8px; font-size: 14px; line-height: 1.5; overflow-wrap: anywhere; }
+  .chunk:nth-child(even) { border-left-color: var(--c-ingest); }
+  .chunk.ans { box-shadow: 0 0 0 2px var(--c-serve); }
+  .chunk .ch { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-bottom: 4px; font-family: var(--font-mono); font-size: 11px; color: var(--muted); }
+  .chunk .pfx { display: block; font-family: var(--font-mono); font-size: 11.5px; color: var(--c-kb); }
+  .chunk .ov { background: var(--track); border-radius: 3px; }
+  .chunk mark { background: #ffe9b3; border-radius: 3px; padding: 0 2px; }
+  .chunk table { width: auto; font-size: 13px; margin: 4px 0; }
+  .chunk td { padding: 2px 10px 2px 0; border-bottom: 1px solid var(--line); }
+  .badge { display: inline-block; padding: 0 7px; border-radius: 999px; border: 1px solid; font-family: var(--font-mono); font-size: 10.5px; line-height: 1.6; }
+  .badge.bad { color: var(--c-dlq); border-color: var(--c-dlq); background: var(--t-dlq); }
+  .badge.ok { color: var(--c-ok); border-color: var(--c-ok); background: #e3f3ea; }
+  .badge.info { color: var(--c-kb); border-color: var(--c-kb); background: var(--t-kb); }
+  .bars { display: grid; gap: 8px; margin: 4px 0 0; }
+  .bar-row { display: grid; grid-template-columns: minmax(0, 150px) minmax(0, 1fr) 46px; gap: 10px; align-items: center; font-size: 14px; }
+  .bar { position: relative; height: 14px; border-radius: 7px; background: var(--track); }
+  .bar i { position: absolute; inset: 0 auto 0 0; border-radius: 7px; background: var(--c-kb); transition: width .3s; }
+  .bar b { position: absolute; top: -4px; bottom: -4px; width: 2px; background: var(--c-dlq); }
+  .bar-row .v { font-family: var(--font-mono); font-size: 12.5px; text-align: right; }
+  .stages { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 10px; padding: 0; list-style: none; font-size: 13px; }
+  .stages li { padding: 2px 10px; border-radius: 999px; border: 1px solid var(--line); color: var(--muted); background: #fff; }
+  .stages li.hit { border-color: var(--accent); color: var(--accent-ink); background: var(--accent); }
+  .stages li.skip { text-decoration: line-through; }
+  .rlist { display: grid; gap: 6px; margin: 0; padding: 0; list-style: none; counter-reset: r; }
+  .rlist li { counter-increment: r; display: grid; grid-template-columns: 28px minmax(0, 1fr) auto; gap: 10px; align-items: center; padding: 6px 10px; background: #fff; border: 1px solid var(--line); border-radius: 8px; font-size: 14px; }
+  .rlist li::before { content: counter(r); font-family: var(--font-mono); font-size: 12px; color: var(--muted); }
+  .rlist li.rel { border-color: var(--c-ok); background: #f0f8f3; }
+  .rlist button { font: 600 12px var(--font-body); padding: 3px 10px; border-radius: 999px; border: 1px solid var(--line-strong); background: #fff; color: var(--ink); cursor: pointer; white-space: nowrap; }
+  .rlist li.rel button { background: var(--c-ok); border-color: var(--c-ok); color: #fff; }
+  .metrics { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 8px; margin: 12px 0 0; }
+  .metric { padding: 8px 10px; background: #fff; border: 1px solid var(--line); border-radius: 10px; }
+  .metric .n { display: block; font-family: var(--font-display); font-size: 24px; font-weight: 700; font-variant-numeric: tabular-nums; }
+  .metric .l { font-family: var(--font-mono); font-size: 11px; letter-spacing: .04em; text-transform: uppercase; color: var(--muted); }
+  .metric small { display: block; font-size: 12px; color: var(--muted); line-height: 1.35; margin-top: 2px; }
+  td.pass { color: var(--c-ok); font-weight: 600; } td.fail { color: var(--c-dlq); font-weight: 600; }
+  .say { border-left: 3px solid var(--c-serve); background: var(--paper); padding: 12px 16px; border-radius: 0 10px 10px 0; margin: 0 0 16px; font-size: 15.5px; }
+  .say p:last-child { margin: 0; }
+</style>
+
+<style>
+  .lab-chart { display: block; width: 100%; height: auto; margin: 4px 0 0; }
+  .lab-chart text { font-family: var(--font-body); font-size: 12px; fill: var(--muted); }
+  .grid-cells { display: grid; gap: 4px; }
+  .srv { display: grid; grid-template-columns: 92px minmax(0,1fr) 70px; gap: 10px; align-items: center; font-size: 14px; }
+  .muted { color: var(--muted); }
+  .lab select { font: 14px var(--font-body); padding: 6px 8px; border-radius: 8px; border: 1px solid var(--line-strong); background: #fff; color: var(--ink); }
+  .lab input[type=number] { width: 9ch; font: 14px var(--font-mono); padding: 6px 8px; border-radius: 8px; border: 1px solid var(--line-strong); background: #fff; color: var(--ink); }
+</style><style>
+  .prompt { margin: 0; font-size: 18px; line-height: 1.5; color: var(--ink); }
+  .prompt q { font-style: italic; }
+  .legend { display: flex; flex-wrap: wrap; gap: 6px 14px; margin: 4px 0 0; padding: 0; list-style: none; font-size: 13px; color: var(--muted); }
+  .legend li { display: flex; align-items: center; gap: 6px; }
+  .legend i { width: 11px; height: 11px; border-radius: 3px; display: inline-block; }
+  .tags { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 16px; padding: 0; list-style: none; }
+  .tags li { font-family: var(--font-mono); font-size: 11px; letter-spacing: .04em; padding: 2px 8px; border-radius: 6px; border: 1px solid var(--line); color: var(--muted); }
+  @media (max-width: 640px) { .prompt { font-size: 16.5px; } }
+</style>
+<style>
+  .rg { display: block; width: 100%; height: auto; margin: 4px 0 0; }
+  .rg rect { stroke: var(--paper); stroke-width: 1; }
+  .rg .c-road { fill: #ffffff; }
+  .rg .c-bld { fill: #c3cad2; }
+  .rg .c-water { fill: var(--t-kb); }
+  .rg .c-bridge { fill: #ffffff; stroke: var(--c-kb); stroke-width: 1.5; }
+  .rg .c-jam { fill: var(--t-dlq); stroke: var(--c-dlq); stroke-width: 1.5; }
+  .rg .c-seen { fill: var(--t-serve); }
+  .rg .c-path { fill: var(--c-ingest); }
+  .rg .c-jam.c-seen { fill: var(--t-dlq); }
+  .rg .c-jam.c-path { fill: var(--c-dlq); }
+  .rg circle.s { fill: var(--ink); }
+  .rg circle.g { fill: #ffffff; stroke: var(--ink); stroke-width: 3; }
+  .rg text { font-family: var(--font-mono); font-size: 10px; fill: var(--c-kb); }
+</style>
+<link rel="stylesheet" href="assets/scene3d.css">
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs><marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" class="ah" style="fill:#7d8996"/></marker></defs></svg>
+<header class="sitebar"><div class="wrap"><a class="brand" href="index.html">Classic System Design</a><nav aria-label="Site"><a href="index.html">Home</a><a href="index.html#blocks">Building blocks</a><a href="index.html#designs" aria-current="page">Designs</a><a href="https://devlcodes.github.io/agentic-ai-notebook/system-design/index.html">Agentic designs ↗</a></nav></div></header>
+<main>
+<header class="wrap"><div class="intro"><p class="eyebrow">Classic system design walkthrough</p><h1>Maps and Navigation</h1><p class="prompt"><q>Design a maps app like Google Maps: people pan and zoom a map of the world, search for an address, get driving directions with an arrival time, and get a faster route when traffic changes. Plan for 100 million daily users, 50 million route requests a day, and 5 million people navigating at once at the evening peak.</q></p><ul class="legend" aria-label="Colour key"><li><i style="background:var(--c-serve)"></i>Map display and search</li><li><i style="background:var(--c-ingest)"></i>Routing and navigation</li><li><i style="background:var(--c-kb)"></i>Storage</li><li><i style="background:var(--c-cross)"></i>Traffic stream</li><li><i style="background:#8795a3"></i>Offline map build</li></ul></div></header>
+<div class="wrap"><figure class="fig3d hero" id="hero">
+  <div class="stage3d" role="img" aria-label="Animated 3D view: a phone asks the CDN for map tiles by zoom, x and y; a miss is filled from the tile store, which the offline tile builder fills from map data. The user searches an address, which the geocoder turns into a point. The phone asks for a route; the routing service searches a precomputed road graph using live speeds and returns routes with arrival times. While navigating, the phone sends its location every five seconds to the navigation service, which streams it through Kafka to the traffic service. Traffic snaps pings to road segments, computes speeds and writes them to the live speed store that routing reads. When a jam appears ahead, navigation asks routing for a new route and sends the faster one back to the phone."><p class="hint3">3D · drag to turn</p><button class="reset3 ghost" type="button" hidden>Reset view</button><p class="nogl">The 3D view needs WebGL and a connection, because Three.js loads from a CDN. The sections below cover the same ground.</p></div>
+  <div class="ctl3"><button class="pp" type="button">Pause</button><span class="k">Step</span><div class="steps3"></div><span class="meta3"></span></div>
+  <div class="track3"><div class="fill3"></div></div>
+  <p class="out3" aria-live="polite"></p>
+  <figcaption>Illustrative. Three separate systems share one app: map display (static files), routing (in-memory graph search) and live traffic (a stream). They meet only at the live speed store.</figcaption>
+</figure></div>
+<div class="wrap doc">
+  <nav class="toc" aria-label="Sections"><p>The solution</p><ol><li><a href="#requirements">Requirements</a></li><li><a href="#success">Success metrics</a></li><li><a href="#estimates">Estimates</a></li><li><a href="#api">API</a></li><li><a href="#architecture">Architecture</a></li><li><a href="#tiles">Map tiles and zoom levels</a></li><li><a href="#lab">Try it: tiles per zoom level</a></li><li><a href="#geocoding">Search and geocoding</a></li><li><a href="#routing">Routing on a road graph</a></li><li><a href="#routelab">Try it: Dijkstra vs A*</a></li><li><a href="#traffic">Live traffic from phones</a></li><li><a href="#eta">Predicting arrival times</a></li><li><a href="#rerouting">Rerouting</a></li><li><a href="#mapdata">Building the map</a></li><li><a href="#storage">Storage</a></li><li><a href="#observability">Observability</a></li><li><a href="#risks">Risks and v2</a></li><li><a href="#presenting">Presenting it in 45 minutes</a></li><li><a href="#numbers">Numbers to remember</a></li></ol></nav>
+  <article>
+
+<section id="requirements">
+  <h2>Requirements</h2>
+  <ul class="tags"><li>Clarify</li><li><a href="requirements.html">Non-functional requirements</a></li></ul>
+  <p class="lead">A maps app is three products glued together: a picture of the world that rarely changes, a shortest-path search that must answer in milliseconds, and a live feed of how fast every road is moving right now.</p>
+  <div class="table"><table>
+    <thead><tr><th>Question</th><th>Assumption</th><th>Why it matters</th></tr></thead>
+    <tbody>
+      <tr><td>Features</td><td>Pan and zoom the map, search places and addresses, driving directions with ETA, turn-by-turn navigation, live traffic, rerouting</td><td>Display, search, routing and traffic scale differently</td></tr>
+      <tr><td>Users</td><td class="num">100M a day</td><td>Tile and search load</td></tr>
+      <tr><td>Routes</td><td class="num">50M requests a day, ~3 alternatives each</td><td>Routing throughput</td></tr>
+      <tr><td>Navigation</td><td class="num">5M trips at once at peak</td><td>Location pings and reroute checks</td></tr>
+      <tr><td>Freshness</td><td class="num">traffic within ~2 min; map edits within days</td><td>Stream for traffic, batch for the map</td></tr>
+      <tr><td>Latency</td><td class="num">tiles &lt; 100 ms from cache; route &lt; 1 s</td><td>Precomputed tiles and a precomputed graph</td></tr>
+      <tr><td>Privacy</td><td>Location data is anonymous and aggregated</td><td>No raw trips leave the traffic pipeline</td></tr>
+    </tbody>
+  </table></div>
+  <p>Out of scope: transit and walking modes, Street View, reviews and business listings. Finding places near a point has its own walkthrough: <a href="nearby-places.html">Nearby places</a>.</p>
+</section>
+
+<section id="success">
+  <h2>Success metrics</h2>
+  <ul class="tags"><li>Define success</li></ul>
+  <div class="table"><table>
+    <thead><tr><th>Kind</th><th>Metric</th><th>Target</th></tr></thead>
+    <tbody>
+      <tr><td>Product</td><td>Trips started from a route; reroute offers accepted</td><td class="num">rising</td></tr>
+      <tr><td>Accuracy</td><td>ETA error: predicted vs actual arrival</td><td class="num">within ~10% on most trips</td></tr>
+      <tr><td>Reliability</td><td>Route p99; tile p99 from the CDN</td><td class="num">&lt; 1 s; &lt; 100 ms</td></tr>
+      <tr><td>Freshness</td><td>Age of traffic speeds; age of the newest map edit on screen</td><td class="num">&lt; 2 min; days</td></tr>
+    </tbody>
+  </table></div>
+</section>
+
+<section id="estimates">
+  <h2>Estimates</h2>
+  <ul class="tags"><li>Back of the envelope</li><li><a href="numbers.html">Numbers</a></li></ul>
+  <figure class="fig"><svg viewBox="0 0 722 150" class="dg" role="img" aria-label="Key numbers: 350,000 tile requests a second at peak, 2,000 route requests a second at peak, 1 million location pings a second, about 100 GB for a planet of vector tiles, and under a millisecond per route query with contraction hierarchies">
+    <rect x="10" y="10" width="134" height="92" rx="8" class="k-serve"/><text x="24" y="52" class="big">350k/s</text><text x="24" y="78" class="sm">tile requests, peak</text><text x="24" y="94" class="sm">most from CDN or phone</text>
+    <rect x="154" y="10" width="134" height="92" rx="8" class="k-ingest"/><text x="168" y="52" class="big">2k/s</text><text x="168" y="78" class="sm">route requests, peak</text><text x="168" y="94" class="sm">50M a day</text>
+    <rect x="298" y="10" width="134" height="92" rx="8" class="k-cross"/><text x="312" y="52" class="big">1M/s</text><text x="312" y="78" class="sm">location pings</text><text x="312" y="94" class="sm">5M trips ÷ 5 s</text>
+    <rect x="442" y="10" width="134" height="92" rx="8" class="k-kb"/><text x="456" y="52" class="big">~100 GB</text><text x="456" y="78" class="sm">vector tiles, z0–14</text><text x="456" y="94" class="sm">the whole planet</text>
+    <rect x="586" y="10" width="126" height="92" rx="8" class="k-ingest"/><text x="600" y="52" class="big">&lt; 1 ms</text><text x="600" y="78" class="sm">per route search</text><text x="600" y="94" class="sm">with a precomputed graph</text>
+    <text x="10" y="132" class="small">Tiles are a caching problem, routes are a precomputation problem, and pings are a streaming problem.</text>
+  </svg></figure>
+  <ul class="plain">
+    <li><strong>Tiles:</strong> 100M users × ~100 tiles a day = 10B tile requests a day ≈ 116k a second, ~350k at the evening peak. Tiles never change within a map version, so phones and the CDN serve almost all of them.</li>
+    <li><strong>Search:</strong> 100M × ~3 searches = 300M a day ≈ 3.5k a second, ~10k at peak, plus autocomplete on every few keystrokes.</li>
+    <li><strong>Routes:</strong> 50M a day ≈ 580 a second, ~2k at peak. Each request finds about three alternatives, and reroutes add more.</li>
+    <li><strong>Pings:</strong> 5M trips sending a location every 5 s (batches of 1-second GPS fixes) = 1M requests a second. At ~100 bytes per fix that is 100 MB/s at peak, or about 3 TB a day at an average of a third of peak.</li>
+    <li><strong>Road graph:</strong> hundreds of millions of junctions and over a billion road segments worldwide. One continent fits in the memory of one large server (tens of GB), so routing servers are replicated per region rather than sharded per query.</li>
+  </ul>
+</section>
+
+<section id="api">
+  <h2>API</h2>
+  <ul class="tags"><li>Interface</li><li><a href="protocols.html">Protocols</a></li></ul>
+<pre><code>GET  /tiles/{style}/{z}/{x}/{y}.mvt?v=2026-11-10      (immutable, cache for a year)
+GET  /api/geocode?q=12+MG+Road&amp;near=12.97,77.59     → [{ place_id, name, lat, lng, score }]
+GET  /api/reverse?lat=12.9757&amp;lng=77.6062           → { address, place_id }
+
+POST /api/routes { origin, destination, depart_at, avoid: ["tolls"] }
+→ { routes: [{ route_id, polyline, distance_m, eta_s, segments: [...], traffic: [...] }] }
+
+POST /api/trips { route_id }                         → { trip_id }
+POST /api/trips/{trip_id}/locations [ {t, lat, lng, speed, heading}, ×5 ]
+→ { eta_s, offer?: { route_id, saves_s, polyline } }</code></pre>
+  <p>The tile URL carries the map version, so a tile is never updated in place: a new map version is a new URL, and old tiles simply age out of caches. The answer to each location batch carries the fresh ETA and any faster-route offer, so navigation needs no separate push channel while the app is open.</p>
+</section>
+
+<section id="architecture">
+  <h2>Architecture</h2>
+  <ul class="tags"><li>Whole system</li></ul>
+  <figure class="fig"><svg viewBox="0 0 722 306" class="dg" role="img" aria-label="Architecture: phones fetch tiles from a CDN backed by a tile store, which an offline builder fills from map data; the builder also produces the routing graph. API calls go through a gateway to search and geocoding, and to routing, which uses an ETA model. Navigation receives location pings and streams them through Kafka to the traffic service, which writes live speeds per road segment. Routing and the ETA model read live speeds, and navigation asks routing for reroutes.">
+    <text x="10" y="22" class="cap">MAP DISPLAY</text>
+    <rect x="10" y="34" width="110" height="40" rx="8" class="k-user"/><text x="65" y="52" class="small b" text-anchor="middle">Phone</text><text x="65" y="67" class="sm" text-anchor="middle">tile cache · GPS</text>
+    <path d="M120 54 L150 54" class="wire" marker-end="url(#ah)"/>
+    <rect x="152" y="34" width="130" height="40" rx="8" class="k-serve"/><text x="217" y="52" class="small b" text-anchor="middle">CDN</text><text x="217" y="67" class="sm" text-anchor="middle">tiles by z/x/y</text>
+    <path d="M282 54 L312 54" class="wire" marker-end="url(#ah)"/>
+    <rect x="314" y="34" width="120" height="40" rx="18" class="k-kb"/><text x="374" y="52" class="small b" text-anchor="middle">Tile store</text><text x="374" y="67" class="sm" text-anchor="middle">object storage</text>
+    <path d="M466 54 L436 54" class="wire" marker-end="url(#ah)"/>
+    <rect x="466" y="34" width="130" height="40" rx="8" class="k-src"/><text x="531" y="52" class="small b" text-anchor="middle">Map builder</text><text x="531" y="67" class="sm" text-anchor="middle">tiles · routing graph</text>
+    <path d="M612 54 L598 54" class="wire" marker-end="url(#ah)"/>
+    <rect x="612" y="34" width="100" height="40" rx="18" class="k-kb"/><text x="662" y="52" class="small b" text-anchor="middle">Map data</text><text x="662" y="67" class="sm" text-anchor="middle">roads · places</text>
+    <path d="M65 74 L65 142 L150 142" class="wire" marker-end="url(#ah)"/>
+    <text x="10" y="116" class="cap">SEARCH AND ROUTING</text>
+    <rect x="152" y="122" width="130" height="40" rx="8" class="k-gov"/><text x="217" y="140" class="small b" text-anchor="middle">API gateway</text><text x="217" y="155" class="sm" text-anchor="middle">auth · rate limits</text>
+    <path d="M282 142 L312 142" class="wire" marker-end="url(#ah)"/>
+    <rect x="314" y="122" width="120" height="40" rx="8" class="k-serve"/><text x="374" y="140" class="small b" text-anchor="middle">Search + geocode</text><text x="374" y="155" class="sm" text-anchor="middle">address index</text>
+    <path d="M531 74 L531 120" class="wire dash" marker-end="url(#ah)"/><text x="539" y="102" class="sm">graph snapshot</text>
+    <rect x="466" y="122" width="130" height="40" rx="8" class="k-ingest"/><text x="531" y="140" class="small b" text-anchor="middle">Routing</text><text x="531" y="155" class="sm" text-anchor="middle">CH graph in memory</text>
+    <path d="M596 142 L610 142" class="wire" marker-end="url(#ah)"/>
+    <rect x="612" y="122" width="100" height="40" rx="8" class="k-ingest"/><text x="662" y="140" class="small b" text-anchor="middle">ETA model</text><text x="662" y="155" class="sm" text-anchor="middle">per segment</text>
+    <path d="M282 150 L298 150 L298 176 L492 176 L492 164" class="wire hot" marker-end="url(#ah)"/><text x="395" y="172" class="sm" text-anchor="middle">routes</text>
+    <path d="M217 162 L217 208" class="wire hot" marker-end="url(#ah)"/><text x="225" y="192" class="sm">pings</text>
+    <text x="10" y="204" class="cap">NAVIGATION AND TRAFFIC</text>
+    <rect x="152" y="210" width="130" height="40" rx="8" class="k-ingest"/><text x="217" y="228" class="small b" text-anchor="middle">Navigation</text><text x="217" y="243" class="sm" text-anchor="middle">trips · reroute checks</text>
+    <path d="M262 210 L262 194 L512 194 L512 164" class="wire dash" marker-end="url(#ah)"/><text x="395" y="190" class="sm" text-anchor="middle">reroute</text>
+    <path d="M282 230 L312 230" class="wire" marker-end="url(#ah)"/>
+    <rect x="314" y="210" width="90" height="40" rx="8" class="k-cross"/><text x="359" y="235" class="small b" text-anchor="middle">Kafka</text>
+    <path d="M404 230 L434 230" class="wire" marker-end="url(#ah)"/>
+    <rect x="436" y="210" width="130" height="40" rx="8" class="k-cross"/><text x="501" y="228" class="small b" text-anchor="middle">Traffic</text><text x="501" y="243" class="sm" text-anchor="middle">map-match · speeds</text>
+    <path d="M566 230 L596 230" class="wire" marker-end="url(#ah)"/>
+    <rect x="598" y="210" width="114" height="40" rx="18" class="k-kb"/><text x="655" y="228" class="small b" text-anchor="middle">Live speeds</text><text x="655" y="243" class="sm" text-anchor="middle">per road segment</text>
+    <path d="M662 210 L662 164" class="wire" marker-end="url(#ah)"/>
+    <path d="M620 210 L620 186 L570 186 L570 164" class="wire" marker-end="url(#ah)"/>
+    <text x="10" y="290" class="sm">The map builder runs in batch; traffic runs as a stream. Routing joins the two: a fixed graph shape with live weights.</text>
+  </svg><figcaption>Static things are precomputed and cached (tiles, the graph's shortcuts); live things are streamed (speeds). The only data that changes every minute is one number per road segment.</figcaption></figure>
+</section>
+
+<section id="tiles">
+  <h2>Map tiles and zoom levels</h2>
+  <ul class="tags"><li>Deep dive 1</li><li><a href="cdn.html">CDN</a></li><li><a href="caching.html">Caching</a></li></ul>
+  <p class="lead">Nobody draws the world on request. The map is cut into square tiles at every zoom level ahead of time, stored as files, and served from caches like any other static asset.</p>
+  <figure class="fig"><svg viewBox="0 0 722 210" class="dg" role="img" aria-label="Tile pyramid: zoom 0 is one tile for the whole world; zoom 1 splits it into 4; zoom 2 into 16; zoom 3 into 64. Each level has four times the tiles of the level above. At zoom 14 there are 268 million tiles, each about 2.4 km wide at the equator.">
+    <g transform="translate(20 30)"><rect width="120" height="120" class="k-kb"/><text x="60" y="142" class="small b" text-anchor="middle">z0 · 1 tile</text><text x="60" y="158" class="sm" text-anchor="middle">40,075 km wide</text></g>
+    <g transform="translate(176 30)"><rect width="120" height="120" class="k-kb"/><path d="M60 0V120M0 60H120" class="rule" style="stroke:var(--c-kb)"/><text x="60" y="142" class="small b" text-anchor="middle">z1 · 4</text><text x="60" y="158" class="sm" text-anchor="middle">20,000 km</text></g>
+    <g transform="translate(332 30)"><rect width="120" height="120" class="k-kb"/><path d="M30 0V120M60 0V120M90 0V120M0 30H120M0 60H120M0 90H120" class="rule" style="stroke:var(--c-kb)"/><text x="60" y="142" class="small b" text-anchor="middle">z2 · 16</text><text x="60" y="158" class="sm" text-anchor="middle">10,000 km</text></g>
+    <g transform="translate(488 30)"><rect width="120" height="120" class="k-kb"/><path d="M15 0V120M30 0V120M45 0V120M60 0V120M75 0V120M90 0V120M105 0V120M0 15H120M0 30H120M0 45H120M0 60H120M0 75H120M0 90H120M0 105H120" class="rule" style="stroke:var(--c-kb)"/><rect x="75" y="45" width="15" height="15" class="k-serve"/><text x="60" y="142" class="small b" text-anchor="middle">z3 · 64</text><text x="60" y="158" class="sm" text-anchor="middle">5,000 km</text></g>
+    <text x="630" y="70" class="small b">…</text><text x="630" y="92" class="small">z14: 268M</text><text x="630" y="110" class="sm">2.4 km wide</text><text x="630" y="136" class="small">z18: 69B</text><text x="630" y="154" class="sm">150 m wide</text>
+    <text x="20" y="20" class="cap">EACH LEVEL HAS 4× THE TILES OF THE ONE ABOVE · A TILE IS NAMED z/x/y</text>
+    <text x="20" y="198" class="sm">Tile widths are at the equator (Web Mercator). The highlighted tile is z3/5/3.</text>
+  </svg></figure>
+  <ul class="plain">
+    <li><strong>Naming:</strong> a tile is <code>z/x/y</code>. Zoom <em>z</em> has 2<sup>z</sup> × 2<sup>z</sup> = 4<sup>z</sup> tiles. Central Bengaluru at zoom 14 is tile <code>14/11723/7596</code>. The phone works out which tiles cover the screen with simple arithmetic; no server lookup is needed.</li>
+    <li><strong>Vector, not pictures:</strong> modern maps send vector tiles (roads, buildings and labels as geometry, a few KB each) and draw them on the phone's GPU. One tile set serves every style (day, night, satellite overlay), every language, and smooth rotation and 3D tilt. Raster tiles (PNG pictures) need a full copy per style and per language.</li>
+    <li><strong>Generalisation:</strong> each zoom level keeps only what is visible at that scale. Zoom 5 has motorways and big cities; zoom 14 has every street. Shapes are simplified per level so a country's outline doesn't carry every bend of its coastline.</li>
+    <li><strong>Overzoom:</strong> vector tiles stop at about zoom 14–16. When you zoom further, the phone keeps scaling the zoom-14 geometry, which is precise to well under a metre. That avoids storing the billions of tiles at zooms 15–20.</li>
+    <li><strong>Empty tiles:</strong> about 70% of the planet is ocean. All empty tiles point to one shared file, so storage grows with land, not area.</li>
+    <li><strong>Caching:</strong> tiles are immutable per map version, so the CDN caches them for a year and phones keep thousands on disk. A new version changes only tiles whose data changed; the rest are copied forward and stay warm in caches.</li>
+  </ul>
+  <div class="table"><table>
+    <thead><tr><th></th><th>Raster tiles</th><th>Vector tiles</th></tr></thead>
+    <tbody>
+      <tr><td>Contents</td><td>A 256 px picture</td><td>Geometry plus attributes (Mapbox Vector Tile, protobuf)</td></tr>
+      <tr><td>Planet storage</td><td class="num">hundreds of TB to z18, per style</td><td class="num">~100 GB to z14, one set for all styles</td></tr>
+      <tr><td>Styles and languages</td><td>One full copy each</td><td>Applied on the phone</td></tr>
+      <tr><td>Rotate, tilt, smooth zoom</td><td>Labels rotate with the map; blurry between levels</td><td>Crisp at any angle and zoom</td></tr>
+      <tr><td>Phone cost</td><td>Just decode an image</td><td>Needs a GPU renderer and label placement</td></tr>
+    </tbody>
+  </table></div>
+</section>
+
+<section id="lab">
+  <h2>Try it: tiles per zoom level</h2>
+  <ul class="tags"><li>Lab</li></ul>
+  <p>Choose a tile format, the deepest zoom you store, and how many tiles actually contain something. Watch how the deepest level dominates the total: each zoom level holds about three times as many tiles as all the levels above it combined.</p>
+  <div class="lab" id="tlab">
+    <div class="lab-row"><span class="lab-k">Format</span><span class="seg" role="group" aria-label="Tile format" id="tl-f"><button type="button" data-v="v" aria-pressed="true">Vector</button><button type="button" data-v="r" aria-pressed="false">Raster</button></span></div>
+    <div class="lab-row"><label for="tl-z">Deepest zoom <input type="range" id="tl-z" min="0" max="20" step="1" value="14"><output id="tl-z-o"></output></label><label for="tl-s">Average stored tile <input type="range" id="tl-s" min="0" max="7" step="1" value="1"><output id="tl-s-o"></output></label></div>
+    <div class="lab-row"><label for="tl-c">Tiles with content (from z6) <input type="range" id="tl-c" min="10" max="100" step="5" value="30"><output id="tl-c-o"></output></label></div>
+    <div class="metrics" id="tl-m"></div>
+    <div class="table" style="margin:12px 0 0"><table id="tl-t"></table></div>
+    <p class="lab-out" id="tl-out" aria-live="polite"></p>
+  </div>
+  <p class="muted" style="font-size:13.5px">Rough model: every tile down to zoom 5 is stored; from zoom 6 only the share with content is stored, and empty tiles share one file. Average sizes are compressed and include sparse rural tiles; a dense city-centre vector tile can be 50–100 KB. 1 GB = 10<sup>9</sup> bytes.</p>
+</section>
+
+<section id="geocoding">
+  <h2>Search and geocoding</h2>
+  <ul class="tags"><li>Deep dive 2</li><li><a href="nearby-places.html">Nearby places</a></li><li><a href="databases.html">Indexes</a></li></ul>
+  <p class="lead">Geocoding turns text into a point: "12 MG Road, Bengaluru" becomes 12.9757, 77.6062. Reverse geocoding turns a point into the nearest address.</p>
+  <ol class="plain">
+    <li><strong>Parse:</strong> split the query into parts (house number, street, locality, city, postcode). Address formats differ by country, so the parser is trained per region; "12 MG Road" and "MG Road 12" must mean the same thing.</li>
+    <li><strong>Match:</strong> look the parts up in a search index of streets, address points and named places (Elasticsearch or a custom inverted index), with spelling tolerance, abbreviations ("Rd" = "Road") and local names in several scripts.</li>
+    <li><strong>Rank:</strong> combine text match, distance from the user's map view and place popularity. "Starbucks" should mean the one nearby, not the most famous one.</li>
+    <li><strong>Interpolate:</strong> if house 12 has no exact point, estimate it along the street segment between known numbers 2 and 40, on the even side.</li>
+    <li><strong>Reverse:</strong> a point lookup in a geo index (S2 or geohash cells) of address points and road segments, then pick the nearest. This is the same index shape as <a href="nearby-places.html#index">Nearby places</a>.</li>
+  </ol>
+  <p>Search is read-only and shards cleanly by region, so it scales with replicas. Autocomplete answers from a prefix index with heavy caching, because millions of people type the same first three letters.</p>
+</section>
+
+<section id="routing">
+  <h2>Routing on a road graph</h2>
+  <ul class="tags"><li>Deep dive 3</li><li><a href="ride-matching.html#eta">Ride matching ETAs</a></li></ul>
+  <p class="lead">Roads are a directed graph: junctions are nodes, road segments are edges, and each edge's weight is the time to drive it. Directions are a shortest-path search on that graph.</p>
+  <ul class="plain">
+    <li><strong>The graph:</strong> each edge stores length, speed limit, road class, and whether it is one-way. Turn restrictions ("no right turn here") and turn costs (a left across traffic takes longer) are modelled by putting the weight on pairs of edges, not just edges.</li>
+    <li><strong>Dijkstra:</strong> settle nodes in order of travel time from the start until the destination is settled. Correct, but it grows a circle in every direction: a 300 km trip settles millions of nodes and takes seconds.</li>
+    <li><strong>A*:</strong> add an estimate of the time left (straight-line distance ÷ top speed) so the search leans toward the goal. It must never overestimate, or it can miss the best route. It settles a few times fewer nodes, still far too many for a continent.</li>
+    <li><strong>Bidirectional:</strong> search forward from the start and backward from the goal at the same time and stop where they meet. Two small circles cover far less area than one big one.</li>
+  </ul>
+  <h3>Contraction hierarchies: precompute the shortcuts</h3>
+  <figure class="fig"><svg viewBox="0 0 722 190" class="dg" role="img" aria-label="Contraction hierarchies: nodes are ranked by importance. Contracting low-ranked node C between B and D adds a shortcut edge B to D with the same travel time. A query searches upward from the start and upward from the goal, only along edges to more important nodes, and the two searches meet at the most important node on the route.">
+    <text x="10" y="20" class="cap">ROAD AS A CHAIN OF JUNCTIONS · HEIGHT = IMPORTANCE</text>
+    <path d="M60 150 L160 120 L260 150 L360 60 L460 150 L560 120 L660 150" class="wire"/>
+    <path d="M160 120 Q210 70 360 60" class="wire hot dash"/><path d="M360 60 Q510 70 560 120" class="wire hot dash"/>
+    <path d="M60 150 Q100 125 160 120" class="wire hot"/><path d="M660 150 Q620 125 560 120" class="wire hot"/>
+    <circle cx="60" cy="150" r="9" class="k-user"/><text x="60" y="176" class="small b" text-anchor="middle">Start</text>
+    <circle cx="160" cy="120" r="9" class="k-ingest"/><text x="160" y="146" class="sm" text-anchor="middle">B · arterial</text>
+    <circle cx="260" cy="150" r="9" class="k-src"/><text x="260" y="176" class="sm" text-anchor="middle">C · side street</text>
+    <circle cx="360" cy="60" r="10" class="k-kb"/><text x="360" y="42" class="small b" text-anchor="middle">Motorway junction</text>
+    <circle cx="460" cy="150" r="9" class="k-src"/><text x="460" y="176" class="sm" text-anchor="middle">side street</text>
+    <circle cx="560" cy="120" r="9" class="k-ingest"/><text x="560" y="146" class="sm" text-anchor="middle">arterial</text>
+    <circle cx="660" cy="150" r="9" class="k-user"/><text x="660" y="176" class="small b" text-anchor="middle">Goal</text>
+    <text x="262" y="102" class="sm" text-anchor="middle">shortcut</text><text x="458" y="102" class="sm" text-anchor="middle">shortcut</text>
+  </svg><figcaption>Offline, the least important nodes are removed one by one; whenever a removed node sat on a shortest path, a shortcut edge with the same travel time replaces it. A query then only climbs upward from both ends and meets near the top.</figcaption></figure>
+  <ul class="plain">
+    <li><strong>Why it is fast:</strong> long trips always climb to arterials and motorways, so a query settles a few hundred nodes instead of millions and finishes in well under a millisecond. The cost is a preprocessing run of minutes to hours per region and roughly double the edges.</li>
+    <li><strong>The traffic problem:</strong> plain contraction hierarchies bake the weights into the shortcuts, so a jam would need a rebuild. <em>Customizable</em> versions (CCH, or multi-level partitions as in CRP) split the work: the order and shape are computed once from the road layout, and new weights are applied in seconds. That is what lets routing follow live traffic.</li>
+    <li><strong>Alternatives:</strong> run the search again with the first route's edges penalised, and keep routes that are different enough and not much slower. Three is the usual answer.</li>
+    <li><strong>Serving:</strong> each routing server loads a region's graph into memory and answers any query inside it. Long cross-region trips use a top-level graph of the most important roads. Scale by adding replicas behind a <a href="load-balancing.html">load balancer</a>.</li>
+  </ul>
+  <div class="table"><table>
+    <thead><tr><th>Algorithm</th><th>Nodes settled on a long trip</th><th>Query time</th><th>Live traffic</th></tr></thead>
+    <tbody>
+      <tr><td>Dijkstra</td><td class="num">millions</td><td class="num">seconds</td><td>Free: just read new weights</td></tr>
+      <tr><td>A* / bidirectional</td><td class="num">hundreds of thousands</td><td class="num">~100 ms</td><td>Free</td></tr>
+      <tr><td>Contraction hierarchies</td><td class="num">hundreds</td><td class="num">&lt; 1 ms</td><td>Rebuild needed</td></tr>
+      <tr><td>Customizable CH / CRP</td><td class="num">hundreds to thousands</td><td class="num">~1 ms</td><td>New weights in seconds</td></tr>
+    </tbody>
+  </table></div>
+  <p class="muted" style="font-size:13.5px">Orders of magnitude from published benchmarks on continental road networks; real numbers depend on the graph and hardware.</p>
+</section>
+
+<section id="routelab">
+  <h2>Try it: Dijkstra vs A*</h2>
+  <ul class="tags"><li>Lab</li></ul>
+  <p>A small city split by a river with two bridges. Each white block takes a minute to drive; grey blocks are buildings. Compare how many blocks each algorithm has to settle before it is sure of the best route, then put a jam on the north bridge.</p>
+  <div class="lab" id="rlab">
+    <div class="lab-row"><span class="lab-k">Algorithm</span><span class="seg" role="group" aria-label="Algorithm" id="rl-a"><button type="button" data-v="d" aria-pressed="false">Dijkstra</button><button type="button" data-v="a" aria-pressed="true">A*</button></span><label for="rl-j"><input type="checkbox" id="rl-j"> Jam on the north bridge (8 min a block)</label></div>
+    <svg class="rg" id="rl-g" role="img" aria-label="Grid city map with the searched blocks and the chosen route"></svg>
+    <ul class="legend" aria-label="Grid key"><li><i style="background:var(--t-serve)"></i>Settled by the search</li><li><i style="background:var(--c-ingest)"></i>Best route</li><li><i style="background:var(--t-kb)"></i>River</li><li><i style="background:#c3cad2"></i>Buildings</li></ul>
+    <div class="metrics" id="rl-m"></div>
+    <p class="lab-out" id="rl-out" aria-live="polite"></p>
+  </div>
+</section>
+
+<section id="traffic">
+  <h2>Live traffic from phones</h2>
+  <ul class="tags"><li>Deep dive 4</li><li><a href="queues.html">Streams</a></li><li><a href="sharding.html">Partitioning</a></li></ul>
+  <p class="lead">Every phone that is navigating is also a traffic sensor. A million pings a second, turned into one speed per road segment, is the live traffic layer.</p>
+  <ol class="plain">
+    <li><strong>Ingest:</strong> the navigation service accepts batches of GPS fixes and writes them to Kafka, keyed by map region so one city's pings stay together.</li>
+    <li><strong>Map matching:</strong> raw GPS wanders by 5–20 m and jumps between parallel roads. A hidden Markov model picks the sequence of road segments that best explains the whole trail, not each point alone: a car can't teleport from the flyover to the service road below it.</li>
+    <li><strong>Aggregate:</strong> a stream processor (Flink, say) keeps a sliding window of the last few minutes per segment and computes a robust speed (a median, ignoring a car parked at a bus stop).</li>
+    <li><strong>Privacy:</strong> drop the first and last few hundred metres of each trip (they reveal homes), rotate trip ids, and publish a segment's speed only when enough different phones contributed. Raw trails expire quickly.</li>
+    <li><strong>Publish:</strong> write speeds to the live speed store (one small record per segment, kept in memory), redraw traffic overlay tiles every minute or two, and send changes to routing and navigation.</li>
+    <li><strong>Fill the gaps:</strong> a quiet road at 3 am has no probes. Fall back to the historical speed for that segment at that hour and weekday, then to the speed limit.</li>
+  </ol>
+  <div class="note"><p>Pings arrive at 1M a second, but the output is small: a few hundred million segments, most of them unchanged in any given minute. The stream turns a firehose into a trickle of speed updates.</p></div>
+</section>
+
+<section id="eta">
+  <h2>Predicting arrival times</h2>
+  <ul class="tags"><li>Deep dive 5</li></ul>
+  <p class="lead">An ETA is the sum of the travel times of the route's segments, but each time is a forecast for when you will reach that segment, not a reading of now.</p>
+  <ul class="plain">
+    <li><strong>Blend:</strong> for a segment you'll reach in 2 minutes, trust the live speed. For one 40 minutes away, lean on the historical speed for that hour, because today's jam may have cleared by then.</li>
+    <li><strong>Correct:</strong> a learned model adjusts the sum for things the graph misses: traffic lights, turn delays, school zones, weather, events. Models that look at neighbouring segments together (graph neural networks) predict how a jam spreads.</li>
+    <li><strong>Search with the forecast:</strong> routing uses the same time-dependent weights, so a route that avoids a motorway jam at 6 pm can be chosen even if it is longer.</li>
+    <li><strong>Keep it honest:</strong> compare every finished trip's actual time with the ETA given at the start. That error, split by city and trip length, is the metric that matters.</li>
+  </ul>
+  <div class="formula">ETA = Σ segments  travel_time(segment, arrival time at that segment) + model correction</div>
+</section>
+
+<section id="rerouting">
+  <h2>Rerouting</h2>
+  <ul class="tags"><li>Deep dive 6</li></ul>
+  <figure class="fig3d" id="reroute3d">
+    <div class="stage3d" role="img" aria-label="Three phones stuck on a road keep sending locations to the traffic service, which computes that segment S-1042 has slowed from 35 to 8 km/h and writes it to the live speed store. Routing applies the new weight. The navigation service looks up which active trips still have S-1042 ahead and finds Priya. Routing recomputes from her position and finds a side road that saves seven minutes. The offer goes back in the reply to her next location batch, and she accepts."><p class="hint3">3D · drag to turn</p><button class="reset3 ghost" type="button" hidden>Reset view</button><p class="nogl">The 3D view needs WebGL and a connection.</p></div>
+    <div class="ctl3"><button class="pp" type="button">Pause</button><span class="k">Step</span><div class="steps3"></div><span class="meta3"></span></div>
+    <div class="track3"><div class="fill3"></div></div>
+    <p class="out3" aria-live="polite"></p>
+    <figcaption>Illustrative. Only trips whose remaining route crosses the slow segment are recomputed, not all 5 million.</figcaption>
+  </figure>
+  <ul class="plain">
+    <li><strong>Off route:</strong> the phone compares each fix with the route line. If it is more than ~30–50 m away for a few seconds (a missed turn), it asks for a new route from its position and heading. The phone does this itself, because it knows first.</li>
+    <li><strong>Faster route:</strong> the server keeps an index from segment to the active trips that still have it ahead. When a segment's speed changes a lot, it recomputes only those trips. Checking all 5M trips every minute would be 83k route searches a second for nothing.</li>
+    <li><strong>No flapping:</strong> offer a new route only if it saves enough (say more than 5 minutes or 10%), and not again for a while after the last offer. Drivers stop trusting an app that changes its mind every junction.</li>
+    <li><strong>Spread the load:</strong> if every app sends everyone down the same side road, that road jams. Large systems watch how many trips they assign to small roads and spread them across alternatives.</li>
+    <li><strong>Offline:</strong> with no signal, the phone keeps navigating on the route and tiles it already has, and can reroute on a downloaded region graph, without live traffic.</li>
+  </ul>
+</section>
+
+<section id="mapdata">
+  <h2>Building the map</h2>
+  <ul class="tags"><li>Batch pipeline</li></ul>
+  <ul class="plain">
+    <li><strong>Sources:</strong> licensed road data, government records, satellite and street-level imagery (signs and lane markings read by computer vision), user edits and reports, and probe trails that reveal new roads no one has mapped yet.</li>
+    <li><strong>Map data store:</strong> one versioned database of features (roads, buildings, places) with history, so a bad edit can be found and rolled back.</li>
+    <li><strong>Build:</strong> a batch job (Spark or similar) cuts the features into tiles for every zoom level, and separately compiles the routing graph and its contraction order. Only tiles touched by changed features are rebuilt.</li>
+    <li><strong>Release:</strong> a new map version is checked (are any motorways disconnected? did a city's road count drop 20%?) before tiles go live and routing servers load the new graph, region by region.</li>
+  </ul>
+</section>
+
+<section id="storage">
+  <h2>Storage</h2>
+  <ul class="tags"><li><a href="databases.html">Databases</a></li><li><a href="sharding.html">Sharding</a></li></ul>
+  <div class="table"><table>
+    <thead><tr><th>Data</th><th>Store</th><th>Why</th></tr></thead>
+    <tbody>
+      <tr><td>Tiles</td><td>Object storage, keyed by version/style/z/x/y, behind a CDN</td><td>Immutable files, huge read fan-out</td></tr>
+      <tr><td>Map features</td><td>Versioned spatial database (PostGIS or a custom store)</td><td>Edits, history, batch builds</td></tr>
+      <tr><td>Routing graph</td><td>Files per region, loaded into memory on routing servers</td><td>Graph search needs RAM-speed access</td></tr>
+      <tr><td>Address and place index</td><td>Search index sharded by region</td><td>Text matching plus geo filters</td></tr>
+      <tr><td>Live speeds</td><td>In-memory key-value store keyed by segment id, replicated</td><td>Tiny records, read on every route</td></tr>
+      <tr><td>Historical speeds</td><td>Columnar store: segment × hour of week</td><td>ETA forecasts and fallbacks</td></tr>
+      <tr><td>Raw pings</td><td>Kafka with short retention, then sampled and anonymised in a data lake</td><td>Traffic, map improvements, model training</td></tr>
+      <tr><td>Active trips</td><td>In-memory store keyed by trip id, plus the segment → trips index</td><td>Reroute checks</td></tr>
+    </tbody>
+  </table></div>
+</section>
+
+<section id="observability">
+  <h2>Observability</h2>
+  <ul class="tags"><li>Production</li><li><a href="observability.html">Monitoring</a></li></ul>
+  <div class="table"><table>
+    <thead><tr><th>Signal</th><th>Why</th><th>Alert when</th></tr></thead>
+    <tbody>
+      <tr><td>CDN hit rate and tile p99 by region</td><td>Tile serving health</td><td>Hit rate drops after a release</td></tr>
+      <tr><td>Route p99 and failures ("no route found")</td><td>Graph or server trouble</td><td>Failures rise in one region</td></tr>
+      <tr><td>ETA error by city</td><td>Prediction quality</td><td>Error grows beyond its usual band</td></tr>
+      <tr><td>Speed age and probes per segment</td><td>Traffic freshness and coverage</td><td>Speeds older than a few minutes</td></tr>
+      <tr><td>Kafka consumer lag in the traffic pipeline</td><td>Stream keeping up</td><td>Lag over a minute</td></tr>
+      <tr><td>Reroute offers per trip and acceptance</td><td>Flapping or bad offers</td><td>Offers per trip jump</td></tr>
+    </tbody>
+  </table></div>
+</section>
+
+<section id="risks">
+  <h2>Risks and v2</h2>
+  <ul class="tags"><li>Wrap-up</li></ul>
+  <div class="table"><table>
+    <thead><tr><th>Risk</th><th>How you detect it</th><th>Mitigation</th></tr></thead>
+    <tbody>
+      <tr><td>Bad map edit (a closed road, a wrong one-way)</td><td>Release checks, drivers ignoring the route there</td><td>Versioned data, fast rollback, probe trails as evidence</td></tr>
+      <tr><td>Fake traffic (a cart full of phones)</td><td>Many probes from few accounts or one spot</td><td>Require many independent phones per segment, spot outliers</td></tr>
+      <tr><td>Location privacy</td><td>Audits of the pipeline</td><td>Trim trip ends, aggregate, short retention, no raw trails outside it</td></tr>
+      <tr><td>Everyone rerouted onto one side street</td><td>Assigned trips per small road</td><td>Spread alternatives, penalise residential roads</td></tr>
+      <tr><td>Region of routing servers down</td><td>Health checks</td><td>Replicas in other zones; phones fall back to the cached route</td></tr>
+    </tbody>
+  </table></div>
+  <p><strong>v2 ideas:</strong> lane-level guidance, transit and walking with schedules, electric-vehicle routing with charging stops, and live incident reports from users.</p>
+</section>
+
+<section id="presenting">
+  <h2>Presenting it in 45 minutes</h2>
+  <ul class="tags"><li>Interview script</li></ul>
+  <div class="table"><table>
+    <thead><tr><th>Step</th><th>Time</th><th>What to cover</th></tr></thead>
+    <tbody>
+      <tr><td>1. Clarify</td><td class="num">5 min</td><td>Display, search, routing, traffic; which to go deep on; scale and freshness</td></tr>
+      <tr><td>2. Estimate</td><td class="num">3 min</td><td>350k tiles/s, 2k routes/s, 1M pings/s, ~100 GB of tiles</td></tr>
+      <tr><td>3. API</td><td class="num">3 min</td><td>Versioned tile URLs, geocode, routes, trip location batches</td></tr>
+      <tr><td>4. Draw the whole system</td><td class="num">8 min</td><td>Tiles and CDN; geocoder; routing and ETA; navigation, Kafka, traffic, live speeds</td></tr>
+      <tr><td>5. Deep dive: routing</td><td class="num">12 min</td><td>Dijkstra, A*, contraction hierarchies, customizable weights for traffic</td></tr>
+      <tr><td>6. Deep dive: traffic and reroute</td><td class="num">9 min</td><td>Map matching, windows, privacy, segment → trips index, thresholds</td></tr>
+      <tr><td>7. Risks and v2</td><td class="num">5 min</td><td>Bad edits, fake traffic, herding drivers</td></tr>
+    </tbody>
+  </table></div>
+  <div class="say"><p>"The map itself is vector tiles cut per zoom level and named z/x/y; they're immutable per version, so the CDN and phones serve almost all of them. Search parses and matches addresses in a regional index. Routing holds each region's road graph in memory with contraction hierarchies, so a query touches a few hundred nodes, and the customizable variant lets new traffic weights apply in seconds. Navigating phones send a batch of locations every five seconds; a stream job map-matches them, computes a speed per segment and writes it to an in-memory store that routing and the ETA model read. When a segment slows down, we recompute only the trips that still cross it and offer a new route if it saves more than a few minutes."</p></div>
+</section>
+
+<section id="numbers">
+  <h2>Numbers to remember</h2>
+  <ul class="tags"><li>Cheat sheet</li></ul>
+  <div class="table"><table><tbody>
+    <tr><td>Tiles at zoom z</td><td class="num">4<sup>z</sup>: z14 ≈ 268M, z18 ≈ 69B</td></tr>
+    <tr><td>Tile width at the equator</td><td class="num">40,075 km ÷ 2<sup>z</sup>: z14 ≈ 2.4 km, z18 ≈ 150 m</td></tr>
+    <tr><td>Deepest zoom level's share of all tiles</td><td class="num">≈ 3/4</td></tr>
+    <tr><td>Planet vector tiles to z14</td><td class="num">~100 GB</td></tr>
+    <tr><td>Route query with contraction hierarchies</td><td class="num">hundreds of nodes, &lt; 1 ms</td></tr>
+    <tr><td>5M trips pinging every 5 s</td><td class="num">1M requests a second</td></tr>
+    <tr><td>Off-route threshold</td><td class="num">~30–50 m for a few seconds</td></tr>
+    <tr><td>Offer a new route when it saves</td><td class="num">&gt; 5 min or &gt; 10%</td></tr>
+  </tbody></table></div>
+</section>
+  </article>
+</div>
+</main>
+
+<footer class="site"><div class="wrap">Part of Classic System Design, a companion to the <a href="https://devlcodes.github.io/agentic-ai-notebook/system-design/index.html">agentic system designs</a>. The 3D views use Three.js loaded from a CDN, so they need a connection; the text and tables cover the same ground. Figures marked illustrative show the shape of a system, not measured numbers. Check vendor docs before relying on a specific product limit.</div></footer>
+<script>
+(function(){
+  var $ = function(id){ return document.getElementById(id); };
+  // ---------- tiles per zoom level ----------
+  var SIZES = [0.5, 1, 2, 5, 10, 15, 20, 40];
+  var FMT = 'v';
+  function big(n){ if (n >= 1e12) return +(n/1e12).toFixed(1) + 'T'; if (n >= 1e9) return +(n/1e9).toFixed(1) + 'B'; if (n >= 1e6) return +(n/1e6).toFixed(1) + 'M'; if (n >= 1e3) return +(n/1e3).toFixed(1) + 'k'; return String(Math.round(n)); }
+  function bytes(b){ var u = ['B','KB','MB','GB','TB','PB','EB'], i = 0; while (b >= 1000 && i < u.length - 1) { b /= 1000; i++; } return (b >= 100 ? Math.round(b) : +b.toFixed(1)) + ' ' + u[i]; }
+  function width(z){ var km = 40075 / Math.pow(2, z); return km >= 10 ? Math.round(km).toLocaleString('en') + ' km' : km >= 1 ? km.toFixed(1) + ' km' : Math.round(km * 1000) + ' m'; }
+  function tiles(){
+    var Z = +$('tl-z').value, kb = SIZES[+$('tl-s').value], share = +$('tl-c').value / 100;
+    $('tl-z-o').textContent = 'z' + Z; $('tl-s-o').textContent = kb + ' KB'; $('tl-c-o').textContent = Math.round(share * 100) + '%';
+    var rows = [], total = 0, all = 0;
+    for (var z = 0; z <= Z; z++) {
+      var n = Math.pow(4, z), st = z <= 5 ? n : Math.ceil(n * share);
+      total += st; all += n; rows.push({ z: z, n: n, st: st });
+    }
+    var size = total * kb * 1000, last = rows[rows.length - 1], lastShare = last.st / total;
+    $('tl-m').innerHTML = '<div class="metric"><span class="n">' + big(total) + '</span><span class="l">tiles stored</span><small>of ' + big(all) + ' in the pyramid</small></div>' +
+      '<div class="metric"><span class="n"' + (size > 1e14 ? ' style="color:var(--c-dlq)"' : '') + '>' + bytes(size) + '</span><span class="l">storage</span><small>' + (FMT === 'r' ? 'per style and language' : 'one set for every style') + '</small></div>' +
+      '<div class="metric"><span class="n">' + Math.round(lastShare * 100) + '%</span><span class="l">in the deepest level</span></div>' +
+      '<div class="metric"><span class="n">' + width(Z) + '</span><span class="l">tile width at z' + Z + '</span><small>at the equator</small></div>';
+    var show = rows.slice(-5).reverse();
+    $('tl-t').innerHTML = '<thead><tr><th>Zoom</th><th>Tiles in the world</th><th>Stored</th><th>Size</th><th>Tile width</th></tr></thead><tbody>' +
+      show.map(function(r){ return '<tr><td>z' + r.z + '</td><td class="num">' + big(r.n) + '</td><td class="num">' + big(r.st) + '</td><td class="num">' + bytes(r.st * kb * 1000) + '</td><td class="num">' + width(r.z) + '</td></tr>'; }).join('') + '</tbody>';
+    var msg;
+    if (FMT === 'v' && Z > 16) msg = 'Vector tiles past zoom 14–16 buy almost nothing: the phone can overzoom zoom-14 geometry, which is already precise to well under a metre. Going to z' + Z + ' multiplies storage to ' + bytes(size) + ' for detail nobody sees.';
+    else if (FMT === 'r' && Z >= 17) msg = 'Raster tiles to z' + Z + ' come to ' + bytes(size) + ', and that is one style in one language. Night mode, satellite labels or Hindi place names each need another full copy. This is why maps moved to vector tiles.';
+    else if (FMT === 'v' && Z < 12) msg = 'Small and cheap, but at z' + Z + ' a tile is ' + width(Z) + ' wide: streets are missing, and overzooming that far just enlarges blurry, simplified shapes.';
+    else msg = bytes(size) + ' for the whole planet to z' + Z + '. That fits on one server, so tiles are cheap to store; the hard part is serving them at 350k requests a second, which the CDN and phone caches absorb.';
+    msg += ' The deepest level alone is ' + Math.round(lastShare * 100) + '% of all stored tiles: each extra zoom level roughly quadruples the total.';
+    $('tl-out').textContent = msg;
+  }
+  $('tl-f').addEventListener('click', function(e){
+    var b = e.target.closest('button'); if (!b) return;
+    FMT = b.dataset.v; this.querySelectorAll('button').forEach(function(x){ x.setAttribute('aria-pressed', x === b); });
+    $('tl-z').value = FMT === 'v' ? 14 : 18; $('tl-s').value = FMT === 'v' ? 1 : 5; tiles();
+  });
+  ['tl-z','tl-s','tl-c'].forEach(function(id){ $(id).addEventListener('input', tiles); });
+  tiles();
+
+  // ---------- Dijkstra vs A* on a grid city ----------
+  var W = 28, H = 15, S = [1, 7], G = [26, 7], ALG = 'a', NS = 'http://www.w3.org/2000/svg';
+  var type = [];
+  for (var y = 0; y < H; y++) for (var x = 0; x < W; x++) {
+    var t = 'road';
+    if (x === 13 || x === 14) t = (y === 4 || y === 12) ? 'bridge' : 'water';
+    else if ((x % 4 === 2 || x % 4 === 3) && (y % 4 === 1 || y % 4 === 2)) t = 'bld';
+    type.push(t);
+  }
+  function idx(x, y){ return y * W + x; }
+  function cost(i, jam){ return type[i] === 'bridge' && jam && Math.floor(i / W) === 4 ? 8 : 1; }
+  function open(i){ return type[i] !== 'bld' && type[i] !== 'water'; }
+  function search(astar, jam){
+    var n = W * H, dist = new Array(n).fill(Infinity), done = new Array(n).fill(false), prev = new Array(n).fill(-1);
+    var gi = idx(G[0], G[1]), si = idx(S[0], S[1]), settled = [];
+    function h(i){ return astar ? Math.abs(i % W - G[0]) + Math.abs(Math.floor(i / W) - G[1]) : 0; }
+    dist[si] = 0;
+    for (;;) {
+      var best = -1, bf = Infinity, bh = Infinity;
+      for (var i = 0; i < n; i++) if (!done[i] && dist[i] < Infinity) {
+        var f = dist[i] + h(i), hh = h(i);
+        if (f < bf || (f === bf && hh < bh)) { best = i; bf = f; bh = hh; }
+      }
+      if (best < 0) break;
+      done[best] = true; settled.push(best);
+      if (best === gi) break;
+      var bx = best % W, by = Math.floor(best / W);
+      [[1,0],[-1,0],[0,1],[0,-1]].forEach(function(d){
+        var nx = bx + d[0], ny = by + d[1]; if (nx < 0 || ny < 0 || nx >= W || ny >= H) return;
+        var j = idx(nx, ny); if (!open(j) || done[j]) return;
+        var nd = dist[best] + cost(j, jam); if (nd < dist[j]) { dist[j] = nd; prev[j] = best; }
+      });
+    }
+    var path = [], k = gi; while (k >= 0) { path.push(k); k = prev[k]; }
+    return { settled: settled, path: path.reverse(), time: dist[gi] };
+  }
+  var openCount = type.filter(function(t){ return t === 'road' || t === 'bridge'; }).length;
+  function route(){
+    var jam = $('rl-j').checked, r = search(ALG === 'a', jam), other = search(ALG !== 'a', jam);
+    var seen = {}, onPath = {}; r.settled.forEach(function(i){ seen[i] = 1; }); r.path.forEach(function(i){ onPath[i] = 1; });
+    var svg = $('rl-g'), C = 20; svg.setAttribute('viewBox', '0 0 ' + (W * C) + ' ' + (H * C)); svg.textContent = '';
+    for (var i = 0; i < W * H; i++) {
+      var rc = document.createElementNS(NS, 'rect'), x = i % W, y = Math.floor(i / W), t = type[i];
+      var cls = t === 'bld' ? 'c-bld' : t === 'water' ? 'c-water' : t === 'bridge' ? (jam && y === 4 ? 'c-jam' : 'c-bridge') : 'c-road';
+      if (onPath[i]) cls += ' c-path'; else if (seen[i] && (t === 'road')) cls += ' c-seen';
+      if (seen[i] && t === 'bridge' && !onPath[i]) cls += ' c-seen';
+      rc.setAttribute('class', cls); rc.setAttribute('x', x * C); rc.setAttribute('y', y * C); rc.setAttribute('width', C); rc.setAttribute('height', C);
+      svg.appendChild(rc);
+    }
+    [[S, 's'], [G, 'g']].forEach(function(p){ var c = document.createElementNS(NS, 'circle'); c.setAttribute('cx', p[0][0] * C + C / 2); c.setAttribute('cy', p[0][1] * C + C / 2); c.setAttribute('r', 6); c.setAttribute('class', p[1]); svg.appendChild(c); });
+    var north = r.path.indexOf(idx(13, 4)) >= 0, name = ALG === 'a' ? 'A*' : 'Dijkstra', oname = ALG === 'a' ? 'Dijkstra' : 'A*';
+    $('rl-m').innerHTML = '<div class="metric"><span class="n">' + r.time + ' min</span><span class="l">best route</span><small>via the ' + (north ? 'north' : 'south') + ' bridge</small></div>' +
+      '<div class="metric"><span class="n">' + r.settled.length + '</span><span class="l">blocks settled · ' + name + '</span><small>of ' + openCount + ' drivable</small></div>' +
+      '<div class="metric"><span class="n">' + other.settled.length + '</span><span class="l">blocks settled · ' + oname + '</span><small>same route, same time</small></div>';
+    var d = ALG === 'd' ? r.settled.length : other.settled.length, a = ALG === 'a' ? r.settled.length : other.settled.length;
+    var msg = 'Best route: ' + r.time + ' minutes via the ' + (north ? 'north' : 'south') + ' bridge, and both algorithms agree on it. ';
+    msg += 'Dijkstra settles ' + d + ' blocks, nearly everything closer than the goal in every direction; A* settles ' + a + ', because the straight-line estimate pulls it toward the goal. ';
+    msg += jam ? 'With the jam, the north bridge costs 16 minutes to cross, so the 4-minute-longer south detour wins. Both algorithms just read the new weights; a contraction hierarchy would need its shortcuts updated first.' : 'On a real continent the gap is millions of nodes versus hundreds of thousands, and contraction hierarchies cut it to a few hundred.';
+    $('rl-out').textContent = msg;
+  }
+  $('rl-a').addEventListener('click', function(e){ var b = e.target.closest('button'); if (!b) return; ALG = b.dataset.v; this.querySelectorAll('button').forEach(function(x){ x.setAttribute('aria-pressed', x === b); }); route(); });
+  $('rl-j').addEventListener('change', route);
+  route();
+})();
+</script>
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+  }
+}
+</script>
+<script type="module">
+import { boot } from './assets/scene3d.js';
+const D = {};
+D.hero = {
+  hero: true,
+  loop: 18,
+  view: { target: [-1, 0, 0.8], w: 30, d: 20, el: 52 },
+  steps: [
+    { t: 0.0, text: 'The phone works out which tiles cover the screen and asks the CDN for them by zoom, x and y. A miss is filled from the tile store, which the offline map builder keeps up to date.' },
+    { t: 3.0, text: 'The user searches "12 MG Road". The geocoder parses the address, matches it in the regional index and returns a point.' },
+    { t: 5.2, text: 'The phone asks for a route. Routing searches the in-memory road graph with contraction hierarchies, weighted by live speeds, and returns three routes with ETAs.' },
+    { t: 8.0, text: 'Navigation starts. Every 5 seconds the phone sends a batch of GPS fixes; the navigation service streams them to Kafka.' },
+    { t: 10.4, text: 'The traffic service snaps pings to road segments, averages the last few minutes and writes one speed per segment to the live speed store.' },
+    { t: 12.8, text: 'A jam builds on the road ahead. Navigation asks routing again from the phone\'s position, and the faster route rides back on the reply to the next ping.' },
+  ],
+  build(c) {
+    const { V, C, P } = c;
+    const ph = c.obj(c.SHAPES.browser(0xd7932a), -13, 1, 'Phone', 'tile cache');
+    const cdn = c.obj(c.SHAPES.server({ emi: C.serve }), -7, -6, 'CDN', 'z/x/y tiles');
+    const ts = c.obj('bucket', -1, -6, 'Tile store');
+    const mb = c.obj(c.SHAPES.server({ emi: C.source }), 5, -6, 'Map builder', 'batch');
+    const md = c.obj(c.SHAPES.database(C.kb, { r: 0.9 }), 11, -6, 'Map data');
+    const gw = c.obj(c.SHAPES.signpost(C.gov), -7, 1, 'Gateway');
+    const geo = c.obj(c.SHAPES.server({ emi: C.serve }), -1, -2, 'Geocoder', 'address index');
+    const rt = c.obj(c.SHAPES.server({ emi: C.ingest, h: 1.3 }), -1, 2.5, 'Routing', 'CH graph in RAM');
+    const nav = c.obj(c.SHAPES.server({ emi: C.ingest }), -1, 7.5, 'Navigation', 'trips');
+    const kf = c.obj(c.SHAPES.topic({ parts: 2, len: 3, color: C.cross }), 5, 7.5, 'Kafka', 'pings');
+    const tr = c.obj(c.SHAPES.server({ emi: C.cross }), 11, 7.5, 'Traffic', 'map-match · speeds');
+    const ls = c.obj(c.SHAPES.database(C.kb, { r: 0.9 }), 11, 2.5, 'Live speeds', 'per segment');
+    c.lane([V(-13, 1), V(-10, 1), V(-10, -6), V(11, -6)]);
+    c.lane([V(-13, 1), V(-4, 1), V(-4, -2), V(-1, -2)]);
+    c.lane([V(-4, 1), V(-4, 7.5), V(11, 7.5), V(11, 2.5), V(-1, 2.5)]);
+    c.lane([V(-4, 2.5), V(-1, 2.5)]);
+    c.lane([V(-1, 7.5), V(-1, 2.5)]);
+    c.packet({ pts: [V(-13, 1), V(-10, 1), V(-10, -6), V(-7, -6)], t0: 0.2, t1: 1.1, kind: 'ask', from: ph, to: cdn, label: '14/11723/7596' });
+    c.packet({ pts: [V(-7, -6), V(-1, -6)], t0: 1.15, t1: 1.6, kind: 'span', to: ts, label: 'miss' });
+    c.packet({ pts: [V(11, -6), V(5, -6), V(-1, -6)], t0: 0.3, t1: 1.6, kind: 'doc', color: P.same, to: ts });
+    c.packet({ pts: [V(-1, -6), V(-7, -6), V(-10, -6), V(-10, 1), V(-13, 1)], t0: 1.7, t1: 2.8, kind: 'doc', color: P.ship, to: ph, label: 'vector tile' });
+    c.packet({ pts: [V(-13, 1), V(-4, 1), V(-4, -2), V(-1, -2)], t0: 3.1, t1: 4.1, kind: 'ask', from: ph, to: geo, label: '12 MG Road' });
+    c.packet({ pts: [V(-1, -2), V(-4, -2), V(-4, 1), V(-13, 1)], t0: 4.2, t1: 5.0, kind: 'span', color: P.ship, to: ph, label: '12.9757, 77.6062' });
+    c.packet({ pts: [V(11, 2.5), V(-1, 2.5)], t0: 5.3, t1: 6.2, kind: 'vec', to: rt, label: 'live speeds' });
+    c.packet({ pts: [V(-13, 1), V(-4, 1), V(-4, 2.5), V(-1, 2.5)], t0: 5.4, t1: 6.3, kind: 'ask', from: ph, to: rt, label: 'route' });
+    c.packet({ pts: [V(-1, 2.5), V(-4, 2.5), V(-4, 1), V(-13, 1)], t0: 6.6, t1: 7.6, kind: 'env', color: P.ship, to: ph, label: '3 routes · 24 min' });
+    c.packet({ pts: [V(-13, 1), V(-4, 1), V(-4, 7.5), V(-1, 7.5)], t0: 8.1, t1: 9.2, n: 3, st: 0.3, kind: 'span', from: ph, to: nav, label: 'GPS ×5' });
+    c.packet({ pts: [V(-1, 7.5), V(5, 7.5)], t0: 9.5, t1: 10.2, n: 3, st: 0.2, kind: 'span', to: kf });
+    c.packet({ pts: [V(5, 7.5), V(11, 7.5)], t0: 10.5, t1: 11.2, n: 3, st: 0.2, kind: 'span', to: tr });
+    c.packet({ pts: [V(11, 7.5), V(11, 2.5)], t0: 11.4, t1: 12.3, kind: 'vec', to: ls, label: 'S-1042: 8 km/h' });
+    c.packet({ pts: [V(-1, 7.5), V(-1, 2.5)], t0: 12.9, t1: 13.7, kind: 'span', to: rt, label: 'reroute?' });
+    c.packet({ pts: [V(-1, 2.5), V(-1, 7.5)], t0: 13.9, t1: 14.6, kind: 'env', color: P.ship, to: nav, label: 'saves 7 min' });
+    c.packet({ pts: [V(-1, 7.5), V(-4, 7.5), V(-4, 1), V(-13, 1)], t0: 14.8, t1: 16.0, kind: 'env', color: P.ship, to: ph, label: 'faster route' });
+    c.note('display · cached', -4, -8.4);
+    c.note('traffic · streamed', 5, 9.6);
+  },
+};
+D.reroute3d = {
+  loop: 16,
+  view: { target: [-1.5, 0, 0], w: 29, d: 17, el: 50 },
+  steps: [
+    { t: 0.0, text: 'Cars on Outer Ring Road slow to a crawl. Their phones keep sending a batch of locations every 5 seconds.' },
+    { t: 2.0, text: 'The traffic service snaps each ping to a road segment and takes the median over the last few minutes: segment S-1042 drops from 35 km/h to 8 km/h.' },
+    { t: 4.2, text: 'The new speed goes to the live speed store. Routing applies it as a new weight; with customizable contraction hierarchies that takes seconds, not a rebuild.' },
+    { t: 6.6, text: 'Navigation looks up the segment → trips index: which active trips still have S-1042 ahead? Priya is one. Trips that already passed it are left alone.' },
+    { t: 8.8, text: 'Routing recomputes from Priya\'s current position. Her old route now takes 31 minutes; a side road takes 24.' },
+    { t: 11.0, text: 'Seven minutes is above the threshold, so the offer rides back on the reply to her next location batch. She taps accept and the phone switches routes.' },
+  ],
+  build(c) {
+    const { V, C, P } = c;
+    const cars = [-6.5, -3, 0.5].map((z, i) => c.obj('person', -12, z, ['Phone A', 'Phone B', 'Phone C'][i], i === 1 ? '8 km/h' : null));
+    const pr = c.obj('person', -12, 5, 'Priya', 'navigating');
+    const tr = c.obj(c.SHAPES.server({ emi: C.cross }), -5, -3, 'Traffic', 'map-match · median');
+    const ls = c.obj(c.SHAPES.database(C.kb, { r: 0.9 }), 1, -3, 'Live speeds', 'S-1042');
+    const rt = c.obj(c.SHAPES.server({ emi: C.ingest, h: 1.3 }), 8, -3, 'Routing', 'CCH weights');
+    const nav = c.obj(c.SHAPES.server({ emi: C.ingest }), 1, 5, 'Navigation', 'segment → trips');
+    [-6.5, -3, 0.5].forEach((z) => c.lane([V(-12, z), V(-8.5, z), V(-8.5, -3), V(-5, -3)]));
+    c.lane([V(-5, -3), V(8, -3)]);
+    c.lane([V(1, -3), V(1, 5)]);
+    c.lane([V(1, 5), V(8, 5), V(8, -3)]);
+    c.lane([V(-12, 5), V(1, 5)]);
+    [-6.5, -3, 0.5].forEach((z, i) => c.packet({ pts: [V(-12, z), V(-8.5, z), V(-8.5, -3), V(-5, -3)], t0: 0.2 + i * 0.25, t1: 1.6 + i * 0.25, n: 2, st: 0.3, kind: 'span', color: P.bad, from: cars[i], to: tr }));
+    c.pulse(tr, 2.4, 3.2);
+    c.packet({ pts: [V(-5, -3), V(1, -3)], t0: 3.4, t1: 4.3, kind: 'vec', color: P.bad, to: ls, label: '35 → 8 km/h' });
+    c.packet({ pts: [V(1, -3), V(8, -3)], t0: 4.5, t1: 5.3, kind: 'vec', to: rt, label: 'new weight' });
+    c.packet({ pts: [V(1, -3), V(1, 5)], t0: 4.6, t1: 5.8, kind: 'span', to: nav, label: 'S-1042 slow' });
+    c.pulse(nav, 6.8, 7.6);
+    c.packet({ pts: [V(1, 5), V(8, 5), V(8, -3)], t0: 7.8, t1: 8.9, kind: 'ask', to: rt, label: 'route for Priya' });
+    c.packet({ pts: [V(8, -3), V(8, 5), V(1, 5)], t0: 9.6, t1: 10.7, kind: 'env', color: P.ship, to: nav, label: '24 min vs 31' });
+    c.packet({ pts: [V(-12, 5), V(1, 5)], t0: 11.1, t1: 11.9, kind: 'span', from: pr, to: nav, label: 'GPS batch' });
+    c.packet({ pts: [V(1, 5), V(-12, 5)], t0: 12.1, t1: 13.2, kind: 'env', color: P.ship, to: pr, label: 'faster route · saves 7 min' });
+    c.note('jam on S-1042', -5, -6.2);
+  },
+};
+
+boot(D);
+</script>
+</body>
+</html>
