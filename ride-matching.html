@@ -427,7 +427,7 @@ POST /v1/offers/{ride_id}/accept      (driver)
 
 <section id="eta">
   <h2>ETAs and routing</h2>
-  <ul class="tags"><li>Quality</li></ul>
+  <ul class="tags"><li>Quality</li><li><a href="maps.html#routing">Maps and routing</a></li></ul>
   <p>Dispatch needs 20–50 pickup ETAs per request within a few milliseconds each. Shortest-path search over a city's road graph from scratch (Dijkstra) is too slow at 50,000 a second, so the routing engine uses <strong>precomputed graphs</strong> (contraction hierarchies or similar) that answer point-to-point queries in about a millisecond, with live traffic applied as edge weights updated every few minutes.</p>
   <p>On top of the graph estimate, an ML model corrects ETAs from historical trips (time of day, weather, events, pickup spot quirks like airport ramps). For ranking candidates, a slightly stale ETA is fine. For what the rider sees, use the better estimate.</p>
 </section>

@@ -22,7 +22,8 @@ Interactive pages on how large web systems are built, before any AI is involved:
 14. [Consensus with Raft](https://devlcodes.github.io/classic-system-designs/raft.html)
 15. [Merkle trees](https://devlcodes.github.io/classic-system-designs/merkle-trees.html)
 16. [Cassandra vs CockroachDB](https://devlcodes.github.io/classic-system-designs/cassandra-vs-cockroachdb.html)
-17. [Numbers to know](https://devlcodes.github.io/classic-system-designs/numbers.html)
+17. [Monitoring, logging and tracing](https://devlcodes.github.io/classic-system-designs/observability.html)
+18. [Numbers to know](https://devlcodes.github.io/classic-system-designs/numbers.html)
 
 ## Worked designs
 
@@ -40,6 +41,7 @@ Interactive pages on how large web systems are built, before any AI is involved:
 - [E-commerce store](https://devlcodes.github.io/classic-system-designs/ecommerce.html): 100M daily shoppers with 10× sale days
 - [Call insights](https://devlcodes.github.io/classic-system-designs/call-insights.html): 50k recorded sales calls a day, insights in 30 minutes
 - [Ticket booking](https://devlcodes.github.io/classic-system-designs/ticket-booking.html): 1M users racing for 50k seats, plus restaurant reservations
+- [Maps and navigation](https://devlcodes.github.io/classic-system-designs/maps.html): 50M routes a day, 1M location pings/s
 
 The companion site, [agentic system designs](https://devlcodes.github.io/agentic-ai-notebook/system-design/), builds RAG, agents and evals on top of these same blocks.
 

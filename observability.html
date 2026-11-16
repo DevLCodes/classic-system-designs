@@ -1,0 +1,443 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Monitoring, logging and tracing · Classic System Design</title>
+<meta name="description" content="Observability for system design: RED and USE metrics, SLIs, SLOs and error budgets, a log pipeline with Kafka and retention tiers, distributed tracing and sampling, and burn-rate alerting, with an error-budget lab.">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700&family=Instrument+Sans:ital,wght@0,400;0,500;0,600;1,400&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+  /* Layout: a slim site bar, then either a card grid (home), a sticky contents rail + reading column (articles), or a filterable term list (glossary). Light, single look. */
+  :root {
+    color-scheme: light;
+    --bg: #e9ecef; --paper: #f7f8f9; --ink: #1c2530; --muted: #586473; --line: #cdd4dc; --line-strong: #9aa5b1;
+    --accent: #4255d4; --accent-ink: #ffffff; --track: #d3d9e0; --code-bg: #eef1f4; --wire: #7d8996;
+    --c-ingest: #2a9d8f; --c-kb: #4d5fd8; --c-serve: #d7932a; --c-model: #e2674f; --c-gov: #b2456e; --c-cross: #4a5562; --c-dlq: #b23a3a; --c-ok: #2f8f5b;
+    --t-src: #e4e8ec; --t-ingest: #d8eeea; --t-kb: #dfe3fa; --t-serve: #f8ead2; --t-model: #fbe1da; --t-gov: #f3dde6; --t-cross: #dfe2e6; --t-dlq: #f6dddb;
+    --font-display: "Bricolage Grotesque", "Avenir Next", "Segoe UI", system-ui, sans-serif;
+    --font-body: "Instrument Sans", "Helvetica Neue", "Segoe UI", system-ui, sans-serif;
+    --font-mono: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  @media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
+  body { margin: 0; background: var(--bg); color: var(--ink); font-family: var(--font-body); font-size: 16px; line-height: 1.6; }
+  a { color: var(--accent); }
+  .wrap { max-width: 1240px; margin: 0 auto; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
+
+  .sitebar { border-bottom: 1px solid var(--line); background: var(--paper); }
+  .sitebar .wrap { display: flex; align-items: center; gap: 18px; flex-wrap: wrap; padding-block: 12px; }
+  .brand { font-family: var(--font-display); font-weight: 700; font-size: 17px; color: var(--ink); text-decoration: none; margin-right: auto; }
+  .sitebar nav { display: flex; gap: 16px; flex-wrap: wrap; font-size: 14px; }
+  .sitebar nav a { color: var(--muted); text-decoration: none; }
+  .sitebar nav a:hover, .sitebar nav a[aria-current="page"] { color: var(--ink); }
+  .sitebar nav a[aria-current="page"] { font-weight: 600; }
+
+  .intro { padding-block: 40px 8px; display: grid; gap: 10px; max-width: 820px; }
+  .eyebrow { margin: 0; font-family: var(--font-mono); font-size: 12px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+  h1 { margin: 0; font-family: var(--font-display); font-weight: 700; font-size: clamp(30px, 5vw, 46px); line-height: 1.05; text-wrap: balance; }
+  .intro .lead { font-size: 18px; margin: 0; }
+
+  .doc { display: grid; grid-template-columns: 220px minmax(0, 1fr); gap: 48px; padding-block: 36px 72px; }
+  .toc { position: sticky; top: calc(env(safe-area-inset-top, 0px) + 20px); align-self: start; }
+  .toc p { margin: 0 0 8px; font-family: var(--font-mono); font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+  .toc ol { margin: 0; padding: 0; list-style: none; display: grid; gap: 2px; counter-reset: toc; }
+  .toc li { counter-increment: toc; }
+  .toc a { display: flex; gap: 8px; padding: 3px 0; font-size: 14px; color: var(--muted); text-decoration: none; }
+  .toc a::before { content: counter(toc, decimal-leading-zero); font-family: var(--font-mono); font-size: 11.5px; padding-top: 2px; color: var(--line-strong); }
+  .toc a:hover { color: var(--ink); }
+  article { min-width: 0; max-width: 760px; }
+  section { padding-bottom: 36px; margin-bottom: 36px; border-bottom: 1px solid var(--line); scroll-margin-top: 20px; }
+  section:last-child { border-bottom: 0; }
+  h2 { margin: 0 0 10px; font-family: var(--font-display); font-weight: 700; font-size: 28px; line-height: 1.15; text-wrap: balance; }
+  h3 { margin: 26px 0 6px; font-family: var(--font-display); font-weight: 600; font-size: 19px; line-height: 1.25; }
+  p { margin: 0 0 14px; }
+  .lead { font-size: 18px; }
+  ul.plain, ol.plain { margin: 0 0 16px; padding-left: 22px; display: grid; gap: 6px; }
+  code { font-family: var(--font-mono); font-size: 0.88em; background: var(--code-bg); padding: 1px 5px; border-radius: 4px; }
+  pre { margin: 0 0 16px; padding: 14px 16px; background: var(--code-bg); border-radius: 10px; overflow-x: auto; font-size: 13px; line-height: 1.55; }
+  pre code { background: none; padding: 0; font-size: inherit; }
+  .table { overflow-x: auto; margin: 0 0 18px; }
+  table { width: 100%; border-collapse: collapse; font-size: 14.5px; line-height: 1.45; }
+  th, td { text-align: left; vertical-align: top; padding: 8px 10px; border-bottom: 1px solid var(--line); }
+  th { font-family: var(--font-mono); font-size: 11.5px; font-weight: 500; letter-spacing: .05em; text-transform: uppercase; color: var(--muted); }
+  td.num { font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .note { border-left: 3px solid var(--accent); background: var(--paper); padding: 12px 16px; border-radius: 0 10px 10px 0; margin: 0 0 18px; }
+  .note p:last-child { margin: 0; }
+  .formula { font-family: var(--font-mono); font-size: 14px; background: var(--paper); border: 1px solid var(--line); border-radius: 10px; padding: 12px 16px; margin: 0 0 16px; overflow-x: auto; white-space: nowrap; }
+  .related { display: flex; flex-wrap: wrap; gap: 8px; margin: 0; padding: 0; list-style: none; }
+  .related a { display: inline-block; padding: 4px 12px; border: 1px solid var(--line); border-radius: 999px; font-size: 14px; color: var(--ink); text-decoration: none; background: var(--paper); }
+  .related a:hover { border-color: var(--ink); }
+  .pager { display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; font-size: 14px; }
+  footer.site { border-top: 1px solid var(--line); padding-block: 20px 40px; font-size: 13px; color: var(--muted); }
+  a:focus-visible, input:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+  /* home */
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 16px; margin: 0 0 40px; padding: 0; list-style: none; }
+  .card { display: grid; gap: 8px; height: 100%; padding: 18px; background: var(--paper); border: 1px solid var(--line); border-radius: 14px; color: var(--ink); text-decoration: none; }
+  .card:hover { border-color: var(--ink); }
+  .card .k { font-family: var(--font-mono); font-size: 11px; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
+  .card h3 { margin: 0; font-size: 20px; }
+  .card p { margin: 0; font-size: 14.5px; color: var(--muted); }
+  .card svg { width: 100%; height: auto; display: block; }
+  .card.feature svg { max-width: 420px; justify-self: center; }
+  .card.feature { grid-column: 1 / -1; grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr); align-items: center; gap: 24px; }
+  .home-h { margin: 28px 0 12px; font-family: var(--font-display); font-size: 24px; }
+
+  /* glossary */
+  .gl-tools { position: sticky; top: 0; z-index: 2; background: var(--bg); padding-block: 12px; display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+  .gl-tools input { flex: 1 1 260px; min-width: 0; font: 15px var(--font-body); padding: 9px 12px; border-radius: 10px; border: 1px solid var(--line-strong); background: #fff; color: var(--ink); }
+  .gl-letters { display: flex; flex-wrap: wrap; gap: 4px; font-family: var(--font-mono); font-size: 13px; }
+  .gl-letters a { padding: 2px 6px; border-radius: 6px; text-decoration: none; color: var(--muted); }
+  .gl-letters a:hover { background: var(--paper); color: var(--ink); }
+  .gl { max-width: 860px; }
+  .gl-item { margin: 0; }
+  .gl-item { display: grid; grid-template-columns: 220px minmax(0, 1fr); gap: 16px; padding: 12px 0; border-bottom: 1px solid var(--line); scroll-margin-top: 70px; }
+  .gl-item dt { font-weight: 600; }
+  .gl-item dt small { display: block; font-weight: 400; font-family: var(--font-mono); font-size: 11px; color: var(--muted); letter-spacing: .04em; text-transform: uppercase; margin-top: 2px; }
+  .gl-item dd { margin: 0; }
+  .gl-item dd .see { font-size: 13.5px; }
+  .gl-letter { margin: 26px 0 4px; font-family: var(--font-display); font-size: 22px; scroll-margin-top: 70px; }
+
+  @media (max-width: 900px) {
+    .doc { grid-template-columns: minmax(0, 1fr); gap: 24px; padding-block: 28px 56px; }
+    .toc { position: static; }
+    .toc ol { grid-template-columns: repeat(2, minmax(0, 1fr)); column-gap: 12px; }
+    .card.feature { grid-template-columns: minmax(0, 1fr); }
+  }
+  @media (max-width: 640px) {
+    .gl-item { grid-template-columns: minmax(0, 1fr); gap: 4px; }
+    h2 { font-size: 24px; }
+    .intro .lead, .lead { font-size: 16.5px; }
+  }
+
+  /* diagrams */
+  .fig { margin: 6px 0 24px; overflow-x: auto; }
+  .fig svg { display: block; width: 100%; height: auto; min-width: 600px; }
+  .fig figcaption { margin-top: 8px; font-size: 13px; line-height: 1.45; color: var(--muted); }
+  .dg text { font-family: var(--font-body); font-size: 13px; fill: var(--ink); }
+  .dg .sm { font-size: 11.5px; fill: var(--muted); }
+  .dg .small { font-size: 12px; }
+  .dg .b { font-weight: 600; }
+  .dg .mono { font-family: var(--font-mono); }
+  .dg .it { font-style: italic; }
+  .dg .mute { fill: var(--muted); }
+  .dg .gov { fill: var(--c-gov); font-weight: 600; }
+  .dg .okt { fill: var(--c-ok); font-weight: 600; }
+  .dg .bad { fill: var(--c-dlq); font-weight: 600; }
+  .dg .cap { font-family: var(--font-mono); font-size: 11px; letter-spacing: .06em; fill: var(--muted); }
+  .dg .big { font-family: var(--font-display); font-size: 30px; font-weight: 700; fill: var(--ink); }
+  .dg .box { fill: var(--paper); stroke: var(--line-strong); stroke-width: 1.25; }
+  .dg .ghost { fill: none; stroke: var(--line-strong); stroke-width: 1.25; stroke-dasharray: 5 5; }
+  .dg .track { fill: var(--track); }
+  .dg .rule { stroke: var(--line); stroke-width: 1; }
+  .dg .axis { stroke: var(--line-strong); stroke-width: 1.25; }
+  .dg .wire { fill: none; stroke: var(--wire); stroke-width: 1.4; }
+  .dg .wire.dash { stroke-dasharray: 4 4; }
+  .dg .wire.hot { stroke: var(--accent); stroke-width: 2; }
+  .dg .wire.red { stroke: var(--c-dlq); }
+  .dg .ah { fill: var(--wire); }
+  .dg .xmark { stroke: var(--c-dlq); stroke-width: 1.8; fill: none; }
+  .dg .tick { stroke: var(--c-ok); stroke-width: 2; fill: none; }
+  .dg .k-src { fill: var(--t-src); stroke: #8795a3; stroke-width: 1.5; }
+  .dg .k-ingest { fill: var(--t-ingest); stroke: var(--c-ingest); stroke-width: 1.5; }
+  .dg .k-kb { fill: var(--t-kb); stroke: var(--c-kb); stroke-width: 1.5; }
+  .dg .k-serve { fill: var(--t-serve); stroke: var(--c-serve); stroke-width: 1.5; }
+  .dg .k-model { fill: var(--t-model); stroke: var(--c-model); stroke-width: 1.5; }
+  .dg .k-gov { fill: var(--t-gov); stroke: var(--c-gov); stroke-width: 1.5; }
+  .dg .k-cross { fill: var(--t-cross); stroke: var(--c-cross); stroke-width: 1.5; }
+  .dg .k-dlq { fill: var(--t-dlq); stroke: var(--c-dlq); stroke-width: 1.5; }
+  .dg .k-user { fill: #ffffff; stroke: var(--line-strong); stroke-width: 1.5; }
+  .dg .f-serve { fill: var(--c-serve); } .dg .f-kb { fill: var(--c-kb); } .dg .f-model { fill: var(--c-model); } .dg .f-gov { fill: var(--c-gov); } .dg .f-ingest { fill: var(--c-ingest); } .dg .f-cross { fill: #b8c0c9; } .dg .f-dlq { fill: var(--c-dlq); } .dg .f-ok { fill: var(--c-ok); }
+  .dg .cell { fill: var(--paper); stroke: var(--line-strong); stroke-width: 1; }
+  .dg .cell.hot { fill: var(--t-ingest); stroke: var(--c-ingest); stroke-width: 1.5; }
+  .dg .cell.old { fill: var(--t-kb); stroke: var(--c-kb); }
+  .dg .cell.new { fill: var(--t-ingest); stroke: var(--c-ingest); stroke-width: 1.5; }
+  .dg .cell.gone { fill: var(--paper); stroke: var(--line); }
+  .dg .dot-hr { fill: var(--c-gov); } .dg .dot-it { fill: var(--c-kb); } .dg .dot-eng { fill: var(--c-ingest); } .dg .dot-q { fill: var(--c-serve); stroke: var(--ink); stroke-width: 1.5; }
+  .dg .halo { fill: none; stroke: var(--c-serve); stroke-width: 1.5; stroke-dasharray: 4 4; }
+  .dg .zone { fill: var(--paper); stroke: var(--line); stroke-width: 1; }
+</style>
+
+<style>
+  .lab { margin: 6px 0 26px; padding: 14px 16px 16px; background: var(--paper); border: 1px solid var(--line); border-radius: 14px; }
+  .lab-row { display: flex; flex-wrap: wrap; gap: 10px 18px; align-items: center; margin: 0 0 12px; }
+  .lab-k { font-family: var(--font-mono); font-size: 11px; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
+  .lab label { display: inline-flex; gap: 8px; align-items: center; font-size: 14px; }
+  .lab input[type=range] { width: 150px; accent-color: var(--accent); }
+  .lab input[type=checkbox] { width: 16px; height: 16px; accent-color: var(--accent); }
+  .lab input[type=text] { flex: 1 1 260px; min-width: 0; font: 15px var(--font-body); padding: 8px 11px; border-radius: 9px; border: 1px solid var(--line-strong); background: #fff; color: var(--ink); }
+  .lab output { font-family: var(--font-mono); font-size: 12.5px; min-width: 6ch; font-variant-numeric: tabular-nums; }
+  .seg { display: inline-flex; flex-wrap: wrap; gap: 6px; }
+  .seg button, .chips button { font: 600 13px var(--font-body); color: var(--ink); background: #fff; border: 1px solid var(--line); border-radius: 8px; padding: 6px 12px; cursor: pointer; }
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; }
+  .chips button { font-weight: 500; border-radius: 999px; padding: 4px 11px; font-size: 13px; }
+  .seg button:hover, .chips button:hover { border-color: var(--ink); }
+  .seg button[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+  .seg button:focus-visible, .chips button:focus-visible, .lab input:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .lab-out { margin: 12px 0 0; padding: 10px 12px; background: #fff; border: 1px solid var(--line); border-radius: 10px; font-size: 14.5px; line-height: 1.5; font-variant-numeric: tabular-nums; }
+  .chunks { display: grid; gap: 8px; max-height: 470px; overflow: auto; padding-right: 4px; }
+  .chunk { min-width: 0; padding: 8px 11px; background: #fff; border: 1px solid var(--line); border-left: 4px solid var(--c-kb); border-radius: 8px; font-size: 14px; line-height: 1.5; overflow-wrap: anywhere; }
+  .chunk:nth-child(even) { border-left-color: var(--c-ingest); }
+  .chunk.ans { box-shadow: 0 0 0 2px var(--c-serve); }
+  .chunk .ch { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-bottom: 4px; font-family: var(--font-mono); font-size: 11px; color: var(--muted); }
+  .chunk .pfx { display: block; font-family: var(--font-mono); font-size: 11.5px; color: var(--c-kb); }
+  .chunk .ov { background: var(--track); border-radius: 3px; }
+  .chunk mark { background: #ffe9b3; border-radius: 3px; padding: 0 2px; }
+  .chunk table { width: auto; font-size: 13px; margin: 4px 0; }
+  .chunk td { padding: 2px 10px 2px 0; border-bottom: 1px solid var(--line); }
+  .badge { display: inline-block; padding: 0 7px; border-radius: 999px; border: 1px solid; font-family: var(--font-mono); font-size: 10.5px; line-height: 1.6; }
+  .badge.bad { color: var(--c-dlq); border-color: var(--c-dlq); background: var(--t-dlq); }
+  .badge.ok { color: var(--c-ok); border-color: var(--c-ok); background: #e3f3ea; }
+  .badge.info { color: var(--c-kb); border-color: var(--c-kb); background: var(--t-kb); }
+  .bars { display: grid; gap: 8px; margin: 4px 0 0; }
+  .bar-row { display: grid; grid-template-columns: minmax(0, 150px) minmax(0, 1fr) 46px; gap: 10px; align-items: center; font-size: 14px; }
+  .bar { position: relative; height: 14px; border-radius: 7px; background: var(--track); }
+  .bar i { position: absolute; inset: 0 auto 0 0; border-radius: 7px; background: var(--c-kb); transition: width .3s; }
+  .bar b { position: absolute; top: -4px; bottom: -4px; width: 2px; background: var(--c-dlq); }
+  .bar-row .v { font-family: var(--font-mono); font-size: 12.5px; text-align: right; }
+  .stages { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 10px; padding: 0; list-style: none; font-size: 13px; }
+  .stages li { padding: 2px 10px; border-radius: 999px; border: 1px solid var(--line); color: var(--muted); background: #fff; }
+  .stages li.hit { border-color: var(--accent); color: var(--accent-ink); background: var(--accent); }
+  .stages li.skip { text-decoration: line-through; }
+  .rlist { display: grid; gap: 6px; margin: 0; padding: 0; list-style: none; counter-reset: r; }
+  .rlist li { counter-increment: r; display: grid; grid-template-columns: 28px minmax(0, 1fr) auto; gap: 10px; align-items: center; padding: 6px 10px; background: #fff; border: 1px solid var(--line); border-radius: 8px; font-size: 14px; }
+  .rlist li::before { content: counter(r); font-family: var(--font-mono); font-size: 12px; color: var(--muted); }
+  .rlist li.rel { border-color: var(--c-ok); background: #f0f8f3; }
+  .rlist button { font: 600 12px var(--font-body); padding: 3px 10px; border-radius: 999px; border: 1px solid var(--line-strong); background: #fff; color: var(--ink); cursor: pointer; white-space: nowrap; }
+  .rlist li.rel button { background: var(--c-ok); border-color: var(--c-ok); color: #fff; }
+  .metrics { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 8px; margin: 12px 0 0; }
+  .metric { padding: 8px 10px; background: #fff; border: 1px solid var(--line); border-radius: 10px; }
+  .metric .n { display: block; font-family: var(--font-display); font-size: 24px; font-weight: 700; font-variant-numeric: tabular-nums; }
+  .metric .l { font-family: var(--font-mono); font-size: 11px; letter-spacing: .04em; text-transform: uppercase; color: var(--muted); }
+  .metric small { display: block; font-size: 12px; color: var(--muted); line-height: 1.35; margin-top: 2px; }
+  td.pass { color: var(--c-ok); font-weight: 600; } td.fail { color: var(--c-dlq); font-weight: 600; }
+  .say { border-left: 3px solid var(--c-serve); background: var(--paper); padding: 12px 16px; border-radius: 0 10px 10px 0; margin: 0 0 16px; font-size: 15.5px; }
+  .say p:last-child { margin: 0; }
+</style>
+
+<style>
+  .lab-chart { display: block; width: 100%; height: auto; margin: 4px 0 0; }
+  .lab-chart text { font-family: var(--font-body); font-size: 12px; fill: var(--muted); }
+  .grid-cells { display: grid; gap: 4px; }
+  .srv { display: grid; grid-template-columns: 92px minmax(0,1fr) 70px; gap: 10px; align-items: center; font-size: 14px; }
+  .muted { color: var(--muted); }
+  .lab select { font: 14px var(--font-body); padding: 6px 8px; border-radius: 8px; border: 1px solid var(--line-strong); background: #fff; color: var(--ink); }
+  .lab input[type=number] { width: 9ch; font: 14px var(--font-mono); padding: 6px 8px; border-radius: 8px; border: 1px solid var(--line-strong); background: #fff; color: var(--ink); }
+</style>
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs><marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" class="ah" style="fill:#7d8996"/></marker></defs></svg>
+<header class="sitebar"><div class="wrap"><a class="brand" href="index.html">Classic System Design</a><nav aria-label="Site"><a href="index.html">Home</a><a href="index.html#blocks" aria-current="page">Building blocks</a><a href="index.html#designs">Designs</a><a href="https://devlcodes.github.io/agentic-ai-notebook/system-design/index.html">Agentic designs ↗</a></nav></div></header>
+<main>
+<div class="wrap"><div class="intro"><p class="eyebrow">Building block · operations</p><h1>Monitoring, logging and tracing</h1><p class="lead">How you find out a system is broken before users tell you, and then find out why: metrics, logs, traces, SLOs and alerts that fire on what users feel.</p></div></div>
+<div class="wrap doc">
+  <nav class="toc" aria-label="On this page"><p>On this page</p><ol><li><a href="#what">Three signals</a></li><li><a href="#metrics">Metrics: RED and USE</a></li><li><a href="#slo">SLIs, SLOs and error budgets</a></li><li><a href="#lab">Try it: burn rate alerts</a></li><li><a href="#logs">The log pipeline</a></li><li><a href="#tracing">Distributed tracing</a></li><li><a href="#alerting">Alerting on symptoms</a></li><li><a href="#failure">How observability fails</a></li><li><a href="#interview">Saying it in an interview</a></li><li><a href="#real-world">In the real world</a></li><li><a href="#related">Related</a></li></ol></nav>
+  <article>
+<section id="what"><h2>Three signals</h2>
+<p class="lead">Metrics tell you <em>that</em> something is wrong, traces tell you <em>where</em>, and logs tell you <em>why</em>. Each is cheap in a different way, so real systems collect all three and link them by a shared request ID.</p>
+<figure class="fig"><svg viewBox="0 0 722 300" class="dg" role="img" aria-label="Telemetry pipeline: services send metrics to a time-series database, logs through Kafka to a log store, and spans through a collector to a trace store; dashboards and alerting read from all three and page the on-call engineer">
+<text x="20" y="22" class="cap">SERVICES</text>
+<rect x="20" y="34" width="132" height="230" rx="10" class="zone"/>
+<rect x="32" y="48" width="108" height="44" rx="8" class="k-kb"/><text x="86" y="68" class="small b" text-anchor="middle">App code</text><text x="86" y="84" class="sm" text-anchor="middle">OpenTelemetry SDK</text>
+<rect x="32" y="128" width="108" height="44" rx="8" class="k-src"/><text x="86" y="148" class="small b" text-anchor="middle">Host agent</text><text x="86" y="164" class="sm" text-anchor="middle">logs, host stats</text>
+<rect x="32" y="208" width="108" height="44" rx="8" class="k-src"/><text x="86" y="228" class="small b" text-anchor="middle">/metrics</text><text x="86" y="244" class="sm" text-anchor="middle">counters, histograms</text>
+<path d="M86 92 L86 126" class="wire dash" marker-end="url(#ah)"/><text x="94" y="114" class="sm">stdout</text>
+<rect x="210" y="34" width="120" height="44" rx="8" class="k-ingest"/><text x="270" y="54" class="small b" text-anchor="middle">OTel collector</text><text x="270" y="70" class="sm" text-anchor="middle">batch, tail-sample</text>
+<rect x="210" y="128" width="120" height="44" rx="8" class="k-ingest"/><text x="270" y="148" class="small b" text-anchor="middle">Kafka</text><text x="270" y="164" class="sm" text-anchor="middle">buffer for bursts</text>
+<rect x="210" y="208" width="120" height="44" rx="8" class="k-ingest"/><text x="270" y="228" class="small b" text-anchor="middle">Scraper</text><text x="270" y="244" class="sm" text-anchor="middle">pull every 15 s</text>
+<path d="M140 64 L208 56" class="wire" marker-end="url(#ah)"/><text x="160" y="50" class="sm">spans</text>
+<path d="M140 150 L208 150" class="wire" marker-end="url(#ah)"/>
+<path d="M208 230 L142 230" class="wire" marker-end="url(#ah)"/>
+<rect x="388" y="34" width="124" height="44" rx="8" class="k-kb"/><text x="450" y="54" class="small b" text-anchor="middle">Trace store</text><text x="450" y="70" class="sm" text-anchor="middle">7–14 days</text>
+<rect x="388" y="128" width="124" height="44" rx="8" class="k-kb"/><text x="450" y="148" class="small b" text-anchor="middle">Log store</text><text x="450" y="164" class="sm" text-anchor="middle">hot 7 d, then S3</text>
+<rect x="388" y="208" width="124" height="44" rx="8" class="k-kb"/><text x="450" y="228" class="small b" text-anchor="middle">Time-series DB</text><text x="450" y="244" class="sm" text-anchor="middle">13 months, downsampled</text>
+<path d="M330 56 L386 56" class="wire" marker-end="url(#ah)"/><path d="M330 150 L386 150" class="wire" marker-end="url(#ah)"/><path d="M330 230 L386 230" class="wire" marker-end="url(#ah)"/>
+<rect x="570" y="80" width="134" height="44" rx="8" class="k-serve"/><text x="637" y="100" class="small b" text-anchor="middle">Dashboards</text><text x="637" y="116" class="sm" text-anchor="middle">query all three</text>
+<rect x="570" y="180" width="134" height="44" rx="8" class="k-dlq"/><text x="637" y="200" class="small b" text-anchor="middle">Alert rules</text><text x="637" y="216" class="sm" text-anchor="middle">SLO burn → pager</text>
+<path d="M512 56 C545 56 545 96 568 98" class="wire" marker-end="url(#ah)"/><path d="M512 150 L568 108" class="wire" marker-end="url(#ah)"/><path d="M512 230 C545 230 545 206 568 204" class="wire hot" marker-end="url(#ah)"/>
+<text x="361" y="290" class="sm" text-anchor="middle">one trace ID in every log line and span lets you jump from a red graph to the slow request to its error message</text>
+</svg><figcaption>A typical telemetry pipeline. Metrics are pulled (Prometheus style) or pushed; logs go through a buffer so a burst cannot take down the log store; spans pass a collector that decides which traces to keep.</figcaption></figure>
+<div class="table"><table><thead><tr><th>Signal</th><th>What it is</th><th>Cost driver</th><th>Best for</th></tr></thead><tbody>
+<tr><td>Metrics</td><td>Numbers aggregated over time: counters, gauges, histograms</td><td>Number of distinct label combinations (cardinality), not traffic</td><td>Dashboards, alerts, trends, capacity</td></tr>
+<tr><td>Logs</td><td>One record per event, ideally structured JSON</td><td>Bytes written: grows with traffic</td><td>The exact error, the input that caused it, audit trails</td></tr>
+<tr><td>Traces</td><td>A tree of timed spans for one request across services</td><td>Spans kept: controlled by sampling</td><td>Where the time went; which service failed first</td></tr>
+</tbody></table></div>
+<p>Monitoring answers questions you thought of in advance ("is the error rate above 1%?"). Observability is the wider goal of answering questions you did not think of, from the data you already collect. Both depend on the same three signals.</p></section>
+
+<section id="metrics"><h2>Metrics: RED and USE</h2>
+<p>Two short checklists cover most of what to measure. Use <strong>RED</strong> for anything that serves requests and <strong>USE</strong> for anything that is a resource.</p>
+<div class="table"><table><thead><tr><th>Method</th><th>Measure</th><th>Applies to</th><th>Example</th></tr></thead><tbody>
+<tr><td>RED</td><td><strong>R</strong>ate, <strong>E</strong>rrors, <strong>D</strong>uration</td><td>Services, endpoints, queues' consumers</td><td>2,400 req/s, 0.3% 5xx, p99 180 ms</td></tr>
+<tr><td>USE</td><td><strong>U</strong>tilisation, <strong>S</strong>aturation, <strong>E</strong>rrors</td><td>CPU, memory, disks, network, connection pools</td><td>CPU 70%, run queue 4, 0 disk errors</td></tr>
+<tr><td>Four golden signals</td><td>Latency, traffic, errors, saturation</td><td>Google's SRE version; RED plus saturation</td><td>Add "DB pool 95% used" to the RED set</td></tr>
+</tbody></table></div>
+<h3>Percentiles, not averages</h3>
+<p>An average hides the slow tail. If 99 requests take 50 ms and one takes 5 s, the mean is about 100 ms and looks fine, but one user in a hundred waited five seconds. Track p50, p95 and p99. A page that makes 20 backend calls hits each one's p99 on about 18% of loads (1 − 0.99<sup>20</sup>), so the tail of each part becomes the typical case of the whole.</p>
+<div class="note"><p>Store latency as a <strong>histogram</strong> (counts per bucket), not as pre-computed percentiles. You can add histograms from 50 servers and then take the p99; you cannot average 50 servers' p99 values and get a correct answer.</p></div>
+<h3>Cardinality</h3>
+<p>Every distinct set of labels is its own time series. <code>http_requests{service, endpoint, status}</code> with 20 endpoints and 6 status codes across 200 pods is 24,000 series per service, which is fine. Add a <code>user_id</code> label with a million users and it becomes billions, which will take down the metrics database. Keep unbounded values (user IDs, request IDs, full URLs) in logs and traces, not in metric labels.</p></section>
+
+<section id="slo"><h2>SLIs, SLOs and error budgets</h2>
+<p>An <strong>SLI</strong> is a ratio you measure from the user's side: good events over all events, such as requests that succeed in under 300 ms. An <strong>SLO</strong> is the target for that ratio over a window, usually 28 or 30 days. The <strong>error budget</strong> is what is left: 1 − SLO. The <a href="requirements.html">requirements</a> page covers how to pick the target; this page is about watching it.</p>
+<div class="table"><table><thead><tr><th>SLO</th><th>Error budget</th><th>Downtime in 30 days</th><th>Bad requests per 10M</th></tr></thead><tbody>
+<tr><td>99%</td><td>1%</td><td>7 h 12 min</td><td>100,000</td></tr>
+<tr><td>99.5%</td><td>0.5%</td><td>3 h 36 min</td><td>50,000</td></tr>
+<tr><td>99.9%</td><td>0.1%</td><td>43 min 12 s</td><td>10,000</td></tr>
+<tr><td>99.95%</td><td>0.05%</td><td>21 min 36 s</td><td>5,000</td></tr>
+<tr><td>99.99%</td><td>0.01%</td><td>4 min 19 s</td><td>1,000</td></tr>
+</tbody></table></div>
+<p>The budget turns reliability into a shared rule rather than an argument. While budget remains, the team ships features and runs experiments. When it is spent, the team slows releases and fixes reliability until the window rolls forward.</p>
+<div class="formula">burn rate = observed error rate ÷ (1 − SLO)<br>time to empty a 30-day budget = 30 days ÷ burn rate</div>
+<p>A burn rate of 1 spends the budget exactly by the end of the window. A burn rate of 10 spends it in 3 days. That single number is what good alerts are built on.</p></section>
+
+<section id="lab"><h2>Try it: burn rate alerts</h2>
+<p>An incident starts and errors jump to a steady rate. Pick the SLO, how bad the incident is, and how long it has lasted. The rules are the multi-window, multi-burn-rate alerts from Google's SRE workbook: each fires only when a long window <em>and</em> a short window both burn faster than its threshold.</p>
+<div class="lab" id="oblab">
+  <div class="lab-row"><span class="lab-k">SLO</span><span class="seg" role="group" aria-label="SLO target" id="ob-slo"><button type="button" data-v="99" aria-pressed="false">99%</button><button type="button" data-v="99.5" aria-pressed="false">99.5%</button><button type="button" data-v="99.9" aria-pressed="true">99.9%</button><button type="button" data-v="99.99" aria-pressed="false">99.99%</button></span></div>
+  <div class="lab-row"><label for="ob-err">Error rate during incident <input type="range" id="ob-err" min="0" max="12" step="1" value="6"><output id="ob-err-o"></output></label><label for="ob-dur">Lasted so far <input type="range" id="ob-dur" min="0" max="10" step="1" value="3"><output id="ob-dur-o"></output></label></div>
+  <div class="metrics" id="ob-m"></div>
+  <div class="table" style="margin-top:12px"><table><thead><tr><th>Rule</th><th>Long / short window</th><th>Burn ≥</th><th>Fires after</th><th>Now</th></tr></thead><tbody id="ob-rules"></tbody></table></div>
+  <p class="lab-out" id="ob-out" aria-live="polite"></p>
+</div>
+<p class="muted" style="font-size:13.5px">Assumes a 30-day window, a steady error rate from the start of the incident and zero errors before it. A rule reaches its threshold in the long window after threshold × window ÷ burn rate, so each rule always fires after spending the same share of budget: 2%, 5% or 10%.</p></section>
+
+<section id="logs"><h2>The log pipeline</h2>
+<p>Each service writes logs to stdout. An agent on every host (Fluent Bit, Vector, the OTel collector) tails them, adds labels such as service and pod, and ships them in batches. A Kafka topic in the middle absorbs bursts: when an incident makes every service log ten times more, the buffer grows instead of the log store falling over. Indexers read from Kafka into the searchable store, and older data moves to cheap object storage.</p>
+<figure class="fig"><svg viewBox="0 0 722 150" class="dg" role="img" aria-label="Log pipeline: app writes JSON to stdout, a host agent batches it into Kafka, indexers write to a hot store, then logs age into warm and cold object storage">
+<rect x="10" y="44" width="96" height="44" rx="8" class="k-kb"/><text x="58" y="64" class="small b" text-anchor="middle">App</text><text x="58" y="80" class="sm" text-anchor="middle">JSON to stdout</text>
+<path d="M106 66 L134 66" class="wire" marker-end="url(#ah)"/>
+<rect x="136" y="44" width="96" height="44" rx="8" class="k-src"/><text x="184" y="64" class="small b" text-anchor="middle">Agent</text><text x="184" y="80" class="sm" text-anchor="middle">batch, redact</text>
+<path d="M232 66 L260 66" class="wire" marker-end="url(#ah)"/>
+<rect x="262" y="44" width="96" height="44" rx="8" class="k-ingest"/><text x="310" y="64" class="small b" text-anchor="middle">Kafka</text><text x="310" y="80" class="sm" text-anchor="middle">hours of buffer</text>
+<path d="M358 66 L386 66" class="wire" marker-end="url(#ah)"/>
+<rect x="388" y="44" width="96" height="44" rx="8" class="k-ingest"/><text x="436" y="64" class="small b" text-anchor="middle">Indexers</text><text x="436" y="80" class="sm" text-anchor="middle">parse, index</text>
+<path d="M484 66 L512 66" class="wire" marker-end="url(#ah)"/>
+<rect x="514" y="20" width="90" height="36" rx="8" class="k-serve"/><text x="559" y="43" class="small b" text-anchor="middle">Hot · 7 d</text>
+<rect x="514" y="76" width="90" height="36" rx="8" class="k-kb"/><text x="559" y="99" class="small b" text-anchor="middle">Warm · 30 d</text>
+<rect x="624" y="76" width="90" height="36" rx="8" class="k-cross"/><text x="669" y="99" class="small b" text-anchor="middle">S3 · 1 yr+</text>
+<path d="M559 56 L559 74" class="wire dash" marker-end="url(#ah)"/><path d="M604 94 L622 94" class="wire dash" marker-end="url(#ah)"/>
+<text x="361" y="138" class="sm" text-anchor="middle">fast SSD search for recent days, cheap compressed objects for audits and rare lookups</text>
+</svg><figcaption>Logs flow left to right and get cheaper as they age. Illustrative retention; set it from your audit and privacy rules.</figcaption></figure>
+<h3>Size it before you build it</h3>
+<div class="formula">50,000 req/s × 10 lines × 500 bytes = 250 MB/s<br>250 MB/s × 86,400 s ≈ 21.6 TB a day raw, about 2 TB compressed</div>
+<p>Logs are often the biggest observability bill, and the bill grows with traffic. The usual levers: log at INFO in production and DEBUG only when switched on for one service; keep every error but sample success logs (say 1 in 100); drop health-check noise at the agent; and keep only a week hot.</p>
+<h3>Good log lines</h3>
+<p>Write <strong>structured</strong> logs (JSON with fixed field names) so you can filter by <code>status=500 AND service=checkout</code> instead of grepping text. Put the <code>trace_id</code> in every line. Never log passwords, tokens, card numbers or other personal data; redact at the agent as a second line of defence. Use UTC timestamps.</p>
+<div class="note"><p>Logging must never block a request. The agent buffers to local disk and drops the oldest data if the pipeline is down for long. A checkout that fails because the log store is slow is a much worse outcome than a gap in the logs.</p></div></section>
+
+<section id="tracing"><h2>Distributed tracing</h2>
+<p>A <strong>trace</strong> is one request's journey. It is made of <strong>spans</strong>: one per unit of work (an HTTP call, a database query, a cache lookup), each with a start time, a duration, a parent span and tags. Drawn as a waterfall, it shows at a glance which call was slow and which ran in sequence when it could have run in parallel.</p>
+<figure class="fig"><svg viewBox="0 0 722 214" class="dg" role="img" aria-label="Trace waterfall: a 420 ms checkout request with spans for auth, cart, inventory, a slow payment call and its database query">
+<text x="20" y="22" class="cap">TRACE 4bf92f35… · POST /checkout · 420 ms</text>
+<path d="M170 34 L700 34" class="axis"/><text x="170" y="48" class="sm">0</text><text x="435" y="48" class="sm" text-anchor="middle">210 ms</text><text x="700" y="48" class="sm" text-anchor="end">420 ms</text>
+<text x="20" y="72" class="small">gateway</text><rect x="170" y="60" width="530" height="18" rx="4" class="k-serve"/>
+<text x="34" y="98" class="small">auth</text><rect x="176" y="86" width="25" height="18" rx="4" class="k-kb"/><text x="208" y="99" class="sm">20 ms</text>
+<text x="34" y="124" class="small">cart</text><rect x="203" y="112" width="51" height="18" rx="4" class="k-kb"/><text x="260" y="125" class="sm">40 ms</text>
+<text x="34" y="150" class="small">inventory</text><rect x="256" y="138" width="76" height="18" rx="4" class="k-kb"/><text x="338" y="151" class="sm">60 ms</text>
+<text x="34" y="176" class="small">payment</text><rect x="334" y="164" width="353" height="18" rx="4" class="k-dlq"/><text x="510" y="177" class="small b" text-anchor="middle">280 ms</text>
+<text x="48" y="202" class="small">└ db query</text><rect x="340" y="190" width="316" height="18" rx="4" class="k-cross"/><text x="498" y="203" class="sm" text-anchor="middle">250 ms · missing index</text>
+</svg><figcaption>One trace, five spans. Payment takes two-thirds of the request, and almost all of that is one database query. Cart and inventory run one after the other; they could run in parallel. Illustrative numbers.</figcaption></figure>
+<h3>Context propagation</h3>
+<p>For spans from different services to join into one trace, every call must carry the trace ID and the parent span ID. Over HTTP and gRPC that is the W3C <code>traceparent</code> header. Through a queue, put the same values in the message headers, so the consumer's span links back to the producer even if it runs an hour later. One service that drops the header breaks the trace into two pieces, which is why tracing is usually done by a shared library (OpenTelemetry) rather than by hand.</p>
+<h3>Sampling</h3>
+<div class="table"><table><thead><tr><th>Approach</th><th>How it works</th><th>Pros</th><th>Cons</th></tr></thead><tbody>
+<tr><td>Head sampling</td><td>The first service decides (say 1%) and passes the decision downstream in the header</td><td>Cheap; the whole trace is kept or dropped together</td><td>Decides before knowing the result, so it keeps 1% of errors too</td></tr>
+<tr><td>Tail sampling</td><td>A collector buffers all spans of a trace for a few seconds, then decides</td><td>Keep every error and every slow trace, plus a small share of normal ones</td><td>The collector must hold all spans in memory and route a trace's spans to one node</td></tr>
+</tbody></table></div>
+<p>A common setup: tail-sample to keep 100% of traces with an error or above the p99 latency, and 1% of the rest. Metrics still count every request, so dashboards stay exact even though most traces are thrown away.</p></section>
+
+<section id="alerting"><h2>Alerting on symptoms</h2>
+<p>Page a human for what users feel: errors and slowness on the SLI. Do not page for causes like "CPU is at 90%". High CPU with happy users is fine, and an outage with normal CPU (a bad config, an expired certificate) would never trigger it. Cause metrics belong on dashboards and in tickets, where they help explain a symptom alert.</p>
+<div class="table"><table><thead><tr><th>Severity</th><th>Burn rate</th><th>Long / short window</th><th>Budget spent when it fires</th><th>Action</th></tr></thead><tbody>
+<tr><td>Page</td><td>14.4</td><td>1 h / 5 min</td><td>2%</td><td>Wake someone now</td></tr>
+<tr><td>Page</td><td>6</td><td>6 h / 30 min</td><td>5%</td><td>Wake someone now</td></tr>
+<tr><td>Ticket</td><td>1</td><td>3 d / 6 h</td><td>10%</td><td>Fix in working hours</td></tr>
+</tbody></table></div>
+<p>The long window stops a brief blip from paging. The short window makes the alert stop soon after the problem is fixed, instead of staying red for the rest of the hour. Compare a plain threshold like "error rate above 1% for 5 minutes": for a 99.9% SLO that pages on a five-minute spike to 2% errors, which used only about 0.2% of the month's budget, yet it never fires for a steady 0.5% error rate that empties the budget in 6 days.</p>
+<h3>Every page should be actionable</h3>
+<p>Each alert links to a runbook and a dashboard. If an alert fires and the right response is "wait and see", turn it into a ticket or delete it. Teams that get more than a couple of pages per on-call shift start ignoring them, and the real one gets missed.</p></section>
+
+<section id="failure"><h2>How observability fails</h2>
+<h3>Cardinality explosion</h3>
+<p>Someone adds a label with unbounded values and the metrics database runs out of memory, usually during the incident you needed it for. Set per-metric series limits and reject new series past them.</p>
+<h3>The monitor shares the outage</h3>
+<p>If monitoring runs in the same region and cluster as the product, a region outage takes out both, and the dashboards go blank at the worst moment. Run at least a minimal probe and alert path somewhere else, and add a dead man's switch: an alert that is always firing, so the pager provider pages you if it stops hearing it.</p>
+<h3>Silence looks like health</h3>
+<p>A service that crashes stops reporting errors, so its error rate drops to zero. Alert on missing data (<code>absent()</code> in Prometheus) and on synthetic probes that call the real endpoint from outside every minute.</p>
+<h3>Logging takes the system down</h3>
+<p>A retry loop logs a stack trace a thousand times a second, fills the disk or saturates the network, and the service falls over. Rate-limit repeated log lines, cap the agent's disk buffer, and make the log call non-blocking.</p>
+<h3>Broken or misleading traces</h3>
+<p>One hop without propagation splits traces. Clock skew between hosts makes a child span appear to start before its parent; trace UIs correct small skews, but keep NTP healthy. Head sampling at 1% means you may have no trace at all for a rare error, which is the argument for tail sampling.</p>
+<h3>Alert fatigue</h3>
+<p>Dozens of flapping cause-based alerts teach people to ignore the pager. Start from a handful of SLO burn alerts per service and add more only after an incident shows a gap.</p></section>
+
+<section id="interview"><h2>Saying it in an interview</h2>
+<div class="say"><p>"Every service exports RED metrics as Prometheus histograms, logs structured JSON with the trace ID to stdout, and creates spans with OpenTelemetry, propagating <code>traceparent</code> over HTTP and through Kafka headers. Logs go agent to Kafka to the log store, seven days hot and then object storage. The collector tail-samples, keeping all errors and slow traces and 1% of the rest. The SLO is 99.9% of checkout requests succeeding in under 500 ms over 30 days, which is about 43 minutes of budget. I'd page on a burn rate of 14.4 over one hour and 5 minutes, and 6 over six hours and 30 minutes, ticket on a slow burn, and keep CPU and queue depth on dashboards rather than the pager. Monitoring runs outside the main region, with a dead man's switch."</p></div></section>
+
+<section id="real-world"><h2>In the real world</h2>
+<div class="table"><table><thead><tr><th>Need</th><th>Real options</th><th>Notes</th></tr></thead><tbody>
+<tr><td>Instrumentation</td><td>OpenTelemetry SDKs and collector</td><td>Vendor-neutral standard for metrics, logs and traces</td></tr>
+<tr><td>Metrics</td><td>Prometheus, Thanos, Mimir, VictoriaMetrics, M3</td><td>Thanos and Mimir add long-term storage and many-cluster queries to Prometheus</td></tr>
+<tr><td>Logs</td><td>Elasticsearch or OpenSearch, Grafana Loki, ClickHouse, Splunk</td><td>Loki indexes only labels, which is cheaper but slower for full-text search</td></tr>
+<tr><td>Traces</td><td>Jaeger, Grafana Tempo, Zipkin</td><td>Tempo stores traces in object storage and finds them by ID</td></tr>
+<tr><td>All in one (hosted)</td><td>Datadog, Grafana Cloud, New Relic, Honeycomb, Amazon CloudWatch</td><td>Less to run; cost grows quickly with logs and custom metrics</td></tr>
+<tr><td>Alert routing</td><td>Alertmanager, PagerDuty, Opsgenie</td><td>Grouping, silences, on-call schedules and escalation</td></tr>
+</tbody></table></div>
+<p class="muted" style="font-size:13.5px;color:var(--muted)">Products change quickly; names here are examples, not endorsements. Check current docs before choosing.</p></section>
+
+<section id="related"><h2>Related</h2><ul class="related"><li><a href="requirements.html">Non-functional requirements</a></li><li><a href="queues.html">Message queues and streams</a></li><li><a href="api-gateways.html">API gateways and service mesh</a></li><li><a href="load-balancing.html">Load balancing</a></li><li><a href="numbers.html">Numbers to know</a></li><li><a href="call-insights.html">Call insights</a></li></ul></section>
+  </article>
+</div>
+</main>
+<footer class="site"><div class="wrap">Part of Classic System Design, a companion to the <a href="https://devlcodes.github.io/agentic-ai-notebook/system-design/index.html">agentic system designs</a>. Figures marked illustrative show the shape of a system, not measured numbers. Check vendor docs before relying on a specific product limit.</div></footer>
+<script>
+(function(){
+  var $ = function(id){ return document.getElementById(id); };
+  var ERR = [0.05, 0.1, 0.2, 0.3, 0.5, 1, 2, 3, 5, 10, 20, 50, 100];
+  var DUR = [5, 15, 30, 60, 120, 360, 720, 1440, 2880, 4320, 10080];
+  var WIN = 30 * 24 * 60, slo = 99.9;
+  var RULES = [
+    { name: 'Fast burn', sev: 'Page', long: 60, short: 5, t: 14.4 },
+    { name: 'Medium burn', sev: 'Page', long: 360, short: 30, t: 6 },
+    { name: 'Slow burn', sev: 'Ticket', long: 4320, short: 360, t: 1 }
+  ];
+  function fmt(min){
+    if (!isFinite(min)) return 'never';
+    if (min < 1) return Math.max(1, Math.round(min * 60)) + ' s';
+    if (min < 90) return (min < 10 ? +min.toFixed(1) : Math.round(min)) + ' min';
+    if (min < 2880) return +(min / 60).toFixed(min < 600 ? 1 : 0) + ' h';
+    return +(min / 1440).toFixed(1) + ' days';
+  }
+  function pct(x){ return x >= 10 ? Math.round(x) + '%' : x >= 1 ? x.toFixed(1) + '%' : x >= 0.1 ? x.toFixed(2) + '%' : x.toFixed(3) + '%'; }
+  function run(){
+    var e = ERR[+$('ob-err').value], d = DUR[+$('ob-dur').value], budget = 100 - slo;
+    $('ob-err-o').textContent = e + '%'; $('ob-dur-o').textContent = fmt(d);
+    var burn = e / budget, spent = Math.min(100, burn * d / WIN * 100), empty = WIN / burn;
+    $('ob-m').innerHTML = '<div class="metric"><span class="n">' + (burn >= 100 ? Math.round(burn) : +burn.toFixed(1)) + '×</span><span class="l">burn rate</span><small>' + e + '% errors ÷ ' + +budget.toFixed(2) + '% budget</small></div>' +
+      '<div class="metric"><span class="n">' + pct(spent) + '</span><span class="l">budget spent</span><small>of the 30-day budget, so far</small></div>' +
+      '<div class="metric"><span class="n">' + fmt(empty) + '</span><span class="l">to empty it</span><small>if nothing changes</small></div>';
+    var rows = '', first = null;
+    RULES.forEach(function(r){
+      var after = burn >= r.t ? r.t * r.long / burn : Infinity;
+      var longB = burn * Math.min(d, r.long) / r.long, shortB = burn * Math.min(d, r.short) / r.short;
+      var fire = longB >= r.t - 1e-9 && shortB >= r.t - 1e-9;
+      if (fire && !first) first = r;
+      rows += '<tr><td>' + r.sev + ' · ' + r.name + '</td><td>' + fmt(r.long) + ' / ' + fmt(r.short) + '</td><td>' + r.t + '</td><td>' + fmt(after) + '</td><td class="' + (fire ? 'fail' : 'pass') + '">' + (fire ? 'firing' : 'quiet') + '</td></tr>';
+    });
+    $('ob-rules').innerHTML = rows;
+    var msg;
+    if (spent >= 100) msg = 'The whole month\'s budget is gone. At ' + e + '% errors a ' + slo + '% SLO empties in ' + fmt(empty) + '; the fast-burn page should have fired after ' + fmt(14.4 * 60 / burn) + '.';
+    else if (first) msg = first.sev === 'Page' ? 'Someone is being paged. ' + first.name + ' fired after ' + fmt(first.t * first.long / burn) + ', once about ' + Math.round(first.t * first.long / WIN * 100) + '% of the budget was spent.' : 'Only a ticket: the burn is real but slow, so it can wait for working hours. Left alone it empties the budget in ' + fmt(empty) + '.';
+    else if (burn < 1) msg = 'Burn rate is below 1, so this pace never empties the budget within the month. No alert should fire, and none does.';
+    else msg = 'No alert yet. The burn would empty the budget in ' + fmt(empty) + ', and the first rule fires after ' + fmt(Math.min.apply(null, RULES.map(function(r){ return burn >= r.t ? r.t * r.long / burn : Infinity; }))) + '. Short spikes stay quiet by design.';
+    if (slo >= 99.99 && burn >= 14.4) msg += ' At 99.99% the whole month allows about 4 minutes of full outage, less than most people need to answer a page and roll back, so SLOs this tight need automated rollback.';
+    $('ob-out').textContent = msg;
+  }
+  $('ob-slo').addEventListener('click', function(ev){ var b = ev.target.closest('button'); if (!b) return; slo = +b.dataset.v; this.querySelectorAll('button').forEach(function(x){ x.setAttribute('aria-pressed', x === b); }); run(); });
+  $('ob-err').addEventListener('input', run); $('ob-dur').addEventListener('input', run);
+  run();
+})();
+</script>
+</body>
+</html>
