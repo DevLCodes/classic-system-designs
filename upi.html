@@ -1,0 +1,702 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>UPI Payments Switch · Classic System Design</title>
+<meta name="description" content="Design the central switch behind UPI: VPA resolution, the debit-then-credit flow between banks, timeouts, deemed success and reversals, idempotency with one transaction id, and settlement and reconciliation.">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700&family=Instrument+Sans:ital,wght@0,400;0,500;0,600;1,400&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+  /* Layout: a slim site bar, then either a card grid (home), a sticky contents rail + reading column (articles), or a filterable term list (glossary). Light, single look. */
+  :root {
+    color-scheme: light;
+    --bg: #e9ecef; --paper: #f7f8f9; --ink: #1c2530; --muted: #586473; --line: #cdd4dc; --line-strong: #9aa5b1;
+    --accent: #4255d4; --accent-ink: #ffffff; --track: #d3d9e0; --code-bg: #eef1f4; --wire: #7d8996;
+    --c-ingest: #2a9d8f; --c-kb: #4d5fd8; --c-serve: #d7932a; --c-model: #e2674f; --c-gov: #b2456e; --c-cross: #4a5562; --c-dlq: #b23a3a; --c-ok: #2f8f5b;
+    --t-src: #e4e8ec; --t-ingest: #d8eeea; --t-kb: #dfe3fa; --t-serve: #f8ead2; --t-model: #fbe1da; --t-gov: #f3dde6; --t-cross: #dfe2e6; --t-dlq: #f6dddb;
+    --font-display: "Bricolage Grotesque", "Avenir Next", "Segoe UI", system-ui, sans-serif;
+    --font-body: "Instrument Sans", "Helvetica Neue", "Segoe UI", system-ui, sans-serif;
+    --font-mono: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  @media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
+  body { margin: 0; background: var(--bg); color: var(--ink); font-family: var(--font-body); font-size: 16px; line-height: 1.6; }
+  a { color: var(--accent); }
+  .wrap { max-width: 1240px; margin: 0 auto; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
+
+  .sitebar { border-bottom: 1px solid var(--line); background: var(--paper); }
+  .sitebar .wrap { display: flex; align-items: center; gap: 18px; flex-wrap: wrap; padding-block: 12px; }
+  .brand { font-family: var(--font-display); font-weight: 700; font-size: 17px; color: var(--ink); text-decoration: none; margin-right: auto; }
+  .sitebar nav { display: flex; gap: 16px; flex-wrap: wrap; font-size: 14px; }
+  .sitebar nav a { color: var(--muted); text-decoration: none; }
+  .sitebar nav a:hover, .sitebar nav a[aria-current="page"] { color: var(--ink); }
+  .sitebar nav a[aria-current="page"] { font-weight: 600; }
+
+  .intro { padding-block: 40px 8px; display: grid; gap: 10px; max-width: 820px; }
+  .eyebrow { margin: 0; font-family: var(--font-mono); font-size: 12px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+  h1 { margin: 0; font-family: var(--font-display); font-weight: 700; font-size: clamp(30px, 5vw, 46px); line-height: 1.05; text-wrap: balance; }
+  .intro .lead { font-size: 18px; margin: 0; }
+
+  .doc { display: grid; grid-template-columns: 220px minmax(0, 1fr); gap: 48px; padding-block: 36px 72px; }
+  .toc { position: sticky; top: calc(env(safe-area-inset-top, 0px) + 20px); align-self: start; }
+  .toc p { margin: 0 0 8px; font-family: var(--font-mono); font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+  .toc ol { margin: 0; padding: 0; list-style: none; display: grid; gap: 2px; counter-reset: toc; }
+  .toc li { counter-increment: toc; }
+  .toc a { display: flex; gap: 8px; padding: 3px 0; font-size: 14px; color: var(--muted); text-decoration: none; }
+  .toc a::before { content: counter(toc, decimal-leading-zero); font-family: var(--font-mono); font-size: 11.5px; padding-top: 2px; color: var(--line-strong); }
+  .toc a:hover { color: var(--ink); }
+  article { min-width: 0; max-width: 760px; }
+  section { padding-bottom: 36px; margin-bottom: 36px; border-bottom: 1px solid var(--line); scroll-margin-top: 20px; }
+  section:last-child { border-bottom: 0; }
+  h2 { margin: 0 0 10px; font-family: var(--font-display); font-weight: 700; font-size: 28px; line-height: 1.15; text-wrap: balance; }
+  h3 { margin: 26px 0 6px; font-family: var(--font-display); font-weight: 600; font-size: 19px; line-height: 1.25; }
+  p { margin: 0 0 14px; }
+  .lead { font-size: 18px; }
+  ul.plain, ol.plain { margin: 0 0 16px; padding-left: 22px; display: grid; gap: 6px; }
+  code { font-family: var(--font-mono); font-size: 0.88em; background: var(--code-bg); padding: 1px 5px; border-radius: 4px; }
+  pre { margin: 0 0 16px; padding: 14px 16px; background: var(--code-bg); border-radius: 10px; overflow-x: auto; font-size: 13px; line-height: 1.55; }
+  pre code { background: none; padding: 0; font-size: inherit; }
+  .table { overflow-x: auto; margin: 0 0 18px; }
+  table { width: 100%; border-collapse: collapse; font-size: 14.5px; line-height: 1.45; }
+  th, td { text-align: left; vertical-align: top; padding: 8px 10px; border-bottom: 1px solid var(--line); }
+  th { font-family: var(--font-mono); font-size: 11.5px; font-weight: 500; letter-spacing: .05em; text-transform: uppercase; color: var(--muted); }
+  td.num { font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .note { border-left: 3px solid var(--accent); background: var(--paper); padding: 12px 16px; border-radius: 0 10px 10px 0; margin: 0 0 18px; }
+  .note p:last-child { margin: 0; }
+  .formula { font-family: var(--font-mono); font-size: 14px; background: var(--paper); border: 1px solid var(--line); border-radius: 10px; padding: 12px 16px; margin: 0 0 16px; overflow-x: auto; white-space: nowrap; }
+  .related { display: flex; flex-wrap: wrap; gap: 8px; margin: 0; padding: 0; list-style: none; }
+  .related a { display: inline-block; padding: 4px 12px; border: 1px solid var(--line); border-radius: 999px; font-size: 14px; color: var(--ink); text-decoration: none; background: var(--paper); }
+  .related a:hover { border-color: var(--ink); }
+  .pager { display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; font-size: 14px; }
+  footer.site { border-top: 1px solid var(--line); padding-block: 20px 40px; font-size: 13px; color: var(--muted); }
+  a:focus-visible, input:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+  /* home */
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 16px; margin: 0 0 40px; padding: 0; list-style: none; }
+  .card { display: grid; gap: 8px; height: 100%; padding: 18px; background: var(--paper); border: 1px solid var(--line); border-radius: 14px; color: var(--ink); text-decoration: none; }
+  .card:hover { border-color: var(--ink); }
+  .card .k { font-family: var(--font-mono); font-size: 11px; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
+  .card h3 { margin: 0; font-size: 20px; }
+  .card p { margin: 0; font-size: 14.5px; color: var(--muted); }
+  .card svg { width: 100%; height: auto; display: block; }
+  .card.feature svg { max-width: 420px; justify-self: center; }
+  .card.feature { grid-column: 1 / -1; grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr); align-items: center; gap: 24px; }
+  .home-h { margin: 28px 0 12px; font-family: var(--font-display); font-size: 24px; }
+
+  /* glossary */
+  .gl-tools { position: sticky; top: 0; z-index: 2; background: var(--bg); padding-block: 12px; display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+  .gl-tools input { flex: 1 1 260px; min-width: 0; font: 15px var(--font-body); padding: 9px 12px; border-radius: 10px; border: 1px solid var(--line-strong); background: #fff; color: var(--ink); }
+  .gl-letters { display: flex; flex-wrap: wrap; gap: 4px; font-family: var(--font-mono); font-size: 13px; }
+  .gl-letters a { padding: 2px 6px; border-radius: 6px; text-decoration: none; color: var(--muted); }
+  .gl-letters a:hover { background: var(--paper); color: var(--ink); }
+  .gl { max-width: 860px; }
+  .gl-item { margin: 0; }
+  .gl-item { display: grid; grid-template-columns: 220px minmax(0, 1fr); gap: 16px; padding: 12px 0; border-bottom: 1px solid var(--line); scroll-margin-top: 70px; }
+  .gl-item dt { font-weight: 600; }
+  .gl-item dt small { display: block; font-weight: 400; font-family: var(--font-mono); font-size: 11px; color: var(--muted); letter-spacing: .04em; text-transform: uppercase; margin-top: 2px; }
+  .gl-item dd { margin: 0; }
+  .gl-item dd .see { font-size: 13.5px; }
+  .gl-letter { margin: 26px 0 4px; font-family: var(--font-display); font-size: 22px; scroll-margin-top: 70px; }
+
+  @media (max-width: 900px) {
+    .doc { grid-template-columns: minmax(0, 1fr); gap: 24px; padding-block: 28px 56px; }
+    .toc { position: static; }
+    .toc ol { grid-template-columns: repeat(2, minmax(0, 1fr)); column-gap: 12px; }
+    .card.feature { grid-template-columns: minmax(0, 1fr); }
+  }
+  @media (max-width: 640px) {
+    .gl-item { grid-template-columns: minmax(0, 1fr); gap: 4px; }
+    h2 { font-size: 24px; }
+    .intro .lead, .lead { font-size: 16.5px; }
+  }
+
+  /* diagrams */
+  .fig { margin: 6px 0 24px; overflow-x: auto; }
+  .fig svg { display: block; width: 100%; height: auto; min-width: 600px; }
+  .fig figcaption { margin-top: 8px; font-size: 13px; line-height: 1.45; color: var(--muted); }
+  .dg text { font-family: var(--font-body); font-size: 13px; fill: var(--ink); }
+  .dg .sm { font-size: 11.5px; fill: var(--muted); }
+  .dg .small { font-size: 12px; }
+  .dg .b { font-weight: 600; }
+  .dg .mono { font-family: var(--font-mono); }
+  .dg .it { font-style: italic; }
+  .dg .mute { fill: var(--muted); }
+  .dg .gov { fill: var(--c-gov); font-weight: 600; }
+  .dg .okt { fill: var(--c-ok); font-weight: 600; }
+  .dg .bad { fill: var(--c-dlq); font-weight: 600; }
+  .dg .cap { font-family: var(--font-mono); font-size: 11px; letter-spacing: .06em; fill: var(--muted); }
+  .dg .big { font-family: var(--font-display); font-size: 30px; font-weight: 700; fill: var(--ink); }
+  .dg .box { fill: var(--paper); stroke: var(--line-strong); stroke-width: 1.25; }
+  .dg .ghost { fill: none; stroke: var(--line-strong); stroke-width: 1.25; stroke-dasharray: 5 5; }
+  .dg .track { fill: var(--track); }
+  .dg .rule { stroke: var(--line); stroke-width: 1; }
+  .dg .axis { stroke: var(--line-strong); stroke-width: 1.25; }
+  .dg .wire { fill: none; stroke: var(--wire); stroke-width: 1.4; }
+  .dg .wire.dash { stroke-dasharray: 4 4; }
+  .dg .wire.hot { stroke: var(--accent); stroke-width: 2; }
+  .dg .wire.red { stroke: var(--c-dlq); }
+  .dg .ah { fill: var(--wire); }
+  .dg .xmark { stroke: var(--c-dlq); stroke-width: 1.8; fill: none; }
+  .dg .tick { stroke: var(--c-ok); stroke-width: 2; fill: none; }
+  .dg .k-src { fill: var(--t-src); stroke: #8795a3; stroke-width: 1.5; }
+  .dg .k-ingest { fill: var(--t-ingest); stroke: var(--c-ingest); stroke-width: 1.5; }
+  .dg .k-kb { fill: var(--t-kb); stroke: var(--c-kb); stroke-width: 1.5; }
+  .dg .k-serve { fill: var(--t-serve); stroke: var(--c-serve); stroke-width: 1.5; }
+  .dg .k-model { fill: var(--t-model); stroke: var(--c-model); stroke-width: 1.5; }
+  .dg .k-gov { fill: var(--t-gov); stroke: var(--c-gov); stroke-width: 1.5; }
+  .dg .k-cross { fill: var(--t-cross); stroke: var(--c-cross); stroke-width: 1.5; }
+  .dg .k-dlq { fill: var(--t-dlq); stroke: var(--c-dlq); stroke-width: 1.5; }
+  .dg .k-user { fill: #ffffff; stroke: var(--line-strong); stroke-width: 1.5; }
+  .dg .f-serve { fill: var(--c-serve); } .dg .f-kb { fill: var(--c-kb); } .dg .f-model { fill: var(--c-model); } .dg .f-gov { fill: var(--c-gov); } .dg .f-ingest { fill: var(--c-ingest); } .dg .f-cross { fill: #b8c0c9; } .dg .f-dlq { fill: var(--c-dlq); } .dg .f-ok { fill: var(--c-ok); }
+  .dg .cell { fill: var(--paper); stroke: var(--line-strong); stroke-width: 1; }
+  .dg .cell.hot { fill: var(--t-ingest); stroke: var(--c-ingest); stroke-width: 1.5; }
+  .dg .cell.old { fill: var(--t-kb); stroke: var(--c-kb); }
+  .dg .cell.new { fill: var(--t-ingest); stroke: var(--c-ingest); stroke-width: 1.5; }
+  .dg .cell.gone { fill: var(--paper); stroke: var(--line); }
+  .dg .dot-hr { fill: var(--c-gov); } .dg .dot-it { fill: var(--c-kb); } .dg .dot-eng { fill: var(--c-ingest); } .dg .dot-q { fill: var(--c-serve); stroke: var(--ink); stroke-width: 1.5; }
+  .dg .halo { fill: none; stroke: var(--c-serve); stroke-width: 1.5; stroke-dasharray: 4 4; }
+  .dg .zone { fill: var(--paper); stroke: var(--line); stroke-width: 1; }
+</style>
+
+<style>
+  .lab { margin: 6px 0 26px; padding: 14px 16px 16px; background: var(--paper); border: 1px solid var(--line); border-radius: 14px; }
+  .lab-row { display: flex; flex-wrap: wrap; gap: 10px 18px; align-items: center; margin: 0 0 12px; }
+  .lab-k { font-family: var(--font-mono); font-size: 11px; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
+  .lab label { display: inline-flex; gap: 8px; align-items: center; font-size: 14px; }
+  .lab input[type=range] { width: 150px; accent-color: var(--accent); }
+  .lab input[type=checkbox] { width: 16px; height: 16px; accent-color: var(--accent); }
+  .lab input[type=text] { flex: 1 1 260px; min-width: 0; font: 15px var(--font-body); padding: 8px 11px; border-radius: 9px; border: 1px solid var(--line-strong); background: #fff; color: var(--ink); }
+  .lab output { font-family: var(--font-mono); font-size: 12.5px; min-width: 6ch; font-variant-numeric: tabular-nums; }
+  .seg { display: inline-flex; flex-wrap: wrap; gap: 6px; }
+  .seg button, .chips button { font: 600 13px var(--font-body); color: var(--ink); background: #fff; border: 1px solid var(--line); border-radius: 8px; padding: 6px 12px; cursor: pointer; }
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; }
+  .chips button { font-weight: 500; border-radius: 999px; padding: 4px 11px; font-size: 13px; }
+  .seg button:hover, .chips button:hover { border-color: var(--ink); }
+  .seg button[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+  .seg button:focus-visible, .chips button:focus-visible, .lab input:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .lab-out { margin: 12px 0 0; padding: 10px 12px; background: #fff; border: 1px solid var(--line); border-radius: 10px; font-size: 14.5px; line-height: 1.5; font-variant-numeric: tabular-nums; }
+  .chunks { display: grid; gap: 8px; max-height: 470px; overflow: auto; padding-right: 4px; }
+  .chunk { min-width: 0; padding: 8px 11px; background: #fff; border: 1px solid var(--line); border-left: 4px solid var(--c-kb); border-radius: 8px; font-size: 14px; line-height: 1.5; overflow-wrap: anywhere; }
+  .chunk:nth-child(even) { border-left-color: var(--c-ingest); }
+  .chunk.ans { box-shadow: 0 0 0 2px var(--c-serve); }
+  .chunk .ch { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-bottom: 4px; font-family: var(--font-mono); font-size: 11px; color: var(--muted); }
+  .chunk .pfx { display: block; font-family: var(--font-mono); font-size: 11.5px; color: var(--c-kb); }
+  .chunk .ov { background: var(--track); border-radius: 3px; }
+  .chunk mark { background: #ffe9b3; border-radius: 3px; padding: 0 2px; }
+  .chunk table { width: auto; font-size: 13px; margin: 4px 0; }
+  .chunk td { padding: 2px 10px 2px 0; border-bottom: 1px solid var(--line); }
+  .badge { display: inline-block; padding: 0 7px; border-radius: 999px; border: 1px solid; font-family: var(--font-mono); font-size: 10.5px; line-height: 1.6; }
+  .badge.bad { color: var(--c-dlq); border-color: var(--c-dlq); background: var(--t-dlq); }
+  .badge.ok { color: var(--c-ok); border-color: var(--c-ok); background: #e3f3ea; }
+  .badge.info { color: var(--c-kb); border-color: var(--c-kb); background: var(--t-kb); }
+  .bars { display: grid; gap: 8px; margin: 4px 0 0; }
+  .bar-row { display: grid; grid-template-columns: minmax(0, 150px) minmax(0, 1fr) 46px; gap: 10px; align-items: center; font-size: 14px; }
+  .bar { position: relative; height: 14px; border-radius: 7px; background: var(--track); }
+  .bar i { position: absolute; inset: 0 auto 0 0; border-radius: 7px; background: var(--c-kb); transition: width .3s; }
+  .bar b { position: absolute; top: -4px; bottom: -4px; width: 2px; background: var(--c-dlq); }
+  .bar-row .v { font-family: var(--font-mono); font-size: 12.5px; text-align: right; }
+  .stages { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 10px; padding: 0; list-style: none; font-size: 13px; }
+  .stages li { padding: 2px 10px; border-radius: 999px; border: 1px solid var(--line); color: var(--muted); background: #fff; }
+  .stages li.hit { border-color: var(--accent); color: var(--accent-ink); background: var(--accent); }
+  .stages li.skip { text-decoration: line-through; }
+  .rlist { display: grid; gap: 6px; margin: 0; padding: 0; list-style: none; counter-reset: r; }
+  .rlist li { counter-increment: r; display: grid; grid-template-columns: 28px minmax(0, 1fr) auto; gap: 10px; align-items: center; padding: 6px 10px; background: #fff; border: 1px solid var(--line); border-radius: 8px; font-size: 14px; }
+  .rlist li::before { content: counter(r); font-family: var(--font-mono); font-size: 12px; color: var(--muted); }
+  .rlist li.rel { border-color: var(--c-ok); background: #f0f8f3; }
+  .rlist button { font: 600 12px var(--font-body); padding: 3px 10px; border-radius: 999px; border: 1px solid var(--line-strong); background: #fff; color: var(--ink); cursor: pointer; white-space: nowrap; }
+  .rlist li.rel button { background: var(--c-ok); border-color: var(--c-ok); color: #fff; }
+  .metrics { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 8px; margin: 12px 0 0; }
+  .metric { padding: 8px 10px; background: #fff; border: 1px solid var(--line); border-radius: 10px; }
+  .metric .n { display: block; font-family: var(--font-display); font-size: 24px; font-weight: 700; font-variant-numeric: tabular-nums; }
+  .metric .l { font-family: var(--font-mono); font-size: 11px; letter-spacing: .04em; text-transform: uppercase; color: var(--muted); }
+  .metric small { display: block; font-size: 12px; color: var(--muted); line-height: 1.35; margin-top: 2px; }
+  td.pass { color: var(--c-ok); font-weight: 600; } td.fail { color: var(--c-dlq); font-weight: 600; }
+  .say { border-left: 3px solid var(--c-serve); background: var(--paper); padding: 12px 16px; border-radius: 0 10px 10px 0; margin: 0 0 16px; font-size: 15.5px; }
+  .say p:last-child { margin: 0; }
+</style>
+
+<style>
+  .lab-chart { display: block; width: 100%; height: auto; margin: 4px 0 0; }
+  .lab-chart text { font-family: var(--font-body); font-size: 12px; fill: var(--muted); }
+  .grid-cells { display: grid; gap: 4px; }
+  .srv { display: grid; grid-template-columns: 92px minmax(0,1fr) 70px; gap: 10px; align-items: center; font-size: 14px; }
+  .muted { color: var(--muted); }
+  .lab select { font: 14px var(--font-body); padding: 6px 8px; border-radius: 8px; border: 1px solid var(--line-strong); background: #fff; color: var(--ink); }
+  .lab input[type=number] { width: 9ch; font: 14px var(--font-mono); padding: 6px 8px; border-radius: 8px; border: 1px solid var(--line-strong); background: #fff; color: var(--ink); }
+</style><style>
+  .prompt { margin: 0; font-size: 18px; line-height: 1.5; color: var(--ink); }
+  .prompt q { font-style: italic; }
+  .legend { display: flex; flex-wrap: wrap; gap: 6px 14px; margin: 4px 0 0; padding: 0; list-style: none; font-size: 13px; color: var(--muted); }
+  .legend li { display: flex; align-items: center; gap: 6px; }
+  .legend i { width: 11px; height: 11px; border-radius: 3px; display: inline-block; }
+  .tags { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 16px; padding: 0; list-style: none; }
+  .tags li { font-family: var(--font-mono); font-size: 11px; letter-spacing: .04em; padding: 2px 8px; border-radius: 6px; border: 1px solid var(--line); color: var(--muted); }
+  @media (max-width: 640px) { .prompt { font-size: 16.5px; } }
+</style>
+<link rel="stylesheet" href="assets/scene3d.css">
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs><marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" class="ah" style="fill:#7d8996"/></marker></defs></svg>
+<header class="sitebar"><div class="wrap"><a class="brand" href="index.html">Classic System Design</a><nav aria-label="Site"><a href="index.html">Home</a><a href="index.html#blocks">Building blocks</a><a href="index.html#designs" aria-current="page">Designs</a><a href="https://devlcodes.github.io/agentic-ai-notebook/system-design/index.html">Agentic designs ↗</a></nav></div></header>
+<main>
+<header class="wrap"><div class="intro"><p class="eyebrow">Classic system design walkthrough</p><h1>UPI Payments Switch</h1><p class="prompt"><q>Design the central switch behind India's UPI: a user types a VPA such as asha@okbank, enters a PIN, and money moves from their bank account to someone else's in a few seconds, any time of day. Hundreds of banks and dozens of payment apps connect to it. Plan for 700 million payments a day, peaks of 25,000 a second, and banks whose core systems are sometimes slow or down. No payment may ever be debited twice, and no debit may be left without a credit or a refund.</q></p><ul class="legend" aria-label="Colour key"><li><i style="background:var(--c-serve)"></i>Apps and PSPs</li><li><i style="background:var(--c-gov)"></i>Central switch</li><li><i style="background:var(--c-kb)"></i>Banks and storage</li><li><i style="background:var(--c-ingest)"></i>Money moving</li><li><i style="background:var(--c-dlq)"></i>Timeouts and reversals</li></ul></div></header>
+<div class="wrap"><figure class="fig3d hero" id="hero">
+  <div class="stage3d" role="img" aria-label="Animated 3D view: Asha pays Ravi from her payment app. Her PSP sends a pay request with a unique transaction id to the NPCI switch. The switch asks Ravi's PSP to resolve his VPA to a bank account. It then asks Asha's bank to verify her PIN and debit her account, and when that succeeds asks Ravi's bank to credit his account. When the credit succeeds, the switch tells both PSPs, and both apps show the payment as done."><p class="hint3">3D · drag to turn</p><button class="reset3 ghost" type="button" hidden>Reset view</button><p class="nogl">The 3D view needs WebGL and a connection, because Three.js loads from a CDN. The sections below cover the same ground.</p></div>
+  <div class="ctl3"><button class="pp" type="button">Pause</button><span class="k">Step</span><div class="steps3"></div><span class="meta3"></span></div>
+  <div class="track3"><div class="fill3"></div></div>
+  <p class="out3" aria-live="polite"></p>
+  <figcaption>Illustrative. The switch never holds money; it routes messages, keeps the state of every transaction, and tells banks what to settle.</figcaption>
+</figure></div>
+<div class="wrap doc">
+  <nav class="toc" aria-label="Sections"><p>The solution</p><ol><li><a href="#requirements">Requirements</a></li><li><a href="#success">Success metrics</a></li><li><a href="#estimates">Estimates</a></li><li><a href="#api">API</a></li><li><a href="#architecture">Architecture</a></li><li><a href="#vpa">VPA resolution</a></li><li><a href="#flow">Debit, then credit</a></li><li><a href="#timeouts">Timeouts, deemed success and reversals</a></li><li><a href="#lab">Try it: slow banks</a></li><li><a href="#idempotency">Idempotency</a></li><li><a href="#recon">Settlement and reconciliation</a></li><li><a href="#storage">Storage</a></li><li><a href="#deployment">Deployment and resilience</a></li><li><a href="#observability">Observability</a></li><li><a href="#risks">Risks and v2</a></li><li><a href="#presenting">Presenting it in 45 minutes</a></li><li><a href="#numbers">Numbers to remember</a></li></ol></nav>
+  <article>
+
+<section id="requirements">
+  <h2>Requirements</h2>
+  <ul class="tags"><li>Clarify</li><li><a href="requirements.html">Non-functional requirements</a></li></ul>
+  <p class="lead">UPI is not a wallet. Money stays in bank accounts the whole time. The switch is a referee that tells one bank to take money out and another to put it in, and remembers exactly what happened.</p>
+  <div class="table"><table>
+    <thead><tr><th>Question</th><th>Assumption</th><th>Why it matters</th></tr></thead>
+    <tbody>
+      <tr><td>Who connects?</td><td>Payment apps (PSPs) on one side, banks on the other, both through the switch</td><td>The switch talks to hundreds of systems it doesn't control</td></tr>
+      <tr><td>Which payments?</td><td>Push (pay a VPA or QR), pull (collect request), person to person and person to merchant</td><td>Same core flow, different starting side</td></tr>
+      <tr><td>How do users name each other?</td><td>A VPA like <code>ravi@ybl</code>, a phone number or a QR code; never an account number</td><td>The switch must turn a name into a bank account on every payment</td></tr>
+      <tr><td>Scale?</td><td>700M payments a day, 25k a second at peak</td><td>Every payment touches two banks, so bank capacity matters more than switch capacity</td></tr>
+      <tr><td>Latency?</td><td>Most payments done in 2 to 5 seconds; hard timeout per request of about 15 seconds</td><td>The user is staring at a spinner at a shop counter</td></tr>
+      <tr><td>Money rules?</td><td>No double debits; a debit without a credit must be credited or refunded within a day</td><td>The regulator sets deadlines and penalties for stuck money</td></tr>
+      <tr><td>Hours?</td><td>24 × 7, including bank holidays and while banks run their nightly batch jobs</td><td>Banks go into maintenance; the switch can't</td></tr>
+    </tbody>
+  </table></div>
+  <p>Out of scope: the payment apps' own features (offers, bill pay), card networks, and fraud models inside banks. General card and wallet payments have their own walkthrough: <a href="payments.html">Payments</a>.</p>
+</section>
+
+<section id="success">
+  <h2>Success metrics</h2>
+  <ul class="tags"><li>Define success</li></ul>
+  <div class="table"><table>
+    <thead><tr><th>Metric</th><th>Target</th><th>Why</th></tr></thead>
+    <tbody>
+      <tr><td>Technical decline rate (fails caused by systems, not users)</td><td class="num">&lt; 0.5% for the switch; tracked per bank</td><td>Wrong PIN is the user's fault; a timeout is ours</td></tr>
+      <tr><td>End-to-end latency</td><td class="num">p50 &lt; 2 s, p95 &lt; 5 s</td><td>A queue forms at the shop counter after that</td></tr>
+      <tr><td>Pending (deemed) payments resolved</td><td class="num">100% by T+1</td><td>Regulatory deadline, and it's the user's money</td></tr>
+      <tr><td>Double debits or double credits</td><td class="num">0</td><td>One is a news story</td></tr>
+      <tr><td>Switch availability</td><td class="num">99.99% (≈ 4 min a month)</td><td>When the switch is down, a whole country can't pay</td></tr>
+    </tbody>
+  </table></div>
+</section>
+
+<section id="estimates">
+  <h2>Estimates</h2>
+  <ul class="tags"><li>Back of the envelope</li><li><a href="numbers.html">Numbers</a></li></ul>
+  <div class="table"><table>
+    <thead><tr><th>Quantity</th><th>Math</th><th>Result</th></tr></thead>
+    <tbody>
+      <tr><td>Average rate</td><td>700M ÷ 86,400 s</td><td class="num">≈ 8,100 payments/s</td></tr>
+      <tr><td>Peak rate</td><td>evenings, salary days and festivals at ~3× average</td><td class="num">≈ 25,000 payments/s</td></tr>
+      <tr><td>Messages at the switch</td><td>~10 messages per payment (request, resolve, debit, credit, responses, confirmations)</td><td class="num">≈ 250,000 messages/s at peak</td></tr>
+      <tr><td>Payments in flight</td><td>Little's law: 25,000/s × 2 s average</td><td class="num">≈ 50,000 open transactions</td></tr>
+      <tr><td>Transaction records</td><td>700M × ~1 KB (ids, VPAs, accounts, amounts, every state change)</td><td class="num">≈ 700 GB a day, ≈ 255 TB a year</td></tr>
+      <tr><td>Per bank</td><td>a big bank sends or receives maybe 15% of payments</td><td class="num">≈ 3,750 debits or credits/s at peak on one core banking system</td></tr>
+    </tbody>
+  </table></div>
+  <p>The last line is the real constraint. The switch can scale out across machines; a bank's core banking system often can't, and it is the slowest hop in every payment.</p>
+</section>
+
+<section id="api">
+  <h2>API</h2>
+  <ul class="tags"><li>Interface</li><li><a href="protocols.html">Protocols</a></li></ul>
+  <p>Real UPI messages are signed XML over HTTPS between registered parties. The shape, simplified:</p>
+<pre><code>PSP → switch     ReqPay      { txnId, payer: asha@okbank, payee: ravi@ybl, amount: 640.00,
+                               cred: &lt;PIN encrypted on the phone&gt;, device, note }
+switch → PSP     ReqAuthDetails { txnId, payee: ravi@ybl }   → { account, ifsc, name }
+switch → bank    ReqPay DEBIT   { txnId, rrn, account, amount, cred } → SUCCESS | FAILURE (reason)
+switch → bank    ReqPay CREDIT  { txnId, rrn, account, amount }       → SUCCESS | FAILURE
+switch → PSPs    RespPay / confirmation { txnId, rrn, status }
+anyone → switch  ReqChkTxn   { txnId }  → SUCCESS | FAILURE | DEEMED | PENDING
+switch → bank    ReqPay REVERSAL { txnId, rrn, original: DEBIT } → SUCCESS | FAILURE</code></pre>
+  <p>Every call is asynchronous: the receiver acknowledges at once, then sends the real response as a separate message when it's done. The <code>txnId</code> is created once by the payer's PSP and travels on every message, so every party can match, retry and deduplicate by it. The switch adds a 12-digit RRN (retrieval reference number) that users and support staff quote.</p>
+</section>
+
+<section id="architecture">
+  <h2>Architecture</h2>
+  <ul class="tags"><li>Whole system</li></ul>
+  <figure class="fig"><svg viewBox="0 0 722 316" class="dg" role="img" aria-label="Architecture: on the left, the payer app talks to the payer PSP; on the right, the payee app or merchant talks to the payee PSP. Both PSPs connect to the central UPI switch in the middle. The switch sends debit requests to the remitter bank on the left and credit requests to the beneficiary bank on the right. Below the switch sit its transaction store, a timer and check-status service, a reversal engine, and settlement and reconciliation, which produces net positions settled through accounts at the central bank.">
+    <text x="10" y="22" class="cap">APPS AND PSPS</text>
+    <rect x="10" y="34" width="92" height="40" rx="8" class="k-user"/><text x="56" y="52" class="small b" text-anchor="middle">Payer app</text><text x="56" y="67" class="sm" text-anchor="middle">PIN entry</text>
+    <path d="M102 54 L123 54" class="wire" marker-end="url(#ah)"/>
+    <rect x="125" y="34" width="112" height="40" rx="8" class="k-serve"/><text x="181" y="52" class="small b" text-anchor="middle">Payer PSP</text><text x="181" y="67" class="sm" text-anchor="middle">makes txnId</text>
+    <path d="M237 54 L278 54" class="wire hot" marker-end="url(#ah)"/><text x="258" y="47" class="sm" text-anchor="middle">pay</text>
+    <rect x="280" y="34" width="130" height="128" rx="10" class="k-gov"/><text x="345" y="56" class="small b" text-anchor="middle">UPI switch</text><text x="345" y="74" class="sm" text-anchor="middle">route by handle</text><text x="345" y="89" class="sm" text-anchor="middle">route by IFSC</text><text x="345" y="104" class="sm" text-anchor="middle">state machine</text><text x="345" y="119" class="sm" text-anchor="middle">per-leg timers</text><text x="345" y="134" class="sm" text-anchor="middle">no money held</text>
+    <path d="M453 50 L412 50" class="wire" marker-end="url(#ah)"/><path d="M412 62 L453 62" class="wire" marker-end="url(#ah)"/><text x="432" y="44" class="sm" text-anchor="middle">VPA?</text>
+    <rect x="455" y="34" width="112" height="40" rx="8" class="k-serve"/><text x="511" y="52" class="small b" text-anchor="middle">Payee PSP</text><text x="511" y="67" class="sm" text-anchor="middle">VPA → account</text>
+    <path d="M567 54 L588 54" class="wire" marker-end="url(#ah)"/>
+    <rect x="590" y="34" width="122" height="40" rx="8" class="k-user"/><text x="651" y="52" class="small b" text-anchor="middle">Payee app</text><text x="651" y="67" class="sm" text-anchor="middle">merchant · person</text>
+    <text x="10" y="116" class="cap">BANKS</text>
+    <path d="M280 134 L239 134" class="wire hot" marker-end="url(#ah)"/><text x="258" y="127" class="sm" text-anchor="middle">debit</text>
+    <path d="M280 154 L239 154" class="wire red dash" marker-end="url(#ah)"/><text x="276" y="176" class="sm" text-anchor="end">reversal if credit fails</text>
+    <rect x="125" y="122" width="112" height="40" rx="18" class="k-kb"/><text x="181" y="140" class="small b" text-anchor="middle">Remitter bank</text><text x="181" y="155" class="sm" text-anchor="middle">checks PIN · debits</text>
+    <path d="M410 142 L453 142" class="wire hot" marker-end="url(#ah)"/><text x="432" y="135" class="sm" text-anchor="middle">credit</text>
+    <rect x="455" y="122" width="112" height="40" rx="18" class="k-kb"/><text x="511" y="140" class="small b" text-anchor="middle">Beneficiary bank</text><text x="511" y="155" class="sm" text-anchor="middle">credits payee</text>
+    <path d="M345 162 L345 216" class="wire" marker-end="url(#ah)"/>
+    <text x="10" y="210" class="cap">SWITCH BACK END</text>
+    <rect x="10" y="218" width="160" height="40" rx="18" class="k-kb"/><text x="90" y="236" class="small b" text-anchor="middle">Transaction store</text><text x="90" y="251" class="sm" text-anchor="middle">txnId · every state change</text>
+    <rect x="190" y="218" width="160" height="40" rx="8" class="k-cross"/><text x="270" y="236" class="small b" text-anchor="middle">Timers + check status</text><text x="270" y="251" class="sm" text-anchor="middle">chase unknown legs</text>
+    <rect x="370" y="218" width="160" height="40" rx="8" class="k-dlq"/><text x="450" y="236" class="small b" text-anchor="middle">Reversal engine</text><text x="450" y="251" class="sm" text-anchor="middle">give the debit back</text>
+    <rect x="550" y="218" width="162" height="40" rx="8" class="k-ingest"/><text x="631" y="236" class="small b" text-anchor="middle">Settlement + recon</text><text x="631" y="251" class="sm" text-anchor="middle">net per bank per cycle</text>
+    <text x="10" y="290" class="sm">The switch moves instructions in seconds; the money between banks settles later, in net amounts, several times a day.</text>
+    <text x="10" y="306" class="sm">Every leg has a timer, and every timer ends in a check status, a reversal or a deemed success: never in silence.</text>
+  </svg><figcaption>Four kinds of party, one referee. The payer side owns the user and the PIN; the payee side owns the name-to-account mapping; banks own the money; the switch owns the order of steps and the record of what happened.</figcaption></figure>
+  <ul class="plain">
+    <li><strong>Payer PSP:</strong> the app plus the bank that sponsors it. It creates the <code>txnId</code>, collects the PIN through a secure library that encrypts it on the phone, and starts the payment.</li>
+    <li><strong>Payee PSP:</strong> owns the handle after the @ (for example <code>@ybl</code>) and maps each VPA to a real account.</li>
+    <li><strong>Remitter bank</strong> (the payer's bank, sometimes called the issuer): decrypts and checks the PIN, checks balance and limits, debits.</li>
+    <li><strong>Beneficiary bank</strong> (the payee's bank; for merchants the acquiring side): credits the account.</li>
+    <li><strong>The switch:</strong> routes, runs a state machine per payment, enforces timeouts, starts reversals, and produces settlement files. It never sees the PIN in clear and never holds money.</li>
+  </ul>
+</section>
+
+<section id="vpa">
+  <h2>VPA resolution</h2>
+  <ul class="tags"><li>Deep dive 1</li><li><a href="dns.html">DNS</a></li><li><a href="caching.html">Caching</a></li></ul>
+  <p class="lead">A VPA works like an email address: the part after the @ says who to ask, and only that party knows the answer.</p>
+  <ol class="plain">
+    <li><strong>Handle to PSP:</strong> the switch keeps a small table of handles (<code>@ybl</code>, <code>@okbank</code>, …) to PSP endpoints. A few hundred rows, held in memory on every switch node, changed by an admin process.</li>
+    <li><strong>VPA to account:</strong> the switch sends <code>ReqAuthDetails</code> to the payee's PSP, which looks up <code>ravi@ybl</code> and returns the account number, IFSC (bank and branch code) and the registered name.</li>
+    <li><strong>IFSC to bank:</strong> the first four letters of the IFSC name the bank, so the switch knows where to send the credit.</li>
+    <li><strong>Show the name:</strong> the payer's app shows "Ravi Kumar" before the PIN screen. This one step stops most wrong-person payments.</li>
+  </ol>
+  <p>Why not cache VPA to account at the switch? Users move a VPA to a new account, and a stale entry sends money to the old one. Caching the handle table is safe; caching the answer is not. QR codes for merchants usually carry the VPA, so the same lookup runs on every scan.</p>
+</section>
+
+<section id="flow">
+  <h2>Debit, then credit</h2>
+  <ul class="tags"><li>Deep dive 2</li><li><a href="consistency.html">Sagas</a></li></ul>
+  <p class="lead">There is no transaction that spans two banks. The switch runs a two-step saga: take the money out first, then put it in, and undo the first step if the second one fails.</p>
+  <div class="table"><table>
+    <thead><tr><th>State</th><th>Entered when</th><th>Next</th></tr></thead>
+    <tbody>
+      <tr><td><code>INITIATED</code></td><td><code>ReqPay</code> accepted, <code>txnId</code> stored</td><td>Resolve payee</td></tr>
+      <tr><td><code>RESOLVED</code></td><td>Payee PSP returned an account</td><td>Send debit</td></tr>
+      <tr><td><code>DEBIT_PENDING</code></td><td>Debit sent to remitter bank, timer started</td><td><code>DEBITED</code>, <code>FAILED</code> (wrong PIN, no balance) or debit timeout</td></tr>
+      <tr><td><code>DEBITED</code></td><td>Remitter bank said SUCCESS</td><td>Send credit</td></tr>
+      <tr><td><code>CREDIT_PENDING</code></td><td>Credit sent to beneficiary bank, timer started</td><td><code>SUCCESS</code>, credit failure or credit timeout</td></tr>
+      <tr><td><code>SUCCESS</code></td><td>Beneficiary bank said SUCCESS</td><td>Notify both PSPs; done</td></tr>
+      <tr><td><code>DEEMED</code></td><td>Credit timed out after a successful debit</td><td>Resolved by check status or reconciliation</td></tr>
+      <tr><td><code>REVERSAL_PENDING</code> → <code>REVERSED</code></td><td>Debit unknown or credit failed</td><td>Money back to payer; done</td></tr>
+    </tbody>
+  </table></div>
+  <p>Why debit first? If you credited first and the debit then failed, you would have handed out money you can't get back. A failed credit leaves money at the payer's own bank, which can always give it back. Each transition is a conditional write on the <code>txnId</code> row (<code>UPDATE … WHERE state = 'DEBIT_PENDING'</code>), so a late or duplicate response can't move a payment backwards.</p>
+</section>
+
+<section id="timeouts">
+  <h2>Timeouts, deemed success and reversals</h2>
+  <ul class="tags"><li>Deep dive 3</li><li><a href="payments.html">Payments</a></li><li><a href="queues.html">Retries</a></li></ul>
+  <p class="lead">A timeout is not a failure. It means "I don't know". The design is mostly about what to do when you don't know which leg happened.</p>
+  <figure class="fig3d" id="timeout3d">
+    <div class="stage3d" role="img" aria-label="Two payments go wrong in different ways. In the first, Asha's bank debits her, but Ravi's bank doesn't answer the credit before the timer runs out. The switch marks the payment deemed, and Asha's app shows pending. The switch sends a check status with the same transaction id; Ravi's bank says it already credited, so nothing is credited twice and the payment becomes a success. In the second, Meera's bank debits her, but the beneficiary bank declines the credit because the account is frozen. The switch sends a reversal to Meera's bank, which puts the money back. At the end of the cycle both banks match their records against the switch's settlement file."><p class="hint3">3D · drag to turn</p><button class="reset3 ghost" type="button" hidden>Reset view</button><p class="nogl">The 3D view needs WebGL and a connection.</p></div>
+    <div class="ctl3"><button class="pp" type="button">Pause</button><span class="k">Step</span><div class="steps3"></div><span class="meta3"></span></div>
+    <div class="track3"><div class="fill3"></div></div>
+    <p class="out3" aria-live="polite"></p>
+    <figcaption>Illustrative. Every unknown ends in a check status, a reversal or a deemed success, and the settlement file is the final word.</figcaption>
+  </figure>
+  <div class="table"><table>
+    <thead><tr><th>What went wrong</th><th>Where the money is</th><th>What the switch does</th><th>User sees</th></tr></thead>
+    <tbody>
+      <tr><td>Debit declined (wrong PIN, no balance)</td><td>Still with payer</td><td>Mark <code>FAILED</code>, notify</td><td>Failed, with reason</td></tr>
+      <tr><td>Debit timed out</td><td>Unknown: maybe debited</td><td>Send a reversal to the remitter bank; the bank undoes the debit if it happened, or answers "no such debit"</td><td>Failed; any debit comes back</td></tr>
+      <tr><td>Credit declined (account closed or frozen)</td><td>Debited from payer, at the remitter bank</td><td>Send a reversal: credit the payer back</td><td>Failed, refunded in seconds</td></tr>
+      <tr><td>Credit timed out</td><td>Debited; maybe credited</td><td>Mark <code>DEEMED</code>; chase with check status; reconciliation settles it</td><td>Pending</td></tr>
+    </tbody>
+  </table></div>
+  <ul class="plain">
+    <li><strong>Why not reverse a timed-out credit?</strong> The payee may already have the money. If you reverse the debit too, the system has created money. So a credit timeout is treated as a success for settlement (deemed approved), and the beneficiary bank must either confirm the credit or return the money, by T+1.</li>
+    <li><strong>Check status:</strong> the switch and PSPs ask "what happened to <code>txnId</code>?" a few times, a few seconds apart, with backoff. Most pending payments resolve within a minute this way.</li>
+    <li><strong>Deadlines:</strong> the regulator expects a debited-but-not-credited payment to be fixed by the next day, with compensation to the customer for each day of delay after that. That is why every timer must end in an action.</li>
+    <li><strong>Shorter timeouts help:</strong> waiting 30 seconds for a dead bank ties up capacity and the user. Response time limits were cut in 2025 so a slow bank fails fast and the user can retry another way. The lab below shows the trade-off.</li>
+  </ul>
+</section>
+
+<section id="lab">
+  <h2>Try it: slow banks</h2>
+  <ul class="tags"><li>Lab</li></ul>
+  <p>Each bank's response time varies from call to call: most are quick, a few are very slow. Set the typical (median) response time for the payer's bank and the payee's bank, how spiky their slow tail is, and the timeout the switch allows each leg. See how many payments a day time out, end up pending, or need a reversal at 700M payments a day.</p>
+  <div class="lab" id="upilab">
+    <div class="lab-row"><label for="up-d">Payer's bank, median <input type="range" id="up-d" min="0" max="8" step="1" value="2"><output id="up-d-o"></output></label><label for="up-c">Payee's bank, median <input type="range" id="up-c" min="0" max="8" step="1" value="2"><output id="up-c-o"></output></label></div>
+    <div class="lab-row"><span class="lab-k">Slow tail</span><span class="seg" role="group" aria-label="Slow tail" id="up-s"><button type="button" data-v="0.5" aria-pressed="false">Calm</button><button type="button" data-v="0.9" aria-pressed="true">Normal</button><button type="button" data-v="1.3" aria-pressed="false">Stressed</button></span></div>
+    <div class="lab-row"><span class="lab-k">Timeout per leg</span><span class="seg" role="group" aria-label="Timeout per leg" id="up-t"><button type="button" data-v="3" aria-pressed="false">3 s</button><button type="button" data-v="5" aria-pressed="false">5 s</button><button type="button" data-v="8" aria-pressed="true">8 s</button><button type="button" data-v="15" aria-pressed="false">15 s</button></span></div>
+    <div class="bars" id="up-bars"></div>
+    <div class="metrics" id="up-m"></div>
+    <p class="lab-out" id="up-out" aria-live="polite"></p>
+  </div>
+  <p class="muted" style="font-size:13.5px">Rough model: each leg's response time is log-normal with the median you set; "calm", "normal" and "stressed" are spreads of 0.5, 0.9 and 1.3. 0.3% of credits are declined outright (closed or frozen accounts). User errors such as a wrong PIN are left out. Payments in flight use Little's law at 25,000 payments/s.</p>
+</section>
+
+<section id="idempotency">
+  <h2>Idempotency</h2>
+  <ul class="tags"><li>Deep dive 4</li><li><a href="queues.html">Exactly-once</a></li></ul>
+  <p class="lead">Messages get lost and retried at every hop. The only safe design is one where doing a step twice has the same effect as doing it once.</p>
+  <ul class="plain">
+    <li><strong>One id, end to end:</strong> the payer's PSP creates the <code>txnId</code> before the first call. A user tapping "Pay" twice, or the app retrying after a network drop, sends the same id.</li>
+    <li><strong>Switch:</strong> <code>INSERT</code> of the transaction row with <code>txnId</code> as the primary key. A second <code>ReqPay</code> with the same id gets the current status back, not a second payment.</li>
+    <li><strong>Banks:</strong> each bank keeps the <code>txnId</code> (or RRN) with the debit or credit in the same database transaction as the balance change. A repeated debit request returns the first result. This is what makes check status and retries safe.</li>
+    <li><strong>Reversals:</strong> keyed by the original <code>txnId</code> too, so a reversal sent twice refunds once, and a reversal for a debit that never happened is a harmless "nothing to reverse".</li>
+    <li><strong>New attempt, new id:</strong> if the user gives up and pays again, that is a new <code>txnId</code>. The app should show the first one as pending, so users don't pay twice by hand.</li>
+  </ul>
+</section>
+
+<section id="recon">
+  <h2>Settlement and reconciliation</h2>
+  <ul class="tags"><li>Proof</li><li><a href="payments.html">Ledger</a></li></ul>
+  <p class="lead">The messages move in seconds. The money between banks moves later, in a few large net amounts.</p>
+  <ol class="plain">
+    <li><strong>Cycles:</strong> the day is cut into several settlement cycles. For each cycle the switch adds up, per bank, everything it owes and is owed. If Bank A's customers paid Bank B's customers ₹900 crore and B's paid A's ₹850 crore, only the ₹50 crore difference moves.</li>
+    <li><strong>Settle:</strong> the net positions are posted to the banks' settlement accounts at the central bank. Thousands of crores in millions of payments become a few hundred transfers.</li>
+    <li><strong>Files:</strong> each bank gets a raw file of every transaction in the cycle with its final status (success, deemed, reversed).</li>
+    <li><strong>Match:</strong> each bank matches the file against its core banking records by <code>txnId</code> or RRN. A deemed payment it never credited must now be credited or returned; a debit with no matching record must be reversed.</li>
+    <li><strong>Disputes:</strong> anything still unmatched becomes an adjustment or a complaint, with deadlines and penalties. Reconciliation is the safety net that catches whatever every timer and retry missed.</li>
+  </ol>
+</section>
+
+<section id="storage">
+  <h2>Storage</h2>
+  <ul class="tags"><li><a href="databases.html">Databases</a></li><li><a href="sharding.html">Sharding</a></li></ul>
+  <div class="table"><table>
+    <thead><tr><th>Data</th><th>Store</th><th>Why</th></tr></thead>
+    <tbody>
+      <tr><td>Live transactions (state machine)</td><td>Replicated SQL or a distributed SQL store, sharded by <code>txnId</code> hash</td><td>Conditional updates on one row; synchronous replication so no state is lost on failover</td></tr>
+      <tr><td>Every message and state change</td><td>Append-only log (Kafka), then cold storage</td><td>Audit, disputes and replay for years</td></tr>
+      <tr><td>Timers</td><td>Timer wheel in memory, backed by <code>due_at</code> on the transaction row</td><td>50k open transactions at peak; a restarted node reloads its due timers</td></tr>
+      <tr><td>Handle → PSP, IFSC prefix → bank</td><td>Small tables cached in memory on every node</td><td>Read on every payment, changed rarely</td></tr>
+      <tr><td>Settlement positions</td><td>Per bank per cycle counters, rebuilt from the log</td><td>Must equal the sum of final statuses</td></tr>
+      <tr><td>Bank and PSP health</td><td>Rolling counters in memory</td><td>Feeds the circuit breakers below</td></tr>
+    </tbody>
+  </table></div>
+</section>
+
+<section id="deployment">
+  <h2>Deployment and resilience</h2>
+  <ul class="tags"><li>Production</li><li><a href="api-gateways.html">Circuit breakers</a></li><li><a href="rate-limiting.html">Rate limiting</a></li></ul>
+  <ul class="plain">
+    <li><strong>Active-active data centres:</strong> at least two sites in different cities, both taking traffic. Each <code>txnId</code> belongs to one site so its state machine has one owner; the other site holds a synchronous copy and takes over on failure.</li>
+    <li><strong>Per-bank circuit breakers:</strong> when a bank's timeouts jump, stop sending it new payments for a short while and fail them fast with a clear "bank unavailable" reason. Waiting 15 seconds on a dead bank just builds up open transactions.</li>
+    <li><strong>Per-bank rate limits:</strong> send each bank no more than the throughput it has declared, so one festival spike doesn't knock its core system over.</li>
+    <li><strong>Planned downtime:</strong> banks announce maintenance windows, and payments to or from them are declined up front during the window instead of timing out.</li>
+    <li><strong>Security:</strong> mutual TLS and signed messages between all parties, PIN encrypted on the device for the issuer only, device binding of the user's phone number, and limits per transaction and per day.</li>
+  </ul>
+</section>
+
+<section id="observability">
+  <h2>Observability</h2>
+  <ul class="tags"><li>Production</li><li><a href="observability.html">Monitoring</a></li></ul>
+  <div class="table"><table>
+    <thead><tr><th>Signal</th><th>Why</th><th>Alert when</th></tr></thead>
+    <tbody>
+      <tr><td>Technical decline rate per bank and per PSP</td><td>Finds the sick bank in minutes</td><td>Above 1% for 5 minutes</td></tr>
+      <tr><td>p50 / p95 / p99 latency per leg (debit, credit, resolve)</td><td>A slow tail comes before timeouts</td><td>p99 above half the timeout</td></tr>
+      <tr><td>Open transactions and timers due</td><td>Little's law in real time</td><td>Above 2× normal for this hour</td></tr>
+      <tr><td>Deemed payments not yet resolved, by age</td><td>Regulatory clock</td><td>Any older than 12 hours</td></tr>
+      <tr><td>Reversals failing</td><td>Money stuck with the payer's bank</td><td>Any repeat failure</td></tr>
+      <tr><td>Settlement totals vs sum of final statuses</td><td>The books must balance</td><td>Any difference</td></tr>
+    </tbody>
+  </table></div>
+</section>
+
+<section id="risks">
+  <h2>Risks and v2</h2>
+  <ul class="tags"><li>Wrap-up</li></ul>
+  <div class="table"><table>
+    <thead><tr><th>Risk</th><th>How you detect it</th><th>Mitigation</th></tr></thead>
+    <tbody>
+      <tr><td>Double debit on retry</td><td>Two debits with one <code>txnId</code> in recon</td><td><code>txnId</code> as a unique key at the switch and at every bank</td></tr>
+      <tr><td>Debited, never credited or refunded</td><td>Deemed payments by age</td><td>Check status, T+1 reconciliation, penalties that push banks to fix it</td></tr>
+      <tr><td>One bank's outage slows everyone</td><td>Open transactions climbing</td><td>Circuit breakers, per-bank limits, short timeouts</td></tr>
+      <tr><td>Wrong payee</td><td>Complaints</td><td>Show the payee's registered name before the PIN</td></tr>
+      <tr><td>Fraud through collect requests ("enter PIN to receive money")</td><td>Collect-request complaints</td><td>Warnings, limits on collect requests, PIN only ever sends money</td></tr>
+      <tr><td>Switch site loss</td><td>Health checks</td><td>Active-active sites with synchronous replication</td></tr>
+    </tbody>
+  </table></div>
+  <p><strong>v2 ideas:</strong> UPI Lite for small payments from an on-device balance without touching the core banking system each time; recurring mandates (AutoPay); credit lines on UPI; and cross-border links to other countries' fast payment systems.</p>
+</section>
+
+<section id="presenting">
+  <h2>Presenting it in 45 minutes</h2>
+  <ul class="tags"><li>Interview script</li></ul>
+  <div class="table"><table>
+    <thead><tr><th>Step</th><th>Time</th><th>What to cover</th></tr></thead>
+    <tbody>
+      <tr><td>1. Clarify</td><td class="num">5 min</td><td>Switch vs app, push and collect, who holds money (banks), latency, money rules</td></tr>
+      <tr><td>2. Estimate</td><td class="num">3 min</td><td>8k/s average, 25k/s peak, 250k messages/s, 50k in flight</td></tr>
+      <tr><td>3. Parties and API</td><td class="num">5 min</td><td>Payer PSP, payee PSP, remitter and beneficiary banks; ReqPay, resolve, debit, credit, check status</td></tr>
+      <tr><td>4. Draw the whole system</td><td class="num">7 min</td><td>Switch in the middle, state store, timers, reversal engine, settlement</td></tr>
+      <tr><td>5. Deep dive: debit then credit</td><td class="num">10 min</td><td>State machine, why debit first, conditional transitions</td></tr>
+      <tr><td>6. Deep dive: timeouts</td><td class="num">10 min</td><td>Debit timeout → reversal, credit timeout → deemed, check status, idempotency, T+1 recon</td></tr>
+      <tr><td>7. Risks and v2</td><td class="num">5 min</td><td>Slow banks and circuit breakers, fraud, UPI Lite</td></tr>
+    </tbody>
+  </table></div>
+  <div class="say"><p>"The switch never holds money; it runs a state machine per payment, keyed by a txnId the payer's app creates. It resolves the payee's VPA through the payee's PSP, then runs a two-step saga: debit the payer's bank first, then credit the payee's bank. Every leg has a timer. A debit timeout triggers a reversal, because undoing a debit that may not have happened is safe. A credit timeout becomes a deemed success, because the payee may already have the money; we chase it with check status and settle it in reconciliation by T+1. Every bank dedupes on the txnId, so retries and check status are safe. Money between banks settles later in net amounts per cycle, and reconciliation against those files is the final safety net."</p></div>
+</section>
+
+<section id="numbers">
+  <h2>Numbers to remember</h2>
+  <ul class="tags"><li>Cheat sheet</li></ul>
+  <div class="table"><table><tbody>
+    <tr><td>700M payments a day</td><td class="num">≈ 8,100 a second, ~25k at peak</td></tr>
+    <tr><td>Messages per payment</td><td class="num">~10</td></tr>
+    <tr><td>Payments in flight at peak</td><td class="num">25k/s × 2 s ≈ 50k</td></tr>
+    <tr><td>Typical payment</td><td class="num">2–5 s end to end</td></tr>
+    <tr><td>Timeout per request</td><td class="num">~15 s (cut from 30 s in 2025)</td></tr>
+    <tr><td>Debited, not credited</td><td class="num">fixed by T+1, or the bank pays compensation</td></tr>
+    <tr><td>Ids</td><td class="num">txnId from the payer PSP, 12-digit RRN</td></tr>
+  </tbody></table></div>
+</section>
+  </article>
+</div>
+</main>
+
+<footer class="site"><div class="wrap">Part of Classic System Design, a companion to the <a href="https://devlcodes.github.io/agentic-ai-notebook/system-design/index.html">agentic system designs</a>. The 3D views use Three.js loaded from a CDN, so they need a connection; the text and tables cover the same ground. Figures marked illustrative show the shape of a system, not measured numbers. Check vendor docs before relying on a specific product limit.</div></footer>
+<script>
+(function(){
+  var $ = function(id){ return document.getElementById(id); };
+  var MED = [0.2, 0.3, 0.5, 0.8, 1.2, 2, 3, 5, 8], DAY = 700e6, PEAK = 25000, DECL = 0.003, OVER = 0.4;
+  var S = 0.9, T = 8;
+  function erf(x){ var s = x < 0 ? -1 : 1; x = Math.abs(x); var t = 1 / (1 + 0.3275911 * x); var y = 1 - (((((1.061405429 * t - 1.453152027) * t) + 1.421413741) * t - 0.284496736) * t + 0.254829592) * t * Math.exp(-x * x); return s * y; }
+  function Phi(z){ return 0.5 * (1 + erf(z / Math.SQRT2)); }
+  function late(m){ return 1 - Phi(Math.log(T / m) / S); }
+  function meanCapped(m){ return m * Math.exp(S * S / 2) * Phi((Math.log(T / m) - S * S) / S) + T * late(m); }
+  function fmt(n){ if (n >= 1e6) return +(n/1e6).toFixed(n < 1e7 ? 1 : 0) + 'M'; if (n >= 1e3) return +(n/1e3).toFixed(n < 1e4 ? 1 : 0) + 'k'; return String(Math.round(n)); }
+  function pct(p){ if (p === 0) return '0%'; if (p < 0.0001) return '<0.01%'; return +(p * 100).toFixed(p < 0.01 ? 2 : 1) + '%'; }
+  function sec(s){ return s < 1 ? Math.round(s * 1000) + ' ms' : +s.toFixed(s < 10 ? 1 : 0) + ' s'; }
+  function run(){
+    var md = MED[+$('up-d').value], mc = MED[+$('up-c').value];
+    $('up-d-o').textContent = sec(md); $('up-c-o').textContent = sec(mc);
+    var pd = late(md), ok = 1 - pd, pc = late(mc);
+    var deemed = ok * pc, revC = ok * (1 - pc) * DECL, good = ok * (1 - pc) * (1 - DECL);
+    var rev = pd + revC, tech = pd + deemed;
+    var wait = OVER + meanCapped(md) + ok * meanCapped(mc), open = PEAK * wait;
+    var rows = [['Paid', good, 'var(--c-ok)'], ['Pending (deemed)', deemed, 'var(--c-serve)'], ['Reversed: debit timed out', pd, 'var(--c-dlq)'], ['Reversed: credit declined', revC, 'var(--c-cross)']];
+    $('up-bars').innerHTML = '<p class="lab-k" style="margin:0">Share of payments · problem bars full at 5%</p>' + rows.map(function(r, i){
+      var w = i === 0 ? r[1] * 100 : Math.min(100, r[1] / 0.05 * 100);
+      return '<div class="bar-row"><span>' + r[0] + '</span><span class="bar"><i style="width:' + w.toFixed(1) + '%;background:' + r[2] + '"></i></span><span class="v">' + pct(r[1]) + '</span></div>';
+    }).join('');
+    $('up-m').innerHTML = '<div class="metric"><span class="n"' + (tech > 0.01 ? ' style="color:var(--c-dlq)"' : '') + '>' + pct(tech) + '</span><span class="l">hit a timeout</span><small>' + fmt(tech * DAY) + ' payments a day</small></div>' +
+      '<div class="metric"><span class="n">' + fmt(deemed * DAY) + '</span><span class="l">pending a day</span><small>debited, credit unknown; fix by T+1</small></div>' +
+      '<div class="metric"><span class="n">' + fmt(rev * DAY) + '</span><span class="l">reversals a day</span></div>' +
+      '<div class="metric"><span class="n">' + sec(wait) + '</span><span class="l">average wait</span></div>' +
+      '<div class="metric"><span class="n"' + (open > 150000 ? ' style="color:var(--c-dlq)"' : '') + '>' + fmt(open) + '</span><span class="l">open at peak</span><small>25k/s × average wait</small></div>';
+    var worse = pd >= pc ? 'payer\'s bank, so most problems are reversals: the money was maybe taken, so the switch asks for it back' : 'payee\'s bank, so most problems are pending payments: the payer was debited and nobody knows yet whether the payee got it';
+    var msg;
+    if (tech > 0.02) msg = 'Too many timeouts: ' + pct(tech) + ' of payments (' + fmt(tech * DAY) + ' a day). The slower side is the ' + worse + '. A longer timeout helps only if the bank is slow but alive; if it is overloaded, a circuit breaker and a clear "bank unavailable" are better.';
+    else if (open > 150000) msg = 'Few timeouts, but at an average of ' + sec(wait) + ' the switch holds ' + fmt(open) + ' payments open at peak and users stand at the counter. Faster banks fix this; a longer timeout does not.';
+    else if (tech > 0.005) msg = 'Workable but visible: ' + fmt(tech * DAY) + ' payments a day hit a timeout. The slower side is the ' + worse + '.';
+    else msg = 'Healthy: ' + pct(good) + ' of payments finish first time in about ' + sec(wait) + ' on average, with ' + fmt(deemed * DAY) + ' pending a day for check status and reconciliation to clear.';
+    if (T >= 15 && tech <= 0.02 && open <= 150000) msg += ' Try 5 s: a shorter timeout fails slow payments faster, so the user can retry, but it turns more slow successes into reversals and pending payments.';
+    $('up-out').textContent = msg;
+  }
+  function seg(id, set){ $(id).addEventListener('click', function(e){ var b = e.target.closest('button'); if (!b) return; set(+b.dataset.v); this.querySelectorAll('button').forEach(function(x){ x.setAttribute('aria-pressed', x === b); }); run(); }); }
+  seg('up-s', function(v){ S = v; }); seg('up-t', function(v){ T = v; });
+  ['up-d','up-c'].forEach(function(id){ $(id).addEventListener('input', run); });
+  run();
+})();
+</script>
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+  }
+}
+</script>
+<script type="module">
+import { boot } from './assets/scene3d.js';
+const D = {};
+D.hero = {
+  hero: true,
+  loop: 15,
+  view: { target: [-0.5, 0, 0], w: 31, d: 20, el: 52 },
+  steps: [
+    { t: 0.0, text: 'Asha pays ravi@ybl ₹640 and enters her PIN. Her app\'s PSP creates a unique txnId; the PIN is encrypted on the phone so only her bank can read it.' },
+    { t: 1.4, text: 'The payer PSP sends ReqPay with the txnId to the UPI switch, which stores the transaction as INITIATED and starts a timer.' },
+    { t: 2.8, text: 'The switch asks the PSP that owns @ybl who ravi@ybl is. It answers with Ravi\'s account number, IFSC and name.' },
+    { t: 4.8, text: 'Debit first: Asha\'s bank decrypts and checks the PIN, checks her balance and debits ₹640, keyed by the txnId.' },
+    { t: 7.4, text: 'Then credit: Ravi\'s bank credits ₹640 to his account and says SUCCESS.' },
+    { t: 10.0, text: 'The switch marks the payment SUCCESS and tells both PSPs. Both phones show it as done. The money between the two banks settles later, in a net amount.' },
+  ],
+  build(c) {
+    const { V, C, P } = c;
+    const ua = c.obj(c.SHAPES.browser(0xd7932a), -13, 4, 'Asha\'s app');
+    const pp = c.obj(c.SHAPES.server({ color: 0x8a6a2e, emi: C.serve }), -7, 4, 'Payer PSP', 'makes txnId');
+    const sw = c.obj(c.SHAPES.server({ emi: C.gov, w: 1.6, h: 1.4 }), 0, 1, 'UPI switch', 'state per txnId');
+    const qp = c.obj(c.SHAPES.server({ color: 0x8a6a2e, emi: C.serve }), 7, 4, 'Payee PSP', '@ybl → account');
+    const ur = c.obj(c.SHAPES.browser(0xd7932a), 12, 4, 'Ravi\'s app');
+    const rb = c.obj(c.SHAPES.database(C.kb, { r: 1.0, tiers: 2 }), -7, -5, 'Asha\'s bank', 'PIN · debit');
+    const bb = c.obj(c.SHAPES.database(C.kb, { r: 1.0, tiers: 2 }), 7, -5, 'Ravi\'s bank', 'credit');
+    c.lane([V(-13, 4), V(-7, 4)]);
+    c.lane([V(-7, 4), V(-3, 4), V(-3, 1), V(0, 1)]);
+    c.lane([V(0, 1), V(3, 1), V(3, 4), V(7, 4)]);
+    c.lane([V(7, 4), V(12, 4)]);
+    c.lane([V(0, 1), V(0, -2), V(-7, -2), V(-7, -5)]);
+    c.lane([V(0, -2), V(7, -2), V(7, -5)]);
+    c.packet({ pts: [V(-13, 4), V(-7, 4)], t0: 0.2, t1: 1.1, kind: 'ask', from: ua, to: pp, label: 'pay ₹640 · PIN' });
+    c.packet({ pts: [V(-7, 4), V(-3, 4), V(-3, 1), V(0, 1)], t0: 1.5, t1: 2.5, kind: 'env', to: sw, label: 'ReqPay txnId' });
+    c.packet({ pts: [V(0, 1), V(3, 1), V(3, 4), V(7, 4)], t0: 2.9, t1: 3.7, kind: 'span', to: qp, label: 'who is ravi@ybl?' });
+    c.packet({ pts: [V(7, 4), V(3, 4), V(3, 1), V(0, 1)], t0: 3.8, t1: 4.6, kind: 'span', color: P.ship, to: sw, label: 'account + IFSC' });
+    c.packet({ pts: [V(0, 1), V(0, -2), V(-7, -2), V(-7, -5)], t0: 4.9, t1: 5.9, kind: 'env', to: rb, label: 'DEBIT ₹640' });
+    c.pulse(rb, 6.0, 6.5);
+    c.packet({ pts: [V(-7, -5), V(-7, -2), V(0, -2), V(0, 1)], t0: 6.5, t1: 7.3, kind: 'span', color: P.ship, to: sw, label: 'debited' });
+    c.packet({ pts: [V(0, 1), V(0, -2), V(7, -2), V(7, -5)], t0: 7.5, t1: 8.5, kind: 'env', to: bb, label: 'CREDIT ₹640' });
+    c.pulse(bb, 8.6, 9.1);
+    c.packet({ pts: [V(7, -5), V(7, -2), V(0, -2), V(0, 1)], t0: 9.1, t1: 9.9, kind: 'span', color: P.ship, to: sw, label: 'credited' });
+    c.packet({ pts: [V(0, 1), V(-3, 1), V(-3, 4), V(-7, 4), V(-13, 4)], t0: 10.1, t1: 11.5, kind: 'env', color: P.ship, to: ua, label: 'SUCCESS' });
+    c.packet({ pts: [V(0, 1), V(3, 1), V(3, 4), V(7, 4), V(12, 4)], t0: 10.1, t1: 11.5, kind: 'env', color: P.ship, to: ur, label: 'received ₹640' });
+    c.note('instructions, not money', 0, 4.2);
+  },
+};
+D.timeout3d = {
+  loop: 20,
+  view: { target: [-2.5, 0, 0.5], w: 32, d: 18, el: 50 },
+  steps: [
+    { t: 0.0, text: 'Payment 1: the payer\'s bank debits Asha ₹500, and the switch sends the credit to Ravi\'s bank.' },
+    { t: 2.6, text: 'Ravi\'s bank doesn\'t answer before the timer runs out. The switch can\'t reverse the debit, because Ravi may already have the money. It marks the payment DEEMED; Asha sees "pending".' },
+    { t: 5.4, text: 'The switch sends a check status with the same txnId. Ravi\'s bank finds the credit it already made, so nothing is credited twice. The payment becomes SUCCESS.' },
+    { t: 8.6, text: 'Payment 2: Meera\'s ₹900 is debited, but Bank Z declines the credit because the account is frozen.' },
+    { t: 11.2, text: 'The switch sends a reversal, keyed by the original txnId, to the payer\'s bank. Meera\'s ₹900 goes back to her account within seconds.' },
+    { t: 14.0, text: 'At the end of the cycle the switch sends every bank a settlement file of final statuses. Each bank matches it against its own records; anything left over is fixed by T+1.' },
+  ],
+  build(c) {
+    const { V, C, P } = c;
+    const asha = c.obj('person', -13, -3.5, 'Asha');
+    const meera = c.obj('person', -13, 3.5, 'Meera');
+    const pb = c.obj(c.SHAPES.database(C.kb, { r: 1.0, tiers: 2 }), -6.5, 0, 'Payer\'s bank', 'debit · reversal');
+    const sw = c.obj(c.SHAPES.server({ emi: C.gov, w: 1.6, h: 1.4 }), 0.5, 0, 'UPI switch', 'timers per leg');
+    const rv = c.obj(c.SHAPES.database(C.kb, { r: 1.0 }), 8, -3.5, 'Ravi\'s bank', 'slow today');
+    const bz = c.obj(c.SHAPES.database(C.kb, { r: 1.0 }), 8, 3.5, 'Bank Z', 'account frozen');
+    const file = c.obj(c.SHAPES.sheet(), 0.5, 5.5, 'Settlement file');
+    c.lane([V(-13, -3.5), V(-9.5, -3.5), V(-9.5, 0), V(-6.5, 0)]);
+    c.lane([V(-13, 3.5), V(-9.5, 3.5), V(-9.5, 0)]);
+    c.lane([V(-6.5, 0), V(0.5, 0)]);
+    c.lane([V(0.5, 0), V(4, 0), V(4, -3.5), V(8, -3.5)]);
+    c.lane([V(4, 0), V(4, 3.5), V(8, 3.5)]);
+    c.lane([V(0.5, 0), V(0.5, 5.5)]);
+    c.packet({ pts: [V(0.5, 0), V(-6.5, 0)], t0: 0.2, t1: 0.9, kind: 'env', to: pb, label: 'DEBIT ₹500' });
+    c.packet({ pts: [V(-6.5, 0), V(0.5, 0)], t0: 1.0, t1: 1.7, kind: 'span', color: P.ship, to: sw, label: 'debited' });
+    c.packet({ pts: [V(0.5, 0), V(4, 0), V(4, -3.5), V(8, -3.5)], t0: 1.8, t1: 2.6, kind: 'env', to: rv, label: 'CREDIT ₹500' });
+    c.pulse(sw, 2.8, 4.4);
+    c.note('timer runs out → DEEMED', -3, -4.5);
+    c.packet({ pts: [V(-6.5, 0), V(-9.5, 0), V(-9.5, -3.5), V(-13, -3.5)], t0: 3.4, t1: 4.6, kind: 'span', color: P.ask, to: asha, label: 'pending' });
+    c.packet({ pts: [V(0.5, 0), V(4, 0), V(4, -3.5), V(8, -3.5)], t0: 5.5, t1: 6.3, kind: 'span', to: rv, label: 'check status txnId' });
+    c.packet({ pts: [V(8, -3.5), V(4, -3.5), V(4, 0), V(0.5, 0)], t0: 6.6, t1: 7.4, kind: 'span', color: P.ship, to: sw, label: 'already credited' });
+    c.packet({ pts: [V(-6.5, 0), V(-9.5, 0), V(-9.5, -3.5), V(-13, -3.5)], t0: 7.5, t1: 8.4, kind: 'env', color: P.ship, to: asha, label: 'SUCCESS' });
+    c.packet({ pts: [V(0.5, 0), V(-6.5, 0)], t0: 8.7, t1: 9.3, kind: 'env', to: pb, label: 'DEBIT ₹900' });
+    c.packet({ pts: [V(-6.5, 0), V(0.5, 0)], t0: 9.3, t1: 9.9, kind: 'span', color: P.ship, to: sw, label: 'debited' });
+    c.packet({ pts: [V(0.5, 0), V(4, 0), V(4, 3.5), V(8, 3.5)], t0: 10.0, t1: 10.7, kind: 'env', to: bz, label: 'CREDIT ₹900' });
+    c.packet({ pts: [V(8, 3.5), V(4, 3.5), V(4, 0), V(0.5, 0)], t0: 10.8, t1: 11.5, kind: 'span', s: 1.3, color: P.bad, to: sw, label: 'declined' });
+    c.packet({ pts: [V(0.5, 0), V(-6.5, 0)], t0: 11.7, t1: 12.5, kind: 'env', color: P.bad, to: pb, label: 'REVERSAL txnId' });
+    c.packet({ pts: [V(-6.5, 0), V(-9.5, 0), V(-9.5, 3.5), V(-13, 3.5)], t0: 12.6, t1: 13.6, kind: 'env', color: P.ship, to: meera, label: '₹900 back' });
+    c.packet({ pts: [V(0.5, 0), V(0.5, 5.5)], t0: 14.2, t1: 15.2, kind: 'doc', to: file, label: 'final statuses' });
+    c.pulse(file, 15.3, 16.2);
+  },
+};
+
+boot(D);
+</script>

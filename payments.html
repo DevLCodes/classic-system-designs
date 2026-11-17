@@ -364,7 +364,7 @@ POST /webhooks/psp               // processor → us, signed</code></pre>
 
 <section id="idempotency">
   <h2>Idempotency and the unknown state</h2>
-  <ul class="tags"><li>Deep dive 1</li><li><a href="queues.html">Exactly-once</a></li></ul>
+  <ul class="tags"><li>Deep dive 1</li><li><a href="queues.html">Exactly-once</a></li><li><a href="upi.html#timeouts">UPI timeouts</a></li></ul>
   <p class="lead">The most dangerous moment in payments: you asked the processor to charge a card, and the connection timed out. Did it charge or not?</p>
   <p>A timeout doesn't mean failure. The request may have succeeded with only the response lost. Retrying blindly can charge twice, and giving up can leave a charge with no order. Three tools handle it:</p>
   <ol class="plain">
@@ -460,7 +460,7 @@ COMMIT;
 
 <section id="reconciliation">
   <h2>Reconciliation</h2>
-  <ul class="tags"><li>Proof</li></ul>
+  <ul class="tags"><li>Proof</li><li><a href="upi.html#recon">UPI settlement</a></li></ul>
   <p class="lead">Your records, the processor's records and the bank's records must agree. Reconciliation finds out, every day, where they don't.</p>
   <ul class="plain">
     <li><strong>Inputs:</strong> the processor's settlement report (every captured, refunded and charged-back transaction with fees) and bank statements for payouts.</li>
