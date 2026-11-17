@@ -364,7 +364,7 @@ GET /api/links/{code}/stats?from=…&amp;to=…   (owner only)
 
 <section id="codes">
   <h2>Generating short codes</h2>
-  <ul class="tags"><li>Deep dive 1</li><li><a href="sharding.html">Keys and hashing</a></li></ul>
+  <ul class="tags"><li>Deep dive 1</li><li><a href="sharding.html">Keys and hashing</a></li><li><a href="unique-ids.html">Unique IDs</a></li></ul>
   <p class="lead">The core question: how do many API servers hand out codes that are short, never collide, and can't be guessed in order?</p>
   <p>Codes use <strong>base62</strong> (a–z, A–Z, 0–9). Seven characters give 62⁷ ≈ 3.5 trillion codes, nearly 600 times the 6 billion we need in five years.</p>
   <div class="table"><table>
