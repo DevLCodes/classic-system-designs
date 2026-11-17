@@ -357,7 +357,7 @@ GET /api/streams/{id}/comments?before=c_77&amp;limit=50   (history on open)</cod
 
 <section id="push">
   <h2>Push, not poll</h2>
-  <ul class="tags"><li>Deep dive 1</li><li><a href="protocols.html#push">Polling vs push</a></li></ul>
+  <ul class="tags"><li>Deep dive 1</li><li><a href="protocols.html#push">Polling vs push</a></li><li><a href="stock-trading.html#marketdata">Live stock prices</a></li></ul>
   <p class="lead">Facebook first tried polling for new comments and dropped it: to feel live, every page would need to poll every few seconds, and the request rate would dwarf the actual comments.</p>
   <p>With 50M viewers polling every 5 seconds, that is 10M requests a second, nearly all answering "nothing new", and comments still arrive 2.5 seconds late on average. Pushing over an open connection sends only real updates, as soon as they exist. The cost is state: someone must hold 50M connections and know which ones care about each stream.</p>
   <div class="table"><table>
