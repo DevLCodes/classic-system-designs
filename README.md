@@ -18,14 +18,15 @@ Interactive pages on how large web systems are built, before any AI is involved:
 10. [Sharding and consistent hashing](https://devlcodes.github.io/classic-system-designs/sharding.html)
 11. [Hot partitions and write buffering](https://devlcodes.github.io/classic-system-designs/hot-partitions.html)
 12. [Unique IDs and sequencers](https://devlcodes.github.io/classic-system-designs/unique-ids.html)
-13. [Message queues and streams](https://devlcodes.github.io/classic-system-designs/queues.html)
-14. [Consistency and CAP](https://devlcodes.github.io/classic-system-designs/consistency.html)
-15. [Consensus with Raft](https://devlcodes.github.io/classic-system-designs/raft.html)
-16. [Merkle trees](https://devlcodes.github.io/classic-system-designs/merkle-trees.html)
-17. [Cassandra vs CockroachDB](https://devlcodes.github.io/classic-system-designs/cassandra-vs-cockroachdb.html)
-18. [Monitoring, logging and tracing](https://devlcodes.github.io/classic-system-designs/observability.html)
-19. [Numbers to know](https://devlcodes.github.io/classic-system-designs/numbers.html)
-20. [Threads, locks and wait/notify](https://devlcodes.github.io/classic-system-designs/threads.html)
+13. [Object storage](https://devlcodes.github.io/classic-system-designs/object-storage.html)
+14. [Message queues and streams](https://devlcodes.github.io/classic-system-designs/queues.html)
+15. [Consistency and CAP](https://devlcodes.github.io/classic-system-designs/consistency.html)
+16. [Consensus with Raft](https://devlcodes.github.io/classic-system-designs/raft.html)
+17. [Merkle trees](https://devlcodes.github.io/classic-system-designs/merkle-trees.html)
+18. [Cassandra vs CockroachDB](https://devlcodes.github.io/classic-system-designs/cassandra-vs-cockroachdb.html)
+19. [Monitoring, logging and tracing](https://devlcodes.github.io/classic-system-designs/observability.html)
+20. [Numbers to know](https://devlcodes.github.io/classic-system-designs/numbers.html)
+21. [Threads, locks and wait/notify](https://devlcodes.github.io/classic-system-designs/threads.html)
 
 ## Worked designs
 
