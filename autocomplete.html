@@ -1,0 +1,718 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Search Autocomplete · Classic System Design</title>
+<meta name="description" content="Design search autocomplete: top-k suggestions per prefix from a trie, offline aggregation of query logs, caching at the edge and in the browser, trending terms, personalization and filtering.">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700&family=Instrument+Sans:ital,wght@0,400;0,500;0,600;1,400&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+  /* Layout: a slim site bar, then either a card grid (home), a sticky contents rail + reading column (articles), or a filterable term list (glossary). Light, single look. */
+  :root {
+    color-scheme: light;
+    --bg: #e9ecef; --paper: #f7f8f9; --ink: #1c2530; --muted: #586473; --line: #cdd4dc; --line-strong: #9aa5b1;
+    --accent: #4255d4; --accent-ink: #ffffff; --track: #d3d9e0; --code-bg: #eef1f4; --wire: #7d8996;
+    --c-ingest: #2a9d8f; --c-kb: #4d5fd8; --c-serve: #d7932a; --c-model: #e2674f; --c-gov: #b2456e; --c-cross: #4a5562; --c-dlq: #b23a3a; --c-ok: #2f8f5b;
+    --t-src: #e4e8ec; --t-ingest: #d8eeea; --t-kb: #dfe3fa; --t-serve: #f8ead2; --t-model: #fbe1da; --t-gov: #f3dde6; --t-cross: #dfe2e6; --t-dlq: #f6dddb;
+    --font-display: "Bricolage Grotesque", "Avenir Next", "Segoe UI", system-ui, sans-serif;
+    --font-body: "Instrument Sans", "Helvetica Neue", "Segoe UI", system-ui, sans-serif;
+    --font-mono: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  @media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
+  body { margin: 0; background: var(--bg); color: var(--ink); font-family: var(--font-body); font-size: 16px; line-height: 1.6; }
+  a { color: var(--accent); }
+  .wrap { max-width: 1240px; margin: 0 auto; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
+
+  .sitebar { border-bottom: 1px solid var(--line); background: var(--paper); }
+  .sitebar .wrap { display: flex; align-items: center; gap: 18px; flex-wrap: wrap; padding-block: 12px; }
+  .brand { font-family: var(--font-display); font-weight: 700; font-size: 17px; color: var(--ink); text-decoration: none; margin-right: auto; }
+  .sitebar nav { display: flex; gap: 16px; flex-wrap: wrap; font-size: 14px; }
+  .sitebar nav a { color: var(--muted); text-decoration: none; }
+  .sitebar nav a:hover, .sitebar nav a[aria-current="page"] { color: var(--ink); }
+  .sitebar nav a[aria-current="page"] { font-weight: 600; }
+
+  .intro { padding-block: 40px 8px; display: grid; gap: 10px; max-width: 820px; }
+  .eyebrow { margin: 0; font-family: var(--font-mono); font-size: 12px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+  h1 { margin: 0; font-family: var(--font-display); font-weight: 700; font-size: clamp(30px, 5vw, 46px); line-height: 1.05; text-wrap: balance; }
+  .intro .lead { font-size: 18px; margin: 0; }
+
+  .doc { display: grid; grid-template-columns: 220px minmax(0, 1fr); gap: 48px; padding-block: 36px 72px; }
+  .toc { position: sticky; top: calc(env(safe-area-inset-top, 0px) + 20px); align-self: start; }
+  .toc p { margin: 0 0 8px; font-family: var(--font-mono); font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+  .toc ol { margin: 0; padding: 0; list-style: none; display: grid; gap: 2px; counter-reset: toc; }
+  .toc li { counter-increment: toc; }
+  .toc a { display: flex; gap: 8px; padding: 3px 0; font-size: 14px; color: var(--muted); text-decoration: none; }
+  .toc a::before { content: counter(toc, decimal-leading-zero); font-family: var(--font-mono); font-size: 11.5px; padding-top: 2px; color: var(--line-strong); }
+  .toc a:hover { color: var(--ink); }
+  article { min-width: 0; max-width: 760px; }
+  section { padding-bottom: 36px; margin-bottom: 36px; border-bottom: 1px solid var(--line); scroll-margin-top: 20px; }
+  section:last-child { border-bottom: 0; }
+  h2 { margin: 0 0 10px; font-family: var(--font-display); font-weight: 700; font-size: 28px; line-height: 1.15; text-wrap: balance; }
+  h3 { margin: 26px 0 6px; font-family: var(--font-display); font-weight: 600; font-size: 19px; line-height: 1.25; }
+  p { margin: 0 0 14px; }
+  .lead { font-size: 18px; }
+  ul.plain, ol.plain { margin: 0 0 16px; padding-left: 22px; display: grid; gap: 6px; }
+  code { font-family: var(--font-mono); font-size: 0.88em; background: var(--code-bg); padding: 1px 5px; border-radius: 4px; }
+  pre { margin: 0 0 16px; padding: 14px 16px; background: var(--code-bg); border-radius: 10px; overflow-x: auto; font-size: 13px; line-height: 1.55; }
+  pre code { background: none; padding: 0; font-size: inherit; }
+  .table { overflow-x: auto; margin: 0 0 18px; }
+  table { width: 100%; border-collapse: collapse; font-size: 14.5px; line-height: 1.45; }
+  th, td { text-align: left; vertical-align: top; padding: 8px 10px; border-bottom: 1px solid var(--line); }
+  th { font-family: var(--font-mono); font-size: 11.5px; font-weight: 500; letter-spacing: .05em; text-transform: uppercase; color: var(--muted); }
+  td.num { font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .note { border-left: 3px solid var(--accent); background: var(--paper); padding: 12px 16px; border-radius: 0 10px 10px 0; margin: 0 0 18px; }
+  .note p:last-child { margin: 0; }
+  .formula { font-family: var(--font-mono); font-size: 14px; background: var(--paper); border: 1px solid var(--line); border-radius: 10px; padding: 12px 16px; margin: 0 0 16px; overflow-x: auto; white-space: nowrap; }
+  .related { display: flex; flex-wrap: wrap; gap: 8px; margin: 0; padding: 0; list-style: none; }
+  .related a { display: inline-block; padding: 4px 12px; border: 1px solid var(--line); border-radius: 999px; font-size: 14px; color: var(--ink); text-decoration: none; background: var(--paper); }
+  .related a:hover { border-color: var(--ink); }
+  .pager { display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; font-size: 14px; }
+  footer.site { border-top: 1px solid var(--line); padding-block: 20px 40px; font-size: 13px; color: var(--muted); }
+  a:focus-visible, input:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+  /* home */
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 16px; margin: 0 0 40px; padding: 0; list-style: none; }
+  .card { display: grid; gap: 8px; height: 100%; padding: 18px; background: var(--paper); border: 1px solid var(--line); border-radius: 14px; color: var(--ink); text-decoration: none; }
+  .card:hover { border-color: var(--ink); }
+  .card .k { font-family: var(--font-mono); font-size: 11px; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
+  .card h3 { margin: 0; font-size: 20px; }
+  .card p { margin: 0; font-size: 14.5px; color: var(--muted); }
+  .card svg { width: 100%; height: auto; display: block; }
+  .card.feature svg { max-width: 420px; justify-self: center; }
+  .card.feature { grid-column: 1 / -1; grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr); align-items: center; gap: 24px; }
+  .home-h { margin: 28px 0 12px; font-family: var(--font-display); font-size: 24px; }
+
+  /* glossary */
+  .gl-tools { position: sticky; top: 0; z-index: 2; background: var(--bg); padding-block: 12px; display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+  .gl-tools input { flex: 1 1 260px; min-width: 0; font: 15px var(--font-body); padding: 9px 12px; border-radius: 10px; border: 1px solid var(--line-strong); background: #fff; color: var(--ink); }
+  .gl-letters { display: flex; flex-wrap: wrap; gap: 4px; font-family: var(--font-mono); font-size: 13px; }
+  .gl-letters a { padding: 2px 6px; border-radius: 6px; text-decoration: none; color: var(--muted); }
+  .gl-letters a:hover { background: var(--paper); color: var(--ink); }
+  .gl { max-width: 860px; }
+  .gl-item { margin: 0; }
+  .gl-item { display: grid; grid-template-columns: 220px minmax(0, 1fr); gap: 16px; padding: 12px 0; border-bottom: 1px solid var(--line); scroll-margin-top: 70px; }
+  .gl-item dt { font-weight: 600; }
+  .gl-item dt small { display: block; font-weight: 400; font-family: var(--font-mono); font-size: 11px; color: var(--muted); letter-spacing: .04em; text-transform: uppercase; margin-top: 2px; }
+  .gl-item dd { margin: 0; }
+  .gl-item dd .see { font-size: 13.5px; }
+  .gl-letter { margin: 26px 0 4px; font-family: var(--font-display); font-size: 22px; scroll-margin-top: 70px; }
+
+  @media (max-width: 900px) {
+    .doc { grid-template-columns: minmax(0, 1fr); gap: 24px; padding-block: 28px 56px; }
+    .toc { position: static; }
+    .toc ol { grid-template-columns: repeat(2, minmax(0, 1fr)); column-gap: 12px; }
+    .card.feature { grid-template-columns: minmax(0, 1fr); }
+  }
+  @media (max-width: 640px) {
+    .gl-item { grid-template-columns: minmax(0, 1fr); gap: 4px; }
+    h2 { font-size: 24px; }
+    .intro .lead, .lead { font-size: 16.5px; }
+  }
+
+  /* diagrams */
+  .fig { margin: 6px 0 24px; overflow-x: auto; }
+  .fig svg { display: block; width: 100%; height: auto; min-width: 600px; }
+  .fig figcaption { margin-top: 8px; font-size: 13px; line-height: 1.45; color: var(--muted); }
+  .dg text { font-family: var(--font-body); font-size: 13px; fill: var(--ink); }
+  .dg .sm { font-size: 11.5px; fill: var(--muted); }
+  .dg .small { font-size: 12px; }
+  .dg .b { font-weight: 600; }
+  .dg .mono { font-family: var(--font-mono); }
+  .dg .it { font-style: italic; }
+  .dg .mute { fill: var(--muted); }
+  .dg .gov { fill: var(--c-gov); font-weight: 600; }
+  .dg .okt { fill: var(--c-ok); font-weight: 600; }
+  .dg .bad { fill: var(--c-dlq); font-weight: 600; }
+  .dg .cap { font-family: var(--font-mono); font-size: 11px; letter-spacing: .06em; fill: var(--muted); }
+  .dg .big { font-family: var(--font-display); font-size: 30px; font-weight: 700; fill: var(--ink); }
+  .dg .box { fill: var(--paper); stroke: var(--line-strong); stroke-width: 1.25; }
+  .dg .ghost { fill: none; stroke: var(--line-strong); stroke-width: 1.25; stroke-dasharray: 5 5; }
+  .dg .track { fill: var(--track); }
+  .dg .rule { stroke: var(--line); stroke-width: 1; }
+  .dg .axis { stroke: var(--line-strong); stroke-width: 1.25; }
+  .dg .wire { fill: none; stroke: var(--wire); stroke-width: 1.4; }
+  .dg .wire.dash { stroke-dasharray: 4 4; }
+  .dg .wire.hot { stroke: var(--accent); stroke-width: 2; }
+  .dg .wire.red { stroke: var(--c-dlq); }
+  .dg .ah { fill: var(--wire); }
+  .dg .xmark { stroke: var(--c-dlq); stroke-width: 1.8; fill: none; }
+  .dg .tick { stroke: var(--c-ok); stroke-width: 2; fill: none; }
+  .dg .k-src { fill: var(--t-src); stroke: #8795a3; stroke-width: 1.5; }
+  .dg .k-ingest { fill: var(--t-ingest); stroke: var(--c-ingest); stroke-width: 1.5; }
+  .dg .k-kb { fill: var(--t-kb); stroke: var(--c-kb); stroke-width: 1.5; }
+  .dg .k-serve { fill: var(--t-serve); stroke: var(--c-serve); stroke-width: 1.5; }
+  .dg .k-model { fill: var(--t-model); stroke: var(--c-model); stroke-width: 1.5; }
+  .dg .k-gov { fill: var(--t-gov); stroke: var(--c-gov); stroke-width: 1.5; }
+  .dg .k-cross { fill: var(--t-cross); stroke: var(--c-cross); stroke-width: 1.5; }
+  .dg .k-dlq { fill: var(--t-dlq); stroke: var(--c-dlq); stroke-width: 1.5; }
+  .dg .k-user { fill: #ffffff; stroke: var(--line-strong); stroke-width: 1.5; }
+  .dg .f-serve { fill: var(--c-serve); } .dg .f-kb { fill: var(--c-kb); } .dg .f-model { fill: var(--c-model); } .dg .f-gov { fill: var(--c-gov); } .dg .f-ingest { fill: var(--c-ingest); } .dg .f-cross { fill: #b8c0c9; } .dg .f-dlq { fill: var(--c-dlq); } .dg .f-ok { fill: var(--c-ok); }
+  .dg .cell { fill: var(--paper); stroke: var(--line-strong); stroke-width: 1; }
+  .dg .cell.hot { fill: var(--t-ingest); stroke: var(--c-ingest); stroke-width: 1.5; }
+  .dg .cell.old { fill: var(--t-kb); stroke: var(--c-kb); }
+  .dg .cell.new { fill: var(--t-ingest); stroke: var(--c-ingest); stroke-width: 1.5; }
+  .dg .cell.gone { fill: var(--paper); stroke: var(--line); }
+  .dg .dot-hr { fill: var(--c-gov); } .dg .dot-it { fill: var(--c-kb); } .dg .dot-eng { fill: var(--c-ingest); } .dg .dot-q { fill: var(--c-serve); stroke: var(--ink); stroke-width: 1.5; }
+  .dg .halo { fill: none; stroke: var(--c-serve); stroke-width: 1.5; stroke-dasharray: 4 4; }
+  .dg .zone { fill: var(--paper); stroke: var(--line); stroke-width: 1; }
+</style>
+
+<style>
+  .lab { margin: 6px 0 26px; padding: 14px 16px 16px; background: var(--paper); border: 1px solid var(--line); border-radius: 14px; }
+  .lab-row { display: flex; flex-wrap: wrap; gap: 10px 18px; align-items: center; margin: 0 0 12px; }
+  .lab-k { font-family: var(--font-mono); font-size: 11px; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
+  .lab label { display: inline-flex; gap: 8px; align-items: center; font-size: 14px; }
+  .lab input[type=range] { width: 150px; accent-color: var(--accent); }
+  .lab input[type=checkbox] { width: 16px; height: 16px; accent-color: var(--accent); }
+  .lab input[type=text] { flex: 1 1 260px; min-width: 0; font: 15px var(--font-body); padding: 8px 11px; border-radius: 9px; border: 1px solid var(--line-strong); background: #fff; color: var(--ink); }
+  .lab output { font-family: var(--font-mono); font-size: 12.5px; min-width: 6ch; font-variant-numeric: tabular-nums; }
+  .seg { display: inline-flex; flex-wrap: wrap; gap: 6px; }
+  .seg button, .chips button { font: 600 13px var(--font-body); color: var(--ink); background: #fff; border: 1px solid var(--line); border-radius: 8px; padding: 6px 12px; cursor: pointer; }
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; }
+  .chips button { font-weight: 500; border-radius: 999px; padding: 4px 11px; font-size: 13px; }
+  .seg button:hover, .chips button:hover { border-color: var(--ink); }
+  .seg button[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+  .seg button:focus-visible, .chips button:focus-visible, .lab input:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .lab-out { margin: 12px 0 0; padding: 10px 12px; background: #fff; border: 1px solid var(--line); border-radius: 10px; font-size: 14.5px; line-height: 1.5; font-variant-numeric: tabular-nums; }
+  .chunks { display: grid; gap: 8px; max-height: 470px; overflow: auto; padding-right: 4px; }
+  .chunk { min-width: 0; padding: 8px 11px; background: #fff; border: 1px solid var(--line); border-left: 4px solid var(--c-kb); border-radius: 8px; font-size: 14px; line-height: 1.5; overflow-wrap: anywhere; }
+  .chunk:nth-child(even) { border-left-color: var(--c-ingest); }
+  .chunk.ans { box-shadow: 0 0 0 2px var(--c-serve); }
+  .chunk .ch { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-bottom: 4px; font-family: var(--font-mono); font-size: 11px; color: var(--muted); }
+  .chunk .pfx { display: block; font-family: var(--font-mono); font-size: 11.5px; color: var(--c-kb); }
+  .chunk .ov { background: var(--track); border-radius: 3px; }
+  .chunk mark { background: #ffe9b3; border-radius: 3px; padding: 0 2px; }
+  .chunk table { width: auto; font-size: 13px; margin: 4px 0; }
+  .chunk td { padding: 2px 10px 2px 0; border-bottom: 1px solid var(--line); }
+  .badge { display: inline-block; padding: 0 7px; border-radius: 999px; border: 1px solid; font-family: var(--font-mono); font-size: 10.5px; line-height: 1.6; }
+  .badge.bad { color: var(--c-dlq); border-color: var(--c-dlq); background: var(--t-dlq); }
+  .badge.ok { color: var(--c-ok); border-color: var(--c-ok); background: #e3f3ea; }
+  .badge.info { color: var(--c-kb); border-color: var(--c-kb); background: var(--t-kb); }
+  .bars { display: grid; gap: 8px; margin: 4px 0 0; }
+  .bar-row { display: grid; grid-template-columns: minmax(0, 150px) minmax(0, 1fr) 46px; gap: 10px; align-items: center; font-size: 14px; }
+  .bar { position: relative; height: 14px; border-radius: 7px; background: var(--track); }
+  .bar i { position: absolute; inset: 0 auto 0 0; border-radius: 7px; background: var(--c-kb); transition: width .3s; }
+  .bar b { position: absolute; top: -4px; bottom: -4px; width: 2px; background: var(--c-dlq); }
+  .bar-row .v { font-family: var(--font-mono); font-size: 12.5px; text-align: right; }
+  .stages { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 10px; padding: 0; list-style: none; font-size: 13px; }
+  .stages li { padding: 2px 10px; border-radius: 999px; border: 1px solid var(--line); color: var(--muted); background: #fff; }
+  .stages li.hit { border-color: var(--accent); color: var(--accent-ink); background: var(--accent); }
+  .stages li.skip { text-decoration: line-through; }
+  .rlist { display: grid; gap: 6px; margin: 0; padding: 0; list-style: none; counter-reset: r; }
+  .rlist li { counter-increment: r; display: grid; grid-template-columns: 28px minmax(0, 1fr) auto; gap: 10px; align-items: center; padding: 6px 10px; background: #fff; border: 1px solid var(--line); border-radius: 8px; font-size: 14px; }
+  .rlist li::before { content: counter(r); font-family: var(--font-mono); font-size: 12px; color: var(--muted); }
+  .rlist li.rel { border-color: var(--c-ok); background: #f0f8f3; }
+  .rlist button { font: 600 12px var(--font-body); padding: 3px 10px; border-radius: 999px; border: 1px solid var(--line-strong); background: #fff; color: var(--ink); cursor: pointer; white-space: nowrap; }
+  .rlist li.rel button { background: var(--c-ok); border-color: var(--c-ok); color: #fff; }
+  .metrics { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 8px; margin: 12px 0 0; }
+  .metric { padding: 8px 10px; background: #fff; border: 1px solid var(--line); border-radius: 10px; }
+  .metric .n { display: block; font-family: var(--font-display); font-size: 24px; font-weight: 700; font-variant-numeric: tabular-nums; }
+  .metric .l { font-family: var(--font-mono); font-size: 11px; letter-spacing: .04em; text-transform: uppercase; color: var(--muted); }
+  .metric small { display: block; font-size: 12px; color: var(--muted); line-height: 1.35; margin-top: 2px; }
+  td.pass { color: var(--c-ok); font-weight: 600; } td.fail { color: var(--c-dlq); font-weight: 600; }
+  .say { border-left: 3px solid var(--c-serve); background: var(--paper); padding: 12px 16px; border-radius: 0 10px 10px 0; margin: 0 0 16px; font-size: 15.5px; }
+  .say p:last-child { margin: 0; }
+</style>
+
+<style>
+  .lab-chart { display: block; width: 100%; height: auto; margin: 4px 0 0; }
+  .lab-chart text { font-family: var(--font-body); font-size: 12px; fill: var(--muted); }
+  .grid-cells { display: grid; gap: 4px; }
+  .srv { display: grid; grid-template-columns: 92px minmax(0,1fr) 70px; gap: 10px; align-items: center; font-size: 14px; }
+  .muted { color: var(--muted); }
+  .lab select { font: 14px var(--font-body); padding: 6px 8px; border-radius: 8px; border: 1px solid var(--line-strong); background: #fff; color: var(--ink); }
+  .lab input[type=number] { width: 9ch; font: 14px var(--font-mono); padding: 6px 8px; border-radius: 8px; border: 1px solid var(--line-strong); background: #fff; color: var(--ink); }
+</style><style>
+  .prompt { margin: 0; font-size: 18px; line-height: 1.5; color: var(--ink); }
+  .prompt q { font-style: italic; }
+  .legend { display: flex; flex-wrap: wrap; gap: 6px 14px; margin: 4px 0 0; padding: 0; list-style: none; font-size: 13px; color: var(--muted); }
+  .legend li { display: flex; align-items: center; gap: 6px; }
+  .legend i { width: 11px; height: 11px; border-radius: 3px; display: inline-block; }
+  .tags { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 16px; padding: 0; list-style: none; }
+  .tags li { font-family: var(--font-mono); font-size: 11px; letter-spacing: .04em; padding: 2px 8px; border-radius: 6px; border: 1px solid var(--line); color: var(--muted); }
+  @media (max-width: 640px) { .prompt { font-size: 16.5px; } }
+</style>
+<link rel="stylesheet" href="assets/scene3d.css">
+<body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs><marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" class="ah" style="fill:#7d8996"/></marker></defs></svg>
+<header class="sitebar"><div class="wrap"><a class="brand" href="index.html">Classic System Design</a><nav aria-label="Site"><a href="index.html">Home</a><a href="index.html#blocks">Building blocks</a><a href="index.html#designs" aria-current="page">Designs</a><a href="https://devlcodes.github.io/agentic-ai-notebook/system-design/index.html">Agentic designs ↗</a></nav></div></header>
+<main>
+<header class="wrap"><div class="intro"><p class="eyebrow">Classic system design walkthrough</p><h1>Search Autocomplete</h1><p class="prompt"><q>Design the suggestion box under a search bar: as the user types, show the 10 most likely completions of what they have typed so far. Plan for 500 million daily users, 5 billion searches a day, and an answer fast enough to keep up with typing. Breaking news should show up within minutes, and nothing offensive or private should ever be suggested.</q></p><ul class="legend" aria-label="Colour key"><li><i style="background:var(--c-serve)"></i>Serving path</li><li><i style="background:var(--c-kb)"></i>Storage</li><li><i style="background:var(--c-ingest)"></i>Offline and streaming jobs</li><li><i style="background:var(--c-cross)"></i>Events</li><li><i style="background:var(--c-gov)"></i>Filtering</li></ul></div></header>
+<div class="wrap"><figure class="fig3d hero" id="hero">
+  <div class="stage3d" role="img" aria-label="Animated 3D view: a user types 'how t'. The browser waits 120 milliseconds after the last key, misses its own cache, and asks the CDN edge, which also misses. The suggestion service looks up the prefix in an in-memory trie shard and returns the stored top 10. The edge keeps the answer for an hour, so a second user typing the same prefix gets it straight from the edge. Submitted searches flow into Kafka; a daily batch job counts them and builds a new trie snapshot, which the trie shards load."><p class="hint3">3D · drag to turn</p><button class="reset3 ghost" type="button" hidden>Reset view</button><p class="nogl">The 3D view needs WebGL and a connection, because Three.js loads from a CDN. The sections below cover the same ground.</p></div>
+  <div class="ctl3"><button class="pp" type="button">Pause</button><span class="k">Step</span><div class="steps3"></div><span class="meta3"></span></div>
+  <div class="track3"><div class="fill3"></div></div>
+  <p class="out3" aria-live="polite"></p>
+  <figcaption>Illustrative. Keystrokes only ever read precomputed answers; everything that changes the answers happens off the request path.</figcaption>
+</figure></div>
+<div class="wrap doc">
+  <nav class="toc" aria-label="Sections"><p>The solution</p><ol><li><a href="#requirements">Requirements</a></li><li><a href="#success">Success metrics</a></li><li><a href="#estimates">Estimates</a></li><li><a href="#api">API</a></li><li><a href="#architecture">Architecture</a></li><li><a href="#trie">The trie and top-k</a></li><li><a href="#build">Building it offline</a></li><li><a href="#caching">Edge and browser caching</a></li><li><a href="#lab">Try it: cache by prefix length</a></li><li><a href="#trending">Trending terms</a></li><li><a href="#personal">Personalization and filtering</a></li><li><a href="#storage">Storage</a></li><li><a href="#observability">Observability</a></li><li><a href="#risks">Risks and v2</a></li><li><a href="#presenting">Presenting it in 45 minutes</a></li><li><a href="#numbers">Numbers to remember</a></li><li><a href="#related">Related</a></li></ol></nav>
+  <article>
+
+<section id="requirements">
+  <h2>Requirements</h2>
+  <ul class="tags"><li>Clarify</li><li><a href="requirements.html">Non-functional requirements</a></li></ul>
+  <p class="lead">Autocomplete is a read problem with a strict clock. Each answer is tiny, almost all of them can be computed ahead of time, and the user is already typing the next letter.</p>
+  <div class="table"><table>
+    <thead><tr><th>Question</th><th>Assumption</th><th>Why it matters</th></tr></thead>
+    <tbody>
+      <tr><td>Features</td><td>Top 10 completions of the typed prefix, ranked by popularity; trending terms; a few of your own past searches</td><td>Shared answers can be cached; personal ones can't</td></tr>
+      <tr><td>Users</td><td class="num">500M a day, 10 searches each</td><td>5B searches a day</td></tr>
+      <tr><td>Requests</td><td class="num">~6 suggestion calls per search</td><td>One per pause in typing, not one per key</td></tr>
+      <tr><td>Latency</td><td class="num">under ~100 ms end to end</td><td>A typist presses a key every 200–300 ms; slower answers arrive for a prefix the user has already left</td></tr>
+      <tr><td>Freshness</td><td class="num">daily for the long tail; minutes for spikes</td><td>A batch job plus a streaming overlay</td></tr>
+      <tr><td>Safety</td><td>No hateful, sexual, violent or defamatory suggestions; no personal data</td><td>Filters at build time and at serve time, plus a fast kill switch</td></tr>
+      <tr><td>Languages</td><td>Per locale (en-IN, hi-IN, …)</td><td>Separate lists; locale is part of the cache key</td></tr>
+    </tbody>
+  </table></div>
+  <p>Out of scope: the search results page itself, spelling correction beyond simple normalization, and ads in the suggestion box.</p>
+</section>
+
+<section id="success">
+  <h2>Success metrics</h2>
+  <ul class="tags"><li>Define success</li></ul>
+  <div class="table"><table>
+    <thead><tr><th>Kind</th><th>Metric</th><th>Target</th></tr></thead>
+    <tbody>
+      <tr><td>Product</td><td>Share of searches where a suggestion was picked; keystrokes saved per search</td><td class="num">rising</td></tr>
+      <tr><td>Speed</td><td>p99 time from keystroke to suggestions shown</td><td class="num">&lt; 100 ms</td></tr>
+      <tr><td>Freshness</td><td>Time from a spike starting to the term being suggested</td><td class="num">&lt; 10 min</td></tr>
+      <tr><td>Safety</td><td>Blocked terms shown after a removal request</td><td class="num">0 after 15 min</td></tr>
+      <tr><td>Cost</td><td>Share of requests answered by browser or edge caches</td><td class="num">&gt; 80%</td></tr>
+    </tbody>
+  </table></div>
+</section>
+
+<section id="estimates">
+  <h2>Estimates</h2>
+  <ul class="tags"><li>Back of the envelope</li><li><a href="numbers.html">Numbers</a></li></ul>
+  <figure class="fig"><svg viewBox="0 0 722 150" class="dg" role="img" aria-label="Key numbers: about 350,000 suggestion requests a second on average and 700,000 at peak; 5 billion searches a day; about 1 billion prefixes taking around 60 gigabytes per copy of the index; about 250 gigabytes of search logs a day; and caches answering more than 80 percent of requests">
+    <rect x="10" y="10" width="134" height="92" rx="8" class="k-serve"/><text x="24" y="52" class="big">350k/s</text><text x="24" y="78" class="sm">suggestion calls</text><text x="24" y="94" class="sm">~700k/s at peak</text>
+    <rect x="154" y="10" width="134" height="92" rx="8" class="k-ingest"/><text x="168" y="52" class="big">5B</text><text x="168" y="78" class="sm">searches a day</text><text x="168" y="94" class="sm">~250 GB of logs</text>
+    <rect x="298" y="10" width="134" height="92" rx="8" class="k-kb"/><text x="312" y="52" class="big">~1B</text><text x="312" y="78" class="sm">prefixes indexed</text><text x="312" y="94" class="sm">from ~100M queries</text>
+    <rect x="442" y="10" width="134" height="92" rx="8" class="k-kb"/><text x="456" y="52" class="big">~60 GB</text><text x="456" y="78" class="sm">per index copy</text><text x="456" y="94" class="sm">~60 B per prefix</text>
+    <rect x="586" y="10" width="126" height="92" rx="8" class="k-serve"/><text x="600" y="52" class="big">&gt; 80%</text><text x="600" y="78" class="sm">cache hits</text><text x="600" y="94" class="sm">browser + edge</text>
+    <text x="10" y="132" class="small">Huge request rate, tiny answers, and almost all of them shared by everyone typing the same letters.</text>
+  </svg></figure>
+  <ul class="plain">
+    <li><strong>Requests:</strong> 5B searches × ~6 calls each = 30B a day ≈ 350k a second, about 700k at the evening peak. Without debouncing (one call per key, ~20 keys per search) it would be over 1M a second.</li>
+    <li><strong>What to index:</strong> billions of distinct queries a day, but most are typed once. Keep queries seen by enough different people, roughly the top 100M. At ~20 characters each that is ~2 GB of text.</li>
+    <li><strong>Prefixes:</strong> 100M queries × 20 characters is 2B prefixes before sharing; shared starts ("how to …") cut that to roughly 1B. Each stores a key and the ids of its top 10 queries, ~60 bytes, so one full copy is ~60 GB. That fits in RAM across 4 shards of ~16 GB.</li>
+    <li><strong>After caching:</strong> if browsers and the CDN answer ~80% (the lab shows where that comes from), the origin sees ~70k a second on average. A server reading from RAM handles tens of thousands of lookups a second, so a few replicas per shard per region is plenty.</li>
+  </ul>
+</section>
+
+<section id="api">
+  <h2>API</h2>
+  <ul class="tags"><li>Interface</li></ul>
+<pre><code>GET /api/suggest?q=how%20t&amp;loc=en-IN&amp;v=812        (public, cacheable)
+→ 200  Cache-Control: public, max-age=3600
+  { prefix: "how t", suggestions: ["how to tie a tie", "how to train your dragon", …] }
+
+GET /api/suggest/personal?q=how%20t                  (private, signed in, optional)
+→ 200  Cache-Control: private, no-store
+  { recent: ["how to tie a saree"] }
+
+POST /api/search  { q: "how to tie a tie", picked_from: "suggestion", pos: 1 }   (logged)</code></pre>
+  <p>The shared call takes no cookies, so the same prefix and locale give the same bytes for everyone, which is what lets a CDN cache it. <code>v</code> is the index version: a new snapshot changes the URL, so the old cached answers age out on their own. The personal call is separate and never cached at the edge.</p>
+</section>
+
+<section id="architecture">
+  <h2>Architecture</h2>
+  <ul class="tags"><li>Whole system</li></ul>
+  <figure class="fig"><svg viewBox="0 0 722 320" class="dg" role="img" aria-label="Architecture: the browser debounces keystrokes and keeps a local cache, then asks the CDN edge cache, keyed by prefix and locale. Misses reach a stateless suggestion service, which reads the prefix's top 10 from in-memory trie shards and recent spikes from a trending store in Redis, then filters and merges them. The browser merges in the user's own history. Submitted searches go to Kafka. A trending job reads Kafka in 5-minute windows and writes the trending store. A daily batch job archives logs, normalizes and counts queries with time decay, and a trie builder writes a versioned snapshot that the trie shards load.">
+    <text x="10" y="22" class="cap">SERVE · EVERY PAUSE IN TYPING</text>
+    <rect x="10" y="34" width="120" height="40" rx="8" class="k-user"/><text x="70" y="52" class="small b" text-anchor="middle">Browser</text><text x="70" y="67" class="sm" text-anchor="middle">debounce · cache</text>
+    <path d="M130 54 L160 54" class="wire hot" marker-end="url(#ah)"/>
+    <rect x="162" y="34" width="130" height="40" rx="8" class="k-serve"/><text x="227" y="52" class="small b" text-anchor="middle">CDN edge cache</text><text x="227" y="67" class="sm" text-anchor="middle">key: prefix + locale</text>
+    <path d="M292 54 L322 54" class="wire hot" marker-end="url(#ah)"/>
+    <rect x="324" y="34" width="140" height="40" rx="8" class="k-serve"/><text x="394" y="52" class="small b" text-anchor="middle">Suggestion service</text><text x="394" y="67" class="sm" text-anchor="middle">merge · filter</text>
+    <path d="M464 54 L494 54" class="wire hot" marker-end="url(#ah)"/>
+    <rect x="496" y="34" width="140" height="40" rx="18" class="k-kb"/><text x="566" y="52" class="small b" text-anchor="middle">Trie shards</text><text x="566" y="67" class="sm" text-anchor="middle">top 10, in RAM</text>
+    <text x="10" y="122" class="cap">FRESHNESS</text>
+    <rect x="10" y="130" width="120" height="40" rx="8" class="k-serve"/><text x="70" y="148" class="small b" text-anchor="middle">Your history</text><text x="70" y="163" class="sm" text-anchor="middle">merged in browser</text>
+    <path d="M70 130 L70 77" class="wire dash" marker-end="url(#ah)"/>
+    <rect x="162" y="130" width="130" height="40" rx="8" class="k-ingest"/><text x="227" y="148" class="small b" text-anchor="middle">Trending job</text><text x="227" y="163" class="sm" text-anchor="middle">5-minute windows</text>
+    <path d="M292 150 L322 150" class="wire" marker-end="url(#ah)"/>
+    <rect x="324" y="130" width="140" height="40" rx="18" class="k-kb"/><text x="394" y="148" class="small b" text-anchor="middle">Trending (Redis)</text><text x="394" y="163" class="sm" text-anchor="middle">spikes · TTL 2 h</text>
+    <path d="M394 130 L394 77" class="wire" marker-end="url(#ah)"/>
+    <path d="M566 228 L566 77" class="wire" marker-end="url(#ah)"/><text x="574" y="150" class="sm">load snapshot</text><text x="574" y="164" class="sm">blue/green</text>
+    <path d="M110 74 L110 100 L146 100 L146 210 L190 210 L190 228" class="wire dash" marker-end="url(#ah)"/><text x="150" y="203" class="sm">searches</text>
+    <path d="M227 230 L227 173" class="wire" marker-end="url(#ah)"/>
+    <text x="10" y="222" class="cap">OFFLINE · DAILY</text>
+    <rect x="10" y="230" width="120" height="40" rx="18" class="k-kb"/><text x="70" y="248" class="small b" text-anchor="middle">Log archive</text><text x="70" y="263" class="sm" text-anchor="middle">object storage</text>
+    <path d="M162 250 L132 250" class="wire" marker-end="url(#ah)"/>
+    <rect x="162" y="230" width="130" height="40" rx="8" class="k-cross"/><text x="227" y="248" class="small b" text-anchor="middle">Kafka</text><text x="227" y="263" class="sm" text-anchor="middle">search events</text>
+    <path d="M292 250 L322 250" class="wire" marker-end="url(#ah)"/>
+    <rect x="324" y="230" width="140" height="40" rx="8" class="k-ingest"/><text x="394" y="248" class="small b" text-anchor="middle">Daily batch job</text><text x="394" y="263" class="sm" text-anchor="middle">count · decay</text>
+    <path d="M464 250 L494 250" class="wire" marker-end="url(#ah)"/>
+    <rect x="496" y="230" width="140" height="40" rx="8" class="k-ingest"/><text x="566" y="248" class="small b" text-anchor="middle">Trie builder</text><text x="566" y="263" class="sm" text-anchor="middle">top 10 per node</text>
+    <text x="10" y="302" class="sm">The request path only reads. Counting, ranking and filtering happen in jobs, so a slow job makes suggestions stale, never slow.</text>
+  </svg><figcaption>Three speeds: answers are read in milliseconds, spikes are folded in within minutes, and the full ranking is rebuilt once a day.</figcaption></figure>
+</section>
+
+<section id="trie">
+  <h2>The trie and top-k</h2>
+  <ul class="tags"><li>Deep dive 1</li><li><a href="databases.html">Indexes</a></li><li><a href="sharding.html">Sharding</a></li></ul>
+  <p class="lead">A trie is a tree of characters: every query is a path from the root, and every prefix is a node. The trick that makes it fast enough is to store each node's answer on the node.</p>
+  <figure class="fig"><svg viewBox="0 0 722 236" class="dg" role="img" aria-label="A small trie with the queries to, tom, tea, ten and ted. The root links to t, which links to te and to. te links to tea, ten and ted; to links to tom. Each node stores its top three completions: t stores to 120, tea 90, ten 70; te stores tea 90, ten 70, ted 40; to stores to 120, tom 30. Looking up te is two hops and one read.">
+    <path d="M66 118 L144 118" class="wire"/><path d="M176 118 L274 76" class="wire hot"/><path d="M176 118 L274 172" class="wire"/>
+    <path d="M306 70 L414 34" class="wire"/><path d="M306 70 L414 84" class="wire"/><path d="M306 76 L414 132" class="wire"/><path d="M306 172 L414 192" class="wire"/>
+    <circle cx="50" cy="118" r="16" class="k-user"/><text x="50" y="122" class="sm" text-anchor="middle">root</text>
+    <circle cx="160" cy="118" r="16" class="k-kb"/><text x="160" y="123" class="b mono" text-anchor="middle">t</text>
+    <text x="160" y="152" class="sm mono" text-anchor="middle">to 120 · tea 90 · ten 70</text>
+    <circle cx="290" cy="72" r="16" class="k-serve"/><text x="290" y="77" class="b mono" text-anchor="middle">te</text>
+    <text x="290" y="44" class="sm mono" text-anchor="middle">tea 90 · ten 70 · ted 40</text>
+    <circle cx="290" cy="172" r="16" class="k-kb"/><circle cx="290" cy="172" r="20" class="ghost"/><text x="290" y="177" class="b mono" text-anchor="middle">to</text>
+    <text x="290" y="212" class="sm mono" text-anchor="middle">to 120 · tom 30</text>
+    <circle cx="430" cy="32" r="16" class="k-kb"/><text x="430" y="37" class="b mono" text-anchor="middle">tea</text><text x="452" y="36" class="sm mono">90</text>
+    <circle cx="430" cy="84" r="16" class="k-kb"/><text x="430" y="89" class="b mono" text-anchor="middle">ten</text><text x="452" y="88" class="sm mono">70</text>
+    <circle cx="430" cy="134" r="16" class="k-kb"/><text x="430" y="139" class="b mono" text-anchor="middle">ted</text><text x="452" y="138" class="sm mono">40</text>
+    <circle cx="430" cy="192" r="16" class="k-kb"/><text x="430" y="197" class="b mono" text-anchor="middle">tom</text><text x="452" y="196" class="sm mono">30</text>
+    <rect x="508" y="20" width="204" height="190" rx="10" class="zone"/>
+    <text x="522" y="44" class="cap">LOOKUP "te"</text>
+    <text x="522" y="66" class="small">1. walk t → e (2 hops)</text>
+    <text x="522" y="86" class="small">2. read the stored list</text>
+    <text x="522" y="106" class="small okt">no subtree walk, no sort</text>
+    <text x="522" y="138" class="cap">COST</text>
+    <text x="522" y="160" class="small">time: prefix length</text>
+    <text x="522" y="180" class="small">memory: k ids per node</text>
+    <text x="522" y="200" class="small">updates: rebuild offline</text>
+  </svg><figcaption>Top 3 shown to keep it small; production stores the top 10. The dashed ring marks a node that is itself a full query ("to").</figcaption></figure>
+  <ul class="plain">
+    <li><strong>Naive version:</strong> walk to the prefix node, then visit every query below it and sort by count. For "a" that is tens of millions of queries per keystroke. Far too slow.</li>
+    <li><strong>Top-k per node:</strong> precompute each node's 10 best completions when the trie is built. A lookup is then one step per character plus one read: microseconds in RAM. The price is memory (10 ids at every node) and that the trie can't cheaply change in place, which is fine because it is rebuilt offline.</li>
+    <li><strong>Store ids, not strings:</strong> each list holds 4-byte query ids into a shared string table, so "how to tie a tie" is stored once, not at each of its 16 prefixes.</li>
+    <li><strong>Flatten it for serving:</strong> once every node has its answer, you no longer need the tree at serve time. A plain key-value map <code>prefix → [ids]</code> gives the same answers, can live in any in-memory store, and can be sharded by a hash of the prefix. The trie is how you build the answers; the map is how you serve them.</li>
+    <li><strong>Sharding:</strong> sharding a real trie by first letter is lopsided ("s" has far more queries than "x"). Hashing the flat map's keys spreads them evenly. The hottest keys are the 1–2 letter prefixes, and those almost always hit a cache before they reach a shard.</li>
+    <li><strong>Long prefixes:</strong> past ~20 characters, stop storing nodes. Few people type that far without picking, and the rare request can be answered from the length-20 node, filtered on the fly.</li>
+  </ul>
+</section>
+
+<section id="build">
+  <h2>Building it offline</h2>
+  <ul class="tags"><li>Deep dive 2</li><li><a href="queues.html">Message queues and streams</a></li><li><a href="hot-partitions.html">Hot partitions</a></li></ul>
+  <p class="lead">Popularity is counted from what people actually searched, not from keystrokes. A daily job turns yesterday's logs into a new, immutable index.</p>
+  <ol class="plain">
+    <li><strong>Collect:</strong> every submitted search (not every keystroke) goes to Kafka with locale, coarse country and time. A copy lands in object storage for reprocessing.</li>
+    <li><strong>Normalize:</strong> lowercase, trim, collapse spaces, Unicode-normalize (so "café" typed two ways is one query), and strip obvious junk like URLs and long digit strings.</li>
+    <li><strong>Count with decay:</strong> score = Σ daily count × 0.5<sup>age in days ÷ 7</sup>. A one-week half-life lets last month's hits fade without forgetting evergreen queries like "weather".</li>
+    <li><strong>Drop the rare:</strong> keep a query only if enough different users searched it (say 20+ in the window). This cuts the index from billions of queries to ~100M and keeps one person's typed phone number or address out of everyone's suggestions.</li>
+    <li><strong>Filter:</strong> remove anything matching the blocklist (see <a href="#personal">filtering</a>).</li>
+    <li><strong>Build top-k bottom-up:</strong> each node's list is the best 10 among its own query (if it is one) and its children's lists. Merging small sorted lists from the leaves up visits every node once, so the whole build is a few hours of batch compute, sharded by prefix.</li>
+    <li><strong>Ship:</strong> write the result as a versioned snapshot (v812) to object storage. Serving replicas load it next to the old one, check it with a set of golden prefixes, then switch over (blue/green). Rolling back is pointing at v811 again.</li>
+  </ol>
+  <div class="note"><p>The whole index is rebuilt rather than patched. That makes it easy to reason about: every replica serves exactly one version, and a bad build is fixed by loading the previous file.</p></div>
+</section>
+
+<section id="caching">
+  <h2>Edge and browser caching</h2>
+  <ul class="tags"><li>Deep dive 3</li><li><a href="caching.html">Caching</a></li><li><a href="cdn.html">CDNs</a></li></ul>
+  <p class="lead">The shared answer for a prefix is the same for everyone in a locale, so it should be served as close to the user as possible. The fastest request is the one the browser never sends.</p>
+  <h3>In the browser</h3>
+  <ul class="plain">
+    <li><strong>Debounce:</strong> wait ~100–150 ms after the last key before asking. Fast typists skip the middle prefixes entirely, which cuts requests by about two thirds.</li>
+    <li><strong>Remember answers:</strong> keep the last few hundred prefix answers in memory. Backspacing from "how to f" to "how to " costs nothing, and the HTTP cache keeps them across page loads for the <code>max-age</code>.</li>
+    <li><strong>Drop stale replies:</strong> cancel the in-flight request when a new one starts, or tag each with a sequence number and ignore answers for a prefix the user has already left. Otherwise a slow reply for "ho" can overwrite the list for "how t".</li>
+    <li><strong>Filter locally:</strong> if the list for "how t" has fewer than 10 entries, it already contains every completion of "how to", so the browser can filter it instead of asking again.</li>
+  </ul>
+  <h3>At the edge</h3>
+  <ul class="plain">
+    <li><strong>Cache key:</strong> prefix + locale + index version, nothing else. No cookies, no user id, so one cached copy serves millions of people.</li>
+    <li><strong>TTL by heat:</strong> an hour for most prefixes; 60 seconds for prefixes that currently have a trending entry, so a spike shows up quickly and falls away quickly.</li>
+    <li><strong>Short prefixes are gold:</strong> there are only ~36 one-character and ~1,000 two-character prefixes, and they carry a big share of traffic. Every edge location holds them all. Longer prefixes are more numerous and less popular each, so the cache holds only the most popular ones. The lab shows the trade-off.</li>
+    <li><strong>Removal:</strong> when a term must disappear (a court order, a bad build), purge its prefixes from the CDN by key, or bump the index version so every cached answer is bypassed at once.</li>
+  </ul>
+</section>
+
+<section id="lab">
+  <h2>Try it: cache by prefix length</h2>
+  <ul class="tags"><li>Lab</li></ul>
+  <p>Each edge location has room for a fixed number of cached answers, about 1 KB each. Choose the longest prefix the edge is allowed to cache, how many answers it can hold, and whether the browser keeps its own cache. The edge keeps the most popular prefixes that fit. See how many of the 350,000 requests a second still reach the suggestion service.</p>
+  <div class="lab" id="aclab">
+    <div class="lab-row"><label for="ac-l">Cache prefixes up to <input type="range" id="ac-l" min="1" max="12" step="1" value="8"><output id="ac-l-o"></output></label><label for="ac-b"><input type="checkbox" id="ac-b" checked> Browser cache</label></div>
+    <div class="lab-row"><span class="lab-k">Edge cache size</span><span class="seg" role="group" aria-label="Edge cache size" id="ac-c"><button type="button" data-v="100000" aria-pressed="false">100k</button><button type="button" data-v="1000000" aria-pressed="true">1M</button><button type="button" data-v="10000000" aria-pressed="false">10M</button><button type="button" data-v="100000000" aria-pressed="false">100M</button></span></div>
+    <div class="metrics" id="ac-m"></div>
+    <p class="lab-out" id="ac-out" aria-live="polite"></p>
+  </div>
+  <p class="muted" style="font-size:13.5px">Rough model: requests by prefix length run from 10% for 1 character, peaking at 13% for 3–4 characters, down to 3% for 12; the number of distinct prefixes grows from 36 (1 character) to 450M (12 characters); popularity within each length follows a Zipf curve. The browser cache answers the ~20% of requests that repeat a prefix that browser already fetched. Illustrative, not measured.</p>
+</section>
+
+<section id="trending">
+  <h2>Trending terms</h2>
+  <ul class="tags"><li>Deep dive 4</li><li><a href="queues.html">Streams</a></li><li><a href="live-comments.html">Live comments</a></li></ul>
+  <p class="lead">An earthquake hits at 2 pm. By 2:05 a million people are typing "earthq…", and last night's index has never heard of today's earthquake. A small streaming path fills the gap until the next build.</p>
+  <figure class="fig3d" id="trend3d">
+    <div class="stage3d" role="img" aria-label="An earthquake makes thousands of people search 'earthquake today'. Their searches flow into Kafka. A trending job counts each query in 5-minute windows and compares with its usual rate; the query is 40 times above normal, so it is written to the trending store under each of its prefixes with a 2-hour expiry. A user types 'earthq'. The suggestion service reads the base trie's top 10 and the trending entry in parallel, puts the trending query first, removes anything on the blocklist and replies. Two hours later the trending entry expires; the nightly build has picked the query up by then."><p class="hint3">3D · drag to turn</p><button class="reset3 ghost" type="button" hidden>Reset view</button><p class="nogl">The 3D view needs WebGL and a connection.</p></div>
+    <div class="ctl3"><button class="pp" type="button">Pause</button><span class="k">Step</span><div class="steps3"></div><span class="meta3"></span></div>
+    <div class="track3"><div class="fill3"></div></div>
+    <p class="out3" aria-live="polite"></p>
+    <figcaption>Illustrative. The overlay is small and short-lived; the daily build remains the source of the full ranking.</figcaption>
+  </figure>
+  <ul class="plain">
+    <li><strong>Detect:</strong> a stream job (Flink, Kafka Streams) counts each normalized query per 5-minute window and compares it with the same query's usual rate. "40× normal and at least 2,000 searches" is trending; "always popular" is not.</li>
+    <li><strong>Publish:</strong> write the trending query under each of its prefixes in Redis, with a score and a 2-hour TTL. Only a few thousand queries trend at once, so this store is megabytes, not gigabytes.</li>
+    <li><strong>Merge at serve time:</strong> the suggestion service reads the base top 10 and the trending list for the prefix in parallel, puts at most one or two trending items near the top, and removes duplicates.</li>
+    <li><strong>Hot keys:</strong> a trending prefix is exactly the key everyone asks for. The short edge TTL means each edge location asks the origin about once a minute for it, no matter how many users type it.</li>
+    <li><strong>Guard it:</strong> trending terms skip the 24-hour vetting of the daily build, so they pass the same blocklist at serve time, need a minimum number of distinct users, and are watched more closely. Coordinated campaigns to push a term are the main abuse.</li>
+  </ul>
+</section>
+
+<section id="personal">
+  <h2>Personalization and filtering</h2>
+  <ul class="tags"><li>Deep dive 5</li><li><a href="api-gateways.html">Gateways</a></li></ul>
+  <h3>Personal, without breaking the cache</h3>
+  <ul class="plain">
+    <li><strong>Keep shared and personal apart:</strong> the shared list comes from the edge cache; your own past searches come from a separate private call or from storage on the device. The browser merges them: up to two of your matching recent searches first, then the shared list without duplicates.</li>
+    <li><strong>Cheap context in the key:</strong> locale and coarse country can go in the cache key ("cricket score" means different matches in India and Australia). Anything finer, like city or user, would split the cache into millions of tiny pieces with no hits.</li>
+    <li><strong>Re-rank lightly:</strong> a signed-in user's list can be re-ordered by a small model on the service (interests, recent topics), but only within the top 20 candidates from the shared list, so the expensive part stays shared.</li>
+    <li><strong>Respect the off switch:</strong> history is deletable and can be turned off; incognito sends only the shared call.</li>
+  </ul>
+  <h3>Filtering</h3>
+  <ul class="plain">
+    <li><strong>At build time:</strong> drop queries matching lists for hate, sexual content, violence and self-harm, plus "person's name + negative claim" patterns that could defame someone. A classifier catches variants the lists miss.</li>
+    <li><strong>At serve time:</strong> the suggestion service checks every outgoing suggestion against an in-memory blocklist pushed to all replicas within minutes. This is the kill switch for things found after the build.</li>
+    <li><strong>Privacy:</strong> the distinct-user threshold keeps one person's unusual search (their address, a medical question) from ever becoming a suggestion for others.</li>
+    <li><strong>Removal flow:</strong> add to the blocklist, purge or version-bump the edge, and confirm with a probe that the term is gone everywhere, which meets the 15-minute target.</li>
+  </ul>
+</section>
+
+<section id="storage">
+  <h2>Storage</h2>
+  <ul class="tags"><li><a href="databases.html">Databases</a></li><li><a href="sharding.html">Sharding</a></li></ul>
+  <div class="table"><table>
+    <thead><tr><th>Data</th><th>Store</th><th>Why</th></tr></thead>
+    <tbody>
+      <tr><td>Prefix → top 10 ids, string table</td><td>In RAM on serving replicas, loaded from a snapshot; 4 hash shards</td><td>Microsecond reads; rebuilt daily, never written live</td></tr>
+      <tr><td>Index snapshots</td><td>Object storage, versioned</td><td>Blue/green loads and instant rollback</td></tr>
+      <tr><td>Trending overlay</td><td>Redis with TTLs</td><td>Small, fast, expires by itself</td></tr>
+      <tr><td>Search events</td><td>Kafka, then object storage (Parquet)</td><td>Streaming detection and daily batch input</td></tr>
+      <tr><td>Personal history</td><td>On device, or a key-value store keyed by user id</td><td>Private, small, deletable</td></tr>
+      <tr><td>Blocklist</td><td>Config service pushed to every replica</td><td>Changes must reach everywhere in minutes</td></tr>
+    </tbody>
+  </table></div>
+</section>
+
+<section id="observability">
+  <h2>Observability</h2>
+  <ul class="tags"><li>Production</li><li><a href="observability.html">Monitoring</a></li></ul>
+  <div class="table"><table>
+    <thead><tr><th>Signal</th><th>Why</th><th>Alert when</th></tr></thead>
+    <tbody>
+      <tr><td>Keystroke-to-render p99 (from real browsers)</td><td>The number users feel</td><td>&gt; 100 ms for 10 minutes</td></tr>
+      <tr><td>Edge hit ratio, origin requests/s</td><td>Cost and origin safety</td><td>Hit ratio drops by 10 points</td></tr>
+      <tr><td>Suggestion pick rate and position picked</td><td>Ranking quality</td><td>Falls after a new index version</td></tr>
+      <tr><td>Index version per replica; build age</td><td>Stuck or mixed deploys</td><td>Build older than 36 hours</td></tr>
+      <tr><td>Golden-prefix checks (known expected answers)</td><td>Catches a broken or empty build</td><td>Any check fails on a new snapshot</td></tr>
+      <tr><td>Blocklist hits at serve time</td><td>Build filter is missing things</td><td>Sudden rise</td></tr>
+    </tbody>
+  </table></div>
+</section>
+
+<section id="risks">
+  <h2>Risks and v2</h2>
+  <ul class="tags"><li>Wrap-up</li></ul>
+  <div class="table"><table>
+    <thead><tr><th>Risk</th><th>How you detect it</th><th>Mitigation</th></tr></thead>
+    <tbody>
+      <tr><td>Offensive or defamatory suggestion</td><td>User reports, serve-time blocklist hits</td><td>Filters at build and serve time, kill switch, edge purge</td></tr>
+      <tr><td>Private data suggested</td><td>Audits for phone numbers, emails</td><td>Distinct-user threshold, pattern stripping</td></tr>
+      <tr><td>Bad build shipped</td><td>Golden prefixes, pick-rate drop</td><td>Blue/green load, roll back to the previous version</td></tr>
+      <tr><td>Manipulation of trending</td><td>Many searches from few accounts or IPs</td><td>Distinct-user counts, bot filtering, caps on trending slots</td></tr>
+      <tr><td>Origin overload when caches go cold</td><td>Hit ratio drop after a version bump</td><td>Pre-warm short prefixes, stagger version rollout by region</td></tr>
+    </tbody>
+  </table></div>
+  <p><strong>v2 ideas:</strong> typo-tolerant matching ("hwo to" → "how to"), completions from the middle of a query ("tie" matching "how to tie a tie"), prefetching the likely next prefix's answer, and per-vertical lists (shopping, maps, videos).</p>
+</section>
+
+<section id="presenting">
+  <h2>Presenting it in 45 minutes</h2>
+  <ul class="tags"><li>Interview script</li></ul>
+  <div class="table"><table>
+    <thead><tr><th>Step</th><th>Time</th><th>What to cover</th></tr></thead>
+    <tbody>
+      <tr><td>1. Clarify</td><td class="num">5 min</td><td>Top 10, ranking by popularity, freshness, personalization, safety, scale</td></tr>
+      <tr><td>2. Estimate</td><td class="num">3 min</td><td>350k calls/s, ~100M queries, ~1B prefixes, ~60 GB</td></tr>
+      <tr><td>3. API</td><td class="num">2 min</td><td>Cacheable shared call; separate private call</td></tr>
+      <tr><td>4. Draw the whole system</td><td class="num">8 min</td><td>Browser, edge, suggestion service, trie shards; Kafka, batch, builder; trending</td></tr>
+      <tr><td>5. Deep dive: trie</td><td class="num">10 min</td><td>Naive walk vs top-k per node, ids not strings, flatten and hash-shard</td></tr>
+      <tr><td>6. Deep dive: freshness and caching</td><td class="num">10 min</td><td>Daily rebuild with decay, trending overlay, debounce, edge TTLs</td></tr>
+      <tr><td>7. Safety and risks</td><td class="num">7 min</td><td>Filters, privacy threshold, kill switch, bad builds</td></tr>
+    </tbody>
+  </table></div>
+  <div class="say"><p>"Every answer is precomputed. A daily job counts submitted searches with a one-week decay, drops rare and blocked queries, and builds a trie where each node stores its top 10 completions as ids. That is flattened into a prefix-to-list map, hash-sharded across a few in-memory replicas and loaded blue/green from a versioned snapshot. The shared answer depends only on prefix and locale, so the browser debounces and caches, and the CDN caches with an hour TTL; together they absorb over 80% of requests. A streaming job spots spikes in 5-minute windows and writes them to a small Redis overlay that the service merges in, with a short edge TTL for those prefixes. Personal history is merged in the browser so it never splits the cache, and every suggestion passes a serve-time blocklist that we can update in minutes."</p></div>
+</section>
+
+<section id="numbers">
+  <h2>Numbers to remember</h2>
+  <ul class="tags"><li>Cheat sheet</li></ul>
+  <div class="table"><table><tbody>
+    <tr><td>5B searches × ~6 calls</td><td class="num">≈ 350k calls a second</td></tr>
+    <tr><td>Time between keystrokes</td><td class="num">~200–300 ms</td></tr>
+    <tr><td>Debounce</td><td class="num">~100–150 ms</td></tr>
+    <tr><td>Index entry (key + 10 ids)</td><td class="num">~60 bytes; ~1B prefixes ≈ 60 GB</td></tr>
+    <tr><td>One cached answer</td><td class="num">~1 KB</td></tr>
+    <tr><td>Prefixes of 1 / 2 characters</td><td class="num">~36 / ~1,000</td></tr>
+    <tr><td>Score decay</td><td class="num">half-life ~7 days</td></tr>
+    <tr><td>Trending window / overlay TTL</td><td class="num">5 minutes / 2 hours</td></tr>
+  </tbody></table></div>
+</section>
+
+<section id="related">
+  <h2>Related</h2>
+  <ul class="related"><li><a href="caching.html">Caching</a></li><li><a href="cdn.html">CDNs, PoPs and IXPs</a></li><li><a href="web-crawler.html">Web crawler</a></li><li><a href="nearby-places.html">Nearby places</a></li><li><a href="news-feed.html">News feed</a></li><li><a href="sharding.html">Sharding and consistent hashing</a></li><li><a href="queues.html">Message queues and streams</a></li></ul>
+</section>
+  </article>
+</div>
+</main>
+
+<footer class="site"><div class="wrap">Part of Classic System Design, a companion to the <a href="https://devlcodes.github.io/agentic-ai-notebook/system-design/index.html">agentic system designs</a>. The 3D views use Three.js loaded from a CDN, so they need a connection; the text and tables cover the same ground. Figures marked illustrative show the shape of a system, not measured numbers. Check vendor docs before relying on a specific product limit.</div></footer>
+<script>
+(function(){
+  var $ = function(id){ return document.getElementById(id); }, CAP = 1e6, RPS = 350000, KB = 1000, REPEAT = 0.2;
+  var W = [0.10, 0.12, 0.13, 0.13, 0.12, 0.10, 0.08, 0.06, 0.05, 0.04, 0.04, 0.03];
+  var M = [36, 1e3, 2e4, 2e5, 1.5e6, 8e6, 3e7, 8e7, 1.5e8, 2.5e8, 3.5e8, 4.5e8];
+  function H(n){ if (n < 1) return 0; if (n < 20) { var s = 0; for (var i = 1; i <= n; i++) s += 1 / i; return s; } return Math.log(n) + 0.5772 + 1 / (2 * n); }
+  function fmt(n){ if (n >= 1e9) return +(n/1e9).toFixed(1) + 'B'; if (n >= 1e6) return +(n/1e6).toFixed(1) + 'M'; if (n >= 1e3) return +(n/1e3).toFixed(n < 1e4 ? 1 : 0) + 'k'; return String(Math.round(n)); }
+  function bytes(n){ return n >= 1e9 ? +(n/1e9).toFixed(1) + ' GB' : n >= 1e6 ? Math.round(n/1e6) + ' MB' : Math.round(n/1e3) + ' KB'; }
+  function model(L, C){
+    var tot = 0, n = [], i;
+    for (i = 0; i < L; i++) tot += M[i];
+    if (C >= tot) { for (i = 0; i < L; i++) n[i] = M[i]; }
+    else {
+      var lo = 1e-15, hi = 1;
+      for (var it = 0; it < 80; it++) {
+        var p = Math.sqrt(lo * hi), s = 0;
+        for (i = 0; i < L; i++) s += Math.min(M[i], Math.floor(W[i] / (p * H(M[i]))));
+        if (s > C) lo = p; else hi = p;
+      }
+      for (i = 0; i < L; i++) n[i] = Math.min(M[i], Math.floor(W[i] / (hi * H(M[i]))));
+    }
+    var hit = 0, used = 0;
+    for (i = 0; i < L; i++) { hit += W[i] * H(n[i]) / H(M[i]); used += n[i]; }
+    return { hit: hit, used: used, tot: tot };
+  }
+  function run(){
+    var L = +$('ac-l').value, br = $('ac-b').checked;
+    $('ac-l-o').textContent = L + (L === 1 ? ' char' : ' chars');
+    var r = model(L, CAP), longer = 0;
+    for (var i = L; i < W.length; i++) longer += W[i];
+    var pre = br ? REPEAT : 0, total = pre + (1 - pre) * r.hit, origin = RPS * (1 - total), mem = r.used * KB;
+    $('ac-m').innerHTML =
+      '<div class="metric"><span class="n">' + Math.round(r.hit * 100) + '%</span><span class="l">edge hit ratio</span><small>of requests that reach the edge</small></div>' +
+      '<div class="metric"><span class="n">' + Math.round(total * 100) + '%</span><span class="l">answered by caches</span><small>' + (br ? 'browser + edge' : 'edge only') + '</small></div>' +
+      '<div class="metric"><span class="n"' + (origin > 100000 ? ' style="color:var(--c-dlq)"' : '') + '>' + fmt(origin) + '/s</span><span class="l">reach the service</span><small>of 350k/s</small></div>' +
+      '<div class="metric"><span class="n"' + (mem > 2e10 ? ' style="color:var(--c-dlq)"' : '') + '>' + bytes(mem) + '</span><span class="l">edge memory</span><small>' + fmt(r.used) + ' answers × 1 KB, per location</small></div>';
+    var msg;
+    if (r.used < CAP) msg = 'Only ' + fmt(r.tot) + ' prefixes of up to ' + L + ' characters exist, so most of the ' + fmt(CAP) + ' slots sit empty. Every request for a longer prefix (' + Math.round(longer * 100) + '% of traffic) goes to the service. Allow longer prefixes to put the space to work.';
+    else if (mem > 2e10) msg = 'Very high hit ratio, but ' + bytes(mem) + ' of cache at every edge location is expensive for answers that are each requested a handful of times. The last few points of hit ratio cost the most.';
+    else if (L <= 5 && longer > 0.3) msg = 'The cache is full of short prefixes, which are cheap and hot, but ' + Math.round(longer * 100) + '% of requests are for longer prefixes and all of them miss. Raising the length limit lets the most popular long prefixes ("how to t…") in.';
+    else if (total >= 0.85) msg = 'Good shape: caches answer ' + Math.round(total * 100) + '% of requests, leaving about ' + fmt(origin) + ' a second for the suggestion service, a few replicas per region. Bigger caches now buy little, because the remaining misses are long-tail prefixes nobody else typed recently.';
+    else msg = 'Caches answer ' + Math.round(total * 100) + '%, leaving ' + fmt(origin) + ' requests a second for the service. Popularity is very uneven, so a modest cache that admits longer prefixes catches most traffic; try a bigger cache or a longer limit.';
+    if (!br) msg += ' With the browser cache off, every backspace and retype costs a network round trip.';
+    $('ac-out').textContent = msg;
+  }
+  $('ac-c').addEventListener('click', function(e){ var b = e.target.closest('button'); if (!b) return; CAP = +b.dataset.v; this.querySelectorAll('button').forEach(function(x){ x.setAttribute('aria-pressed', x === b); }); run(); });
+  $('ac-l').addEventListener('input', run);
+  $('ac-b').addEventListener('change', run);
+  run();
+})();
+</script>
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+  }
+}
+</script>
+<script type="module">
+import { boot } from './assets/scene3d.js';
+const D = {};
+D.hero = {
+  hero: true,
+  loop: 16,
+  view: { target: [-1, 0, 1], w: 30, d: 18, el: 52 },
+  steps: [
+    { t: 0.0, text: 'Asha types "how t". The browser waits 120 ms after her last key, then checks its own cache of recent answers: a miss.' },
+    { t: 1.8, text: 'It asks the CDN edge for prefix "how t", locale en-IN. The edge has no copy either, so the request goes on to the suggestion service.' },
+    { t: 3.2, text: 'The service hashes the prefix to a trie shard and reads the stored top 10 from RAM. No counting or sorting happens here.' },
+    { t: 4.8, text: 'The answer flows back. The edge keeps it for an hour and the browser keeps it too.' },
+    { t: 6.6, text: 'Ravi types the same prefix a minute later. The edge answers in a few milliseconds; the service never sees it.' },
+    { t: 8.6, text: 'Searches people actually submit (not keystrokes) are logged to Kafka.' },
+    { t: 10.2, text: 'Once a day a batch job normalizes and counts them with a one-week decay, drops rare and blocked queries, and builds a new trie with the top 10 stored at every node.' },
+    { t: 12.4, text: 'The new snapshot (v812) loads next to the old one on each shard; after a few golden-prefix checks, the shards switch over.' },
+  ],
+  build(c) {
+    const { V, C, P } = c;
+    const asha = c.obj(c.SHAPES.browser(0xd7932a), -13, 6, 'Asha', 'debounce · cache');
+    const ravi = c.obj('person', -13, 1.5, 'Ravi');
+    const edge = c.obj(c.SHAPES.server({ emi: C.serve }), -6.5, 4, 'CDN edge', 'prefix + locale');
+    const svc = c.obj(c.SHAPES.server({ emi: C.serve, h: 1.3 }), -0.5, 4, 'Suggestion service');
+    const trie = c.obj(c.SHAPES.database(C.kb, { r: 1.0, tiers: 2 }), 6, 4, 'Trie shard', 'prefix → top 10');
+    const kf = c.obj(c.SHAPES.topic({ parts: 1, len: 3, color: C.cross }), -6.5, -4, 'Kafka', 'searches');
+    const job = c.obj(c.SHAPES.server({ emi: C.ingest, h: 1.2 }), -0.5, -4, 'Daily batch', 'count · decay · build');
+    const snap = c.obj(c.SHAPES.bucket(), 6, -4, 'Snapshot', 'v812');
+    c.lane([V(-13, 6), V(-10, 6), V(-10, 4), V(6, 4)]);
+    c.lane([V(-13, 1.5), V(-10, 1.5), V(-10, 4)]);
+    c.lane([V(-13, 1.5), V(-13, -4), V(6, -4), V(6, 4)]);
+    c.packet({ pts: [V(-13, 6), V(-10, 6), V(-10, 4), V(-6.5, 4)], t0: 1.9, t1: 2.8, kind: 'ask', from: asha, to: edge, label: '"how t"' });
+    c.packet({ pts: [V(-6.5, 4), V(-0.5, 4)], t0: 2.9, t1: 3.5, kind: 'ask', to: svc, label: 'miss' });
+    c.packet({ pts: [V(-0.5, 4), V(6, 4)], t0: 3.6, t1: 4.2, kind: 'span', to: trie, label: 'get "how t"' });
+    c.packet({ pts: [V(6, 4), V(-0.5, 4), V(-6.5, 4)], t0: 4.9, t1: 5.8, kind: 'doc', color: P.ship, to: edge, label: 'top 10' });
+    c.packet({ pts: [V(-6.5, 4), V(-10, 4), V(-10, 6), V(-13, 6)], t0: 5.9, t1: 6.5, kind: 'doc', color: P.ship, to: asha });
+    c.packet({ pts: [V(-13, 1.5), V(-10, 1.5), V(-10, 4), V(-6.5, 4)], t0: 6.7, t1: 7.4, kind: 'ask', from: ravi, to: edge, label: '"how t"' });
+    c.packet({ pts: [V(-6.5, 4), V(-10, 4), V(-10, 1.5), V(-13, 1.5)], t0: 7.5, t1: 8.1, kind: 'doc', color: P.ship, to: ravi, label: 'edge hit' });
+    c.packet({ pts: [V(-13, 1.5), V(-13, -4), V(-6.5, -4)], t0: 8.7, t1: 9.7, n: 4, st: 0.15, kind: 'env', to: kf, label: 'searched' });
+    c.packet({ pts: [V(-6.5, -4), V(-0.5, -4)], t0: 10.3, t1: 11.0, n: 3, st: 0.15, kind: 'env', to: job });
+    c.packet({ pts: [V(-0.5, -4), V(6, -4)], t0: 11.6, t1: 12.3, kind: 'doc', color: P.vec, to: snap, label: 'new index' });
+    c.packet({ pts: [V(6, -4), V(6, 4)], t0: 12.5, t1: 13.5, kind: 'doc', color: P.ship, to: trie, label: 'load v812' });
+    c.note('read path · milliseconds', 3, 6.6);
+    c.note('build path · daily', 3, -6.4);
+  },
+};
+D.trend3d = {
+  loop: 15,
+  view: { target: [-2, 0, 1.5], w: 28, d: 17, el: 50 },
+  steps: [
+    { t: 0.0, text: 'An earthquake hits. Within minutes thousands of people search "earthquake today". Last night\'s index has never seen it.' },
+    { t: 1.8, text: 'Their searches flow into Kafka. The trending job counts each query per 5-minute window and compares it with its usual rate: 40× normal.' },
+    { t: 4.0, text: 'It writes "earthquake today" to the trending store under each of its prefixes (e, ea, ear, …) with a 2-hour expiry.' },
+    { t: 6.2, text: 'Meera types "earthq". The suggestion service reads the base trie\'s top 10 and the trending list for that prefix at the same time.' },
+    { t: 8.4, text: 'It puts the trending query first, drops anything on the serve-time blocklist, and replies. The edge caches this prefix for only 60 seconds.' },
+    { t: 11.0, text: 'Two hours later the trending entry expires on its own. By then the nightly build has counted the query and ranks it normally.' },
+  ],
+  build(c) {
+    const { V, C, P } = c;
+    const ppl = c.obj('person', -13, -3.5, 'Searchers');
+    const kf = c.obj(c.SHAPES.topic({ parts: 1, len: 3, color: C.cross }), -7, -3.5, 'Kafka');
+    const job = c.obj(c.SHAPES.server({ emi: C.ingest, h: 1.2 }), -0.5, -3.5, 'Trending job', '5-min windows');
+    const red = c.obj(c.SHAPES.database(C.kb, { r: 0.9 }), 5, 1, 'Trending (Redis)', 'TTL 2 h');
+    const meera = c.obj(c.SHAPES.browser(0xd7932a), -13, 4, 'Meera', '"earthq"');
+    const svc = c.obj(c.SHAPES.server({ emi: C.serve, h: 1.3 }), -4, 4, 'Suggestion service', 'merge · blocklist');
+    const trie = c.obj(c.SHAPES.database(C.kb, { r: 1.0, tiers: 2 }), 5, 7, 'Base trie', 'built last night');
+    c.lane([V(-13, -3.5), V(5, -3.5), V(5, 1)]);
+    c.lane([V(-13, 4), V(-4, 4), V(1, 4), V(1, 7), V(5, 7)]);
+    c.lane([V(1, 4), V(1, 1), V(5, 1)]);
+    c.packet({ pts: [V(-13, -3.5), V(-7, -3.5)], t0: 0.4, t1: 1.6, n: 6, st: 0.12, kind: 'env', from: ppl, to: kf, label: 'earthquake today' });
+    c.packet({ pts: [V(-7, -3.5), V(-0.5, -3.5)], t0: 1.9, t1: 2.8, n: 4, st: 0.15, kind: 'env', to: job });
+    c.pulse(job, 3.2, 3.6);
+    c.packet({ pts: [V(-0.5, -3.5), V(5, -3.5), V(5, 1)], t0: 4.1, t1: 5.2, kind: 'span', color: P.ask, to: red, label: '40× normal' });
+    c.packet({ pts: [V(-13, 4), V(-4, 4)], t0: 6.3, t1: 7.0, kind: 'ask', from: meera, to: svc, label: '"earthq"' });
+    c.packet({ pts: [V(-4, 4), V(1, 4), V(1, 7), V(5, 7)], t0: 7.1, t1: 7.8, kind: 'span', to: trie, label: 'top 10' });
+    c.packet({ pts: [V(-4, 4), V(1, 4), V(1, 1), V(5, 1)], t0: 7.1, t1: 7.8, kind: 'span', to: red, label: 'trending' });
+    c.packet({ pts: [V(5, 7), V(1, 7), V(1, 4), V(-4, 4)], t0: 7.9, t1: 8.4, kind: 'span', color: P.ship, to: svc });
+    c.packet({ pts: [V(5, 1), V(1, 1), V(1, 4), V(-4, 4)], t0: 7.9, t1: 8.4, kind: 'span', color: P.ship, to: svc });
+    c.pulse(svc, 8.6, 9.0);
+    c.packet({ pts: [V(-4, 4), V(-13, 4)], t0: 9.1, t1: 9.9, kind: 'doc', color: P.ship, to: meera, label: '1. earthquake today' });
+    c.pulse(red, 11.4, 12.2);
+    c.note('expires on its own', 8.2, 1);
+  },
+};
+
+boot(D);
+</script>
+</body>
+</html>

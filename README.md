@@ -46,6 +46,7 @@ Interactive pages on how large web systems are built, before any AI is involved:
 - [Maps and navigation](https://devlcodes.github.io/classic-system-designs/maps.html): 50M routes a day, 1M location pings/s
 - [UPI payments switch](https://devlcodes.github.io/classic-system-designs/upi.html): 700M bank-to-bank payments a day, 25k/s at peak
 - [Stock trading platform](https://devlcodes.github.io/classic-system-designs/stock-trading.html): 15M orders a day, 2M live price streams at the market open
+- [Search autocomplete](https://devlcodes.github.io/classic-system-designs/autocomplete.html): 5B searches a day, 350k suggestion calls/s
 
 The companion site, [agentic system designs](https://devlcodes.github.io/agentic-ai-notebook/system-design/), builds RAG, agents and evals on top of these same blocks.
 
