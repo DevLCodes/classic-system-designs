@@ -1,0 +1,27 @@
+{
+  "title": "Maps and navigation",
+  "page": "maps.html",
+  "cards": [
+    {"front": "The three products inside a maps app", "back": "A picture of the world that rarely changes (tiles), a shortest-path search that answers in milliseconds (routing), and a live feed of road speeds (traffic).", "link": "maps.html#requirements"},
+    {"front": "Location ping load for 5M navigating trips", "back": "A batch every 5 s is 1M requests a second, about 100 MB/s at peak.", "link": "maps.html#estimates"},
+    {"front": "Why tile URLs carry the map version", "back": "Tiles are never updated in place, so they are cached for a year; a new version is a new URL and old tiles age out.", "link": "maps.html#api"},
+    {"front": "Tiles at zoom level z", "back": "4^z (2^z × 2^z). Zoom 14 is about 268M tiles; the deepest level is about 3/4 of all tiles.", "link": "maps.html#tiles"},
+    {"front": "Vector vs raster tiles", "back": "Vector tiles send geometry and render on the phone: one set (~100 GB to z14) serves every style and language. Raster tiles need a full copy per style.", "link": "maps.html#tiles"},
+    {"front": "Overzoom", "back": "Vector tiles stop around zoom 14-16; beyond that the phone scales the deepest geometry, avoiding billions of tiles at zooms 15-20.", "link": "maps.html#tiles"},
+    {"front": "Dijkstra vs A*", "back": "Dijkstra grows a circle in every direction; A* adds a never-overestimating estimate of time left so the search leans toward the goal.", "link": "maps.html#routing"},
+    {"front": "Contraction hierarchies", "back": "Offline, unimportant nodes are removed and replaced by shortcuts; a query climbs upward from both ends, settling hundreds of nodes in under 1 ms.", "link": "maps.html#routing"},
+    {"front": "Why customizable CH or CRP for traffic", "back": "Plain contraction hierarchies bake weights into shortcuts; customizable variants keep the order fixed and apply new weights in seconds.", "link": "maps.html#routing"},
+    {"front": "Map matching", "back": "A hidden Markov model picks the road sequence that best explains a whole GPS trail, since raw fixes wander 5-20 m and jump between parallel roads.", "link": "maps.html#traffic"},
+    {"front": "How ETAs blend live and historical speeds", "back": "Trust live speed for segments reached soon; lean on the historical speed for that hour for segments far ahead, plus a learned correction.", "link": "maps.html#eta"},
+    {"front": "When to offer a faster route", "back": "Only when it saves more than about 5 minutes or 10%, and not again soon after the last offer, so the app doesn't flap.", "link": "maps.html#rerouting"}
+  ],
+  "quiz": [
+    {"q": "A jam forms on a motorway. Routing uses plain contraction hierarchies and keeps sending drivers into it. Why?", "choices": ["Plain CH bakes weights into shortcuts, so traffic needs a rebuild; a customizable variant applies new weights in seconds", "A* overestimates", "The tiles are stale", "Map matching failed"], "answer": 0, "why": "Customizable CH or CRP separates the order from the weights.", "link": "maps.html#routing"},
+    {"q": "Every minute, the server recomputes routes for all 5M active trips to look for faster options. What is a better design?", "choices": ["Let phones poll every second", "Recompute only trips whose remaining route crosses a segment whose speed changed a lot", "Recompute every 10 minutes instead", "Stop offering reroutes"], "answer": 1, "why": "A segment → active trips index avoids about 83k pointless searches a second.", "link": "maps.html#rerouting"},
+    {"q": "Traffic speeds on a flyover look wrong because cars on the service road below are being counted. What is missing?", "choices": ["A larger Kafka cluster", "Historical speeds", "Map matching over the whole trail with a hidden Markov model", "Raster tiles"], "answer": 2, "why": "Matching whole trails stops cars from teleporting between parallel roads.", "link": "maps.html#traffic"},
+    {"q": "A residential side street jams because the app sends everyone onto it. What helps?", "choices": ["Lower the reroute threshold", "Use Dijkstra instead of CH", "Raise the tile cache TTL", "Track trips assigned to small roads and spread them across alternatives"], "answer": 3, "why": "Large systems spread load and penalise residential roads.", "link": "maps.html#rerouting"},
+    {"q": "A quiet road at 3 am has no probe phones. What speed does the ETA use?", "choices": ["Zero", "The historical speed for that hour and weekday, then the speed limit", "The busiest speed recorded", "The nearest motorway's speed"], "answer": 1, "why": "Gaps fall back to history, then the limit.", "link": "maps.html#traffic"},
+    {"q": "Someone walks a cart full of phones slowly down a road to fake a jam. What defends against it?", "choices": ["Require many independent phones per segment and spot outliers", "Trust any probe with GPS", "Use raster tiles", "Shorter tile URLs"], "answer": 0, "why": "Many probes from few accounts or one spot are suspicious.", "link": "maps.html#risks"},
+    {"q": "A new map version ships. How do tile caches stay correct without a mass purge?", "choices": ["Purge the CDN globally", "Tiles expire after an hour", "Each version has new URLs; unchanged tiles are copied forward and stay warm", "Phones re-download all tiles"], "answer": 2, "why": "Immutable, versioned tiles never need purging.", "link": "maps.html#tiles"}
+  ]
+}
