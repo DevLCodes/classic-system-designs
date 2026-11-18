@@ -1,0 +1,566 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Search and inverted indexes · Classic System Design</title>
+<meta name="description" content="Full-text search for system design: analyzers and tokens, inverted indexes and posting lists, BM25 ranking, sharding by document vs by term, near-real-time refresh and Elasticsearch basics, with an inverted-index lab.">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700&family=Instrument+Sans:ital,wght@0,400;0,500;0,600;1,400&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+  /* Layout: a slim site bar, then either a card grid (home), a sticky contents rail + reading column (articles), or a filterable term list (glossary). Light, single look. */
+  :root {
+    color-scheme: light;
+    --bg: #e9ecef; --paper: #f7f8f9; --ink: #1c2530; --muted: #586473; --line: #cdd4dc; --line-strong: #9aa5b1;
+    --accent: #4255d4; --accent-ink: #ffffff; --track: #d3d9e0; --code-bg: #eef1f4; --wire: #7d8996;
+    --c-ingest: #2a9d8f; --c-kb: #4d5fd8; --c-serve: #d7932a; --c-model: #e2674f; --c-gov: #b2456e; --c-cross: #4a5562; --c-dlq: #b23a3a; --c-ok: #2f8f5b;
+    --t-src: #e4e8ec; --t-ingest: #d8eeea; --t-kb: #dfe3fa; --t-serve: #f8ead2; --t-model: #fbe1da; --t-gov: #f3dde6; --t-cross: #dfe2e6; --t-dlq: #f6dddb;
+    --font-display: "Bricolage Grotesque", "Avenir Next", "Segoe UI", system-ui, sans-serif;
+    --font-body: "Instrument Sans", "Helvetica Neue", "Segoe UI", system-ui, sans-serif;
+    --font-mono: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  @media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
+  body { margin: 0; background: var(--bg); color: var(--ink); font-family: var(--font-body); font-size: 16px; line-height: 1.6; }
+  a { color: var(--accent); }
+  .wrap { max-width: 1240px; margin: 0 auto; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
+
+  .sitebar { border-bottom: 1px solid var(--line); background: var(--paper); }
+  .sitebar .wrap { display: flex; align-items: center; gap: 18px; flex-wrap: wrap; padding-block: 12px; }
+  .brand { font-family: var(--font-display); font-weight: 700; font-size: 17px; color: var(--ink); text-decoration: none; margin-right: auto; }
+  .sitebar nav { display: flex; gap: 16px; flex-wrap: wrap; font-size: 14px; }
+  .sitebar nav a { color: var(--muted); text-decoration: none; }
+  .sitebar nav a:hover, .sitebar nav a[aria-current="page"] { color: var(--ink); }
+  .sitebar nav a[aria-current="page"] { font-weight: 600; }
+
+  .intro { padding-block: 40px 8px; display: grid; gap: 10px; max-width: 820px; }
+  .eyebrow { margin: 0; font-family: var(--font-mono); font-size: 12px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+  h1 { margin: 0; font-family: var(--font-display); font-weight: 700; font-size: clamp(30px, 5vw, 46px); line-height: 1.05; text-wrap: balance; }
+  .intro .lead { font-size: 18px; margin: 0; }
+
+  .doc { display: grid; grid-template-columns: 220px minmax(0, 1fr); gap: 48px; padding-block: 36px 72px; }
+  .toc { position: sticky; top: calc(env(safe-area-inset-top, 0px) + 20px); align-self: start; }
+  .toc p { margin: 0 0 8px; font-family: var(--font-mono); font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+  .toc ol { margin: 0; padding: 0; list-style: none; display: grid; gap: 2px; counter-reset: toc; }
+  .toc li { counter-increment: toc; }
+  .toc a { display: flex; gap: 8px; padding: 3px 0; font-size: 14px; color: var(--muted); text-decoration: none; }
+  .toc a::before { content: counter(toc, decimal-leading-zero); font-family: var(--font-mono); font-size: 11.5px; padding-top: 2px; color: var(--line-strong); }
+  .toc a:hover { color: var(--ink); }
+  article { min-width: 0; max-width: 760px; }
+  section { padding-bottom: 36px; margin-bottom: 36px; border-bottom: 1px solid var(--line); scroll-margin-top: 20px; }
+  section:last-child { border-bottom: 0; }
+  h2 { margin: 0 0 10px; font-family: var(--font-display); font-weight: 700; font-size: 28px; line-height: 1.15; text-wrap: balance; }
+  h3 { margin: 26px 0 6px; font-family: var(--font-display); font-weight: 600; font-size: 19px; line-height: 1.25; }
+  p { margin: 0 0 14px; }
+  .lead { font-size: 18px; }
+  ul.plain, ol.plain { margin: 0 0 16px; padding-left: 22px; display: grid; gap: 6px; }
+  code { font-family: var(--font-mono); font-size: 0.88em; background: var(--code-bg); padding: 1px 5px; border-radius: 4px; }
+  pre { margin: 0 0 16px; padding: 14px 16px; background: var(--code-bg); border-radius: 10px; overflow-x: auto; font-size: 13px; line-height: 1.55; }
+  pre code { background: none; padding: 0; font-size: inherit; }
+  .table { overflow-x: auto; margin: 0 0 18px; }
+  table { width: 100%; border-collapse: collapse; font-size: 14.5px; line-height: 1.45; }
+  th, td { text-align: left; vertical-align: top; padding: 8px 10px; border-bottom: 1px solid var(--line); }
+  th { font-family: var(--font-mono); font-size: 11.5px; font-weight: 500; letter-spacing: .05em; text-transform: uppercase; color: var(--muted); }
+  td.num { font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .note { border-left: 3px solid var(--accent); background: var(--paper); padding: 12px 16px; border-radius: 0 10px 10px 0; margin: 0 0 18px; }
+  .note p:last-child { margin: 0; }
+  .formula { font-family: var(--font-mono); font-size: 14px; background: var(--paper); border: 1px solid var(--line); border-radius: 10px; padding: 12px 16px; margin: 0 0 16px; overflow-x: auto; white-space: nowrap; }
+  .related { display: flex; flex-wrap: wrap; gap: 8px; margin: 0; padding: 0; list-style: none; }
+  .related a { display: inline-block; padding: 4px 12px; border: 1px solid var(--line); border-radius: 999px; font-size: 14px; color: var(--ink); text-decoration: none; background: var(--paper); }
+  .related a:hover { border-color: var(--ink); }
+  .pager { display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; font-size: 14px; }
+  footer.site { border-top: 1px solid var(--line); padding-block: 20px 40px; font-size: 13px; color: var(--muted); }
+  a:focus-visible, input:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+  /* home */
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 16px; margin: 0 0 40px; padding: 0; list-style: none; }
+  .card { display: grid; gap: 8px; height: 100%; padding: 18px; background: var(--paper); border: 1px solid var(--line); border-radius: 14px; color: var(--ink); text-decoration: none; }
+  .card:hover { border-color: var(--ink); }
+  .card .k { font-family: var(--font-mono); font-size: 11px; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
+  .card h3 { margin: 0; font-size: 20px; }
+  .card p { margin: 0; font-size: 14.5px; color: var(--muted); }
+  .card svg { width: 100%; height: auto; display: block; }
+  .card.feature svg { max-width: 420px; justify-self: center; }
+  .card.feature { grid-column: 1 / -1; grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr); align-items: center; gap: 24px; }
+  .home-h { margin: 28px 0 12px; font-family: var(--font-display); font-size: 24px; }
+
+  /* glossary */
+  .gl-tools { position: sticky; top: 0; z-index: 2; background: var(--bg); padding-block: 12px; display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+  .gl-tools input { flex: 1 1 260px; min-width: 0; font: 15px var(--font-body); padding: 9px 12px; border-radius: 10px; border: 1px solid var(--line-strong); background: #fff; color: var(--ink); }
+  .gl-letters { display: flex; flex-wrap: wrap; gap: 4px; font-family: var(--font-mono); font-size: 13px; }
+  .gl-letters a { padding: 2px 6px; border-radius: 6px; text-decoration: none; color: var(--muted); }
+  .gl-letters a:hover { background: var(--paper); color: var(--ink); }
+  .gl { max-width: 860px; }
+  .gl-item { margin: 0; }
+  .gl-item { display: grid; grid-template-columns: 220px minmax(0, 1fr); gap: 16px; padding: 12px 0; border-bottom: 1px solid var(--line); scroll-margin-top: 70px; }
+  .gl-item dt { font-weight: 600; }
+  .gl-item dt small { display: block; font-weight: 400; font-family: var(--font-mono); font-size: 11px; color: var(--muted); letter-spacing: .04em; text-transform: uppercase; margin-top: 2px; }
+  .gl-item dd { margin: 0; }
+  .gl-item dd .see { font-size: 13.5px; }
+  .gl-letter { margin: 26px 0 4px; font-family: var(--font-display); font-size: 22px; scroll-margin-top: 70px; }
+
+  @media (max-width: 900px) {
+    .doc { grid-template-columns: minmax(0, 1fr); gap: 24px; padding-block: 28px 56px; }
+    .toc { position: static; }
+    .toc ol { grid-template-columns: repeat(2, minmax(0, 1fr)); column-gap: 12px; }
+    .card.feature { grid-template-columns: minmax(0, 1fr); }
+  }
+  @media (max-width: 640px) {
+    .gl-item { grid-template-columns: minmax(0, 1fr); gap: 4px; }
+    h2 { font-size: 24px; }
+    .intro .lead, .lead { font-size: 16.5px; }
+  }
+
+  /* diagrams */
+  .fig { margin: 6px 0 24px; overflow-x: auto; }
+  .fig svg { display: block; width: 100%; height: auto; min-width: 600px; }
+  .fig figcaption { margin-top: 8px; font-size: 13px; line-height: 1.45; color: var(--muted); }
+  .dg text { font-family: var(--font-body); font-size: 13px; fill: var(--ink); }
+  .dg .sm { font-size: 11.5px; fill: var(--muted); }
+  .dg .small { font-size: 12px; }
+  .dg .b { font-weight: 600; }
+  .dg .mono { font-family: var(--font-mono); }
+  .dg .it { font-style: italic; }
+  .dg .mute { fill: var(--muted); }
+  .dg .gov { fill: var(--c-gov); font-weight: 600; }
+  .dg .okt { fill: var(--c-ok); font-weight: 600; }
+  .dg .bad { fill: var(--c-dlq); font-weight: 600; }
+  .dg .cap { font-family: var(--font-mono); font-size: 11px; letter-spacing: .06em; fill: var(--muted); }
+  .dg .big { font-family: var(--font-display); font-size: 30px; font-weight: 700; fill: var(--ink); }
+  .dg .box { fill: var(--paper); stroke: var(--line-strong); stroke-width: 1.25; }
+  .dg .ghost { fill: none; stroke: var(--line-strong); stroke-width: 1.25; stroke-dasharray: 5 5; }
+  .dg .track { fill: var(--track); }
+  .dg .rule { stroke: var(--line); stroke-width: 1; }
+  .dg .axis { stroke: var(--line-strong); stroke-width: 1.25; }
+  .dg .wire { fill: none; stroke: var(--wire); stroke-width: 1.4; }
+  .dg .wire.dash { stroke-dasharray: 4 4; }
+  .dg .wire.hot { stroke: var(--accent); stroke-width: 2; }
+  .dg .wire.red { stroke: var(--c-dlq); }
+  .dg .ah { fill: var(--wire); }
+  .dg .xmark { stroke: var(--c-dlq); stroke-width: 1.8; fill: none; }
+  .dg .tick { stroke: var(--c-ok); stroke-width: 2; fill: none; }
+  .dg .k-src { fill: var(--t-src); stroke: #8795a3; stroke-width: 1.5; }
+  .dg .k-ingest { fill: var(--t-ingest); stroke: var(--c-ingest); stroke-width: 1.5; }
+  .dg .k-kb { fill: var(--t-kb); stroke: var(--c-kb); stroke-width: 1.5; }
+  .dg .k-serve { fill: var(--t-serve); stroke: var(--c-serve); stroke-width: 1.5; }
+  .dg .k-model { fill: var(--t-model); stroke: var(--c-model); stroke-width: 1.5; }
+  .dg .k-gov { fill: var(--t-gov); stroke: var(--c-gov); stroke-width: 1.5; }
+  .dg .k-cross { fill: var(--t-cross); stroke: var(--c-cross); stroke-width: 1.5; }
+  .dg .k-dlq { fill: var(--t-dlq); stroke: var(--c-dlq); stroke-width: 1.5; }
+  .dg .k-user { fill: #ffffff; stroke: var(--line-strong); stroke-width: 1.5; }
+  .dg .f-serve { fill: var(--c-serve); } .dg .f-kb { fill: var(--c-kb); } .dg .f-model { fill: var(--c-model); } .dg .f-gov { fill: var(--c-gov); } .dg .f-ingest { fill: var(--c-ingest); } .dg .f-cross { fill: #b8c0c9; } .dg .f-dlq { fill: var(--c-dlq); } .dg .f-ok { fill: var(--c-ok); }
+  .dg .cell { fill: var(--paper); stroke: var(--line-strong); stroke-width: 1; }
+  .dg .cell.hot { fill: var(--t-ingest); stroke: var(--c-ingest); stroke-width: 1.5; }
+  .dg .cell.old { fill: var(--t-kb); stroke: var(--c-kb); }
+  .dg .cell.new { fill: var(--t-ingest); stroke: var(--c-ingest); stroke-width: 1.5; }
+  .dg .cell.gone { fill: var(--paper); stroke: var(--line); }
+  .dg .dot-hr { fill: var(--c-gov); } .dg .dot-it { fill: var(--c-kb); } .dg .dot-eng { fill: var(--c-ingest); } .dg .dot-q { fill: var(--c-serve); stroke: var(--ink); stroke-width: 1.5; }
+  .dg .halo { fill: none; stroke: var(--c-serve); stroke-width: 1.5; stroke-dasharray: 4 4; }
+  .dg .zone { fill: var(--paper); stroke: var(--line); stroke-width: 1; }
+</style>
+
+<style>
+  .lab { margin: 6px 0 26px; padding: 14px 16px 16px; background: var(--paper); border: 1px solid var(--line); border-radius: 14px; }
+  .lab-row { display: flex; flex-wrap: wrap; gap: 10px 18px; align-items: center; margin: 0 0 12px; }
+  .lab-k { font-family: var(--font-mono); font-size: 11px; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
+  .lab label { display: inline-flex; gap: 8px; align-items: center; font-size: 14px; }
+  .lab input[type=range] { width: 150px; accent-color: var(--accent); }
+  .lab input[type=checkbox] { width: 16px; height: 16px; accent-color: var(--accent); }
+  .lab input[type=text] { flex: 1 1 260px; min-width: 0; font: 15px var(--font-body); padding: 8px 11px; border-radius: 9px; border: 1px solid var(--line-strong); background: #fff; color: var(--ink); }
+  .lab output { font-family: var(--font-mono); font-size: 12.5px; min-width: 6ch; font-variant-numeric: tabular-nums; }
+  .seg { display: inline-flex; flex-wrap: wrap; gap: 6px; }
+  .seg button, .chips button { font: 600 13px var(--font-body); color: var(--ink); background: #fff; border: 1px solid var(--line); border-radius: 8px; padding: 6px 12px; cursor: pointer; }
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; }
+  .chips button { font-weight: 500; border-radius: 999px; padding: 4px 11px; font-size: 13px; }
+  .seg button:hover, .chips button:hover { border-color: var(--ink); }
+  .seg button[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+  .seg button:focus-visible, .chips button:focus-visible, .lab input:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .lab-out { margin: 12px 0 0; padding: 10px 12px; background: #fff; border: 1px solid var(--line); border-radius: 10px; font-size: 14.5px; line-height: 1.5; font-variant-numeric: tabular-nums; }
+  .chunks { display: grid; gap: 8px; max-height: 470px; overflow: auto; padding-right: 4px; }
+  .chunk { min-width: 0; padding: 8px 11px; background: #fff; border: 1px solid var(--line); border-left: 4px solid var(--c-kb); border-radius: 8px; font-size: 14px; line-height: 1.5; overflow-wrap: anywhere; }
+  .chunk:nth-child(even) { border-left-color: var(--c-ingest); }
+  .chunk.ans { box-shadow: 0 0 0 2px var(--c-serve); }
+  .chunk .ch { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-bottom: 4px; font-family: var(--font-mono); font-size: 11px; color: var(--muted); }
+  .chunk .pfx { display: block; font-family: var(--font-mono); font-size: 11.5px; color: var(--c-kb); }
+  .chunk .ov { background: var(--track); border-radius: 3px; }
+  .chunk mark { background: #ffe9b3; border-radius: 3px; padding: 0 2px; }
+  .chunk table { width: auto; font-size: 13px; margin: 4px 0; }
+  .chunk td { padding: 2px 10px 2px 0; border-bottom: 1px solid var(--line); }
+  .badge { display: inline-block; padding: 0 7px; border-radius: 999px; border: 1px solid; font-family: var(--font-mono); font-size: 10.5px; line-height: 1.6; }
+  .badge.bad { color: var(--c-dlq); border-color: var(--c-dlq); background: var(--t-dlq); }
+  .badge.ok { color: var(--c-ok); border-color: var(--c-ok); background: #e3f3ea; }
+  .badge.info { color: var(--c-kb); border-color: var(--c-kb); background: var(--t-kb); }
+  .bars { display: grid; gap: 8px; margin: 4px 0 0; }
+  .bar-row { display: grid; grid-template-columns: minmax(0, 150px) minmax(0, 1fr) 46px; gap: 10px; align-items: center; font-size: 14px; }
+  .bar { position: relative; height: 14px; border-radius: 7px; background: var(--track); }
+  .bar i { position: absolute; inset: 0 auto 0 0; border-radius: 7px; background: var(--c-kb); transition: width .3s; }
+  .bar b { position: absolute; top: -4px; bottom: -4px; width: 2px; background: var(--c-dlq); }
+  .bar-row .v { font-family: var(--font-mono); font-size: 12.5px; text-align: right; }
+  .stages { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 10px; padding: 0; list-style: none; font-size: 13px; }
+  .stages li { padding: 2px 10px; border-radius: 999px; border: 1px solid var(--line); color: var(--muted); background: #fff; }
+  .stages li.hit { border-color: var(--accent); color: var(--accent-ink); background: var(--accent); }
+  .stages li.skip { text-decoration: line-through; }
+  .rlist { display: grid; gap: 6px; margin: 0; padding: 0; list-style: none; counter-reset: r; }
+  .rlist li { counter-increment: r; display: grid; grid-template-columns: 28px minmax(0, 1fr) auto; gap: 10px; align-items: center; padding: 6px 10px; background: #fff; border: 1px solid var(--line); border-radius: 8px; font-size: 14px; }
+  .rlist li::before { content: counter(r); font-family: var(--font-mono); font-size: 12px; color: var(--muted); }
+  .rlist li.rel { border-color: var(--c-ok); background: #f0f8f3; }
+  .rlist button { font: 600 12px var(--font-body); padding: 3px 10px; border-radius: 999px; border: 1px solid var(--line-strong); background: #fff; color: var(--ink); cursor: pointer; white-space: nowrap; }
+  .rlist li.rel button { background: var(--c-ok); border-color: var(--c-ok); color: #fff; }
+  .metrics { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 8px; margin: 12px 0 0; }
+  .metric { padding: 8px 10px; background: #fff; border: 1px solid var(--line); border-radius: 10px; }
+  .metric .n { display: block; font-family: var(--font-display); font-size: 24px; font-weight: 700; font-variant-numeric: tabular-nums; }
+  .metric .l { font-family: var(--font-mono); font-size: 11px; letter-spacing: .04em; text-transform: uppercase; color: var(--muted); }
+  .metric small { display: block; font-size: 12px; color: var(--muted); line-height: 1.35; margin-top: 2px; }
+  td.pass { color: var(--c-ok); font-weight: 600; } td.fail { color: var(--c-dlq); font-weight: 600; }
+  .say { border-left: 3px solid var(--c-serve); background: var(--paper); padding: 12px 16px; border-radius: 0 10px 10px 0; margin: 0 0 16px; font-size: 15.5px; }
+  .say p:last-child { margin: 0; }
+</style>
+
+<style>
+  .lab-chart { display: block; width: 100%; height: auto; margin: 4px 0 0; }
+  .lab-chart text { font-family: var(--font-body); font-size: 12px; fill: var(--muted); }
+  .grid-cells { display: grid; gap: 4px; }
+  .srv { display: grid; grid-template-columns: 92px minmax(0,1fr) 70px; gap: 10px; align-items: center; font-size: 14px; }
+  .muted { color: var(--muted); }
+  .lab select { font: 14px var(--font-body); padding: 6px 8px; border-radius: 8px; border: 1px solid var(--line-strong); background: #fff; color: var(--ink); }
+  .lab input[type=number] { width: 9ch; font: 14px var(--font-mono); padding: 6px 8px; border-radius: 8px; border: 1px solid var(--line-strong); background: #fff; color: var(--ink); }
+</style>
+<style>
+  .lab textarea { display: block; width: 100%; min-height: 150px; resize: vertical; font: 14px/1.5 var(--font-mono); padding: 8px 11px; border-radius: 9px; border: 1px solid var(--line-strong); background: #fff; color: var(--ink); box-sizing: border-box; }
+  .lab .lab-k { font-size: 14px; color: var(--muted); }
+  .lab .full { display: grid; gap: 6px; width: 100%; font-size: 14px; }
+  .toks { display: flex; flex-wrap: wrap; gap: 6px; margin: 0; padding: 0; list-style: none; }
+  .toks li { font-family: var(--font-mono); font-size: 12.5px; padding: 1px 9px; border-radius: 999px; border: 1px solid var(--c-kb); background: var(--t-kb); color: var(--ink); }
+  .toks li.drop { border-color: var(--line); background: #fff; color: var(--muted); text-decoration: line-through; }
+  .ix { max-height: 260px; overflow: auto; border: 1px solid var(--line); border-radius: 10px; background: #fff; margin: 6px 0 12px; }
+  .ix table { width: 100%; margin: 0; font-size: 13px; border-collapse: collapse; }
+  .ix th, .ix td { padding: 4px 10px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }
+  .ix th { position: sticky; top: 0; background: var(--paper); font-family: var(--font-mono); font-size: 11px; letter-spacing: .04em; text-transform: uppercase; color: var(--muted); }
+  .ix td:first-child { font-family: var(--font-mono); white-space: nowrap; }
+  .ix td.pl { font-family: var(--font-mono); font-size: 12px; overflow-wrap: anywhere; }
+  .ix tr.q td { background: var(--t-serve); }
+  .res { display: grid; gap: 6px; margin: 6px 0 0; padding: 0; list-style: none; }
+  .res li { display: grid; grid-template-columns: 34px minmax(0, 1fr) auto; gap: 10px; align-items: baseline; padding: 7px 10px; background: #fff; border: 1px solid var(--line); border-radius: 8px; font-size: 14px; }
+  .res li .d { font-family: var(--font-mono); font-size: 12px; color: var(--muted); }
+  .res li .s { font-family: var(--font-mono); font-size: 12.5px; font-variant-numeric: tabular-nums; }
+  .res li .t { overflow-wrap: anywhere; }
+  .res mark { background: #ffe9b3; border-radius: 3px; padding: 0 2px; }
+  .lab h4 { margin: 14px 0 4px; font-family: var(--font-mono); font-size: 11px; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); font-weight: 500; }
+</style>
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs><marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" class="ah" style="fill:#7d8996"/></marker></defs></svg>
+<header class="sitebar"><div class="wrap"><a class="brand" href="index.html">Classic System Design</a><nav aria-label="Site"><a href="index.html">Home</a><a href="index.html#blocks" aria-current="page">Building blocks</a><a href="index.html#designs">Designs</a><a href="https://devlcodes.github.io/agentic-ai-notebook/system-design/index.html">Agentic designs ↗</a></nav></div></header>
+<main>
+<div class="wrap"><div class="intro"><p class="eyebrow">Building block · data</p><h1>Search and inverted indexes</h1><p class="lead">Finding the few documents that match some words out of millions, in milliseconds, and putting the best ones first.</p></div></div>
+<div class="wrap doc">
+  <nav class="toc" aria-label="On this page"><p>On this page</p><ol><li><a href="#what">What a search engine does</a></li><li><a href="#analyzers">Tokens and analyzers</a></li><li><a href="#index">The inverted index</a></li><li><a href="#lab">Try it: build an index</a></li><li><a href="#ranking">Ranking with BM25</a></li><li><a href="#sharding">Sharding a search index</a></li><li><a href="#nrt">Near-real-time refresh</a></li><li><a href="#elasticsearch">Elasticsearch basics</a></li><li><a href="#failure">How search fails</a></li><li><a href="#interview">Saying it in an interview</a></li><li><a href="#real-world">In the real world</a></li><li><a href="#related">Related</a></li></ol></nav>
+  <article>
+<section id="what"><h2>What a search engine does</h2>
+<p class="lead">A database index answers "which row has id 42?". A search index answers "which documents mention <em>wireless noise cancelling headphones</em>, and which of them are the best match?".</p>
+<p>The naive way is <code>WHERE body LIKE '%headphones%'</code>. A pattern with a leading wildcard can't use a B-tree, so the database reads every row. That is fine for 10,000 rows and hopeless for 100 million. It also gets the meaning wrong: it misses "Headphone", matches "headphonesXYZ", and has no idea which match is better.</p>
+<p>A search engine fixes this with work at write time. It splits each document into terms, and keeps a map from each term to the documents that contain it. A query then looks up a handful of terms instead of scanning every document.</p>
+<figure class="fig"><svg viewBox="0 0 722 236" class="dg" role="img" aria-label="Two paths. Indexing: documents go through an analyzer into an inverted index. Querying: the query goes through the same analyzer, looks up posting lists, scores matches and returns the top results.">
+<text x="20" y="22" class="cap">INDEXING PATH · ON WRITE</text>
+<rect x="20" y="36" width="120" height="48" rx="8" class="k-src"/><text x="80" y="57" class="small b" text-anchor="middle">Documents</text><text x="80" y="73" class="sm" text-anchor="middle">from the database</text>
+<path d="M140 60 L188 60" class="wire" marker-end="url(#ah)"/>
+<rect x="190" y="36" width="130" height="48" rx="8" class="k-ingest"/><text x="255" y="57" class="small b" text-anchor="middle">Analyzer</text><text x="255" y="73" class="sm" text-anchor="middle">split, lowercase, stem</text>
+<path d="M320 60 L398 96" class="wire" marker-end="url(#ah)"/>
+<rect x="400" y="84" width="150" height="68" rx="8" class="k-kb"/><text x="475" y="106" class="small b" text-anchor="middle">Inverted index</text><text x="475" y="123" class="sm mono" text-anchor="middle">term → doc IDs</text><text x="475" y="139" class="sm" text-anchor="middle">in immutable segments</text>
+<text x="20" y="128" class="cap">QUERY PATH · ON READ</text>
+<rect x="20" y="142" width="120" height="48" rx="8" class="k-user"/><text x="80" y="163" class="small b" text-anchor="middle">Query</text><text x="80" y="179" class="sm" text-anchor="middle">"Wireless Headphones"</text>
+<path d="M140 166 L188 166" class="wire hot" marker-end="url(#ah)"/>
+<rect x="190" y="142" width="130" height="48" rx="8" class="k-ingest"/><text x="255" y="163" class="small b" text-anchor="middle">Same analyzer</text><text x="255" y="179" class="sm mono" text-anchor="middle">wireless, headphon</text>
+<path d="M320 166 L398 132" class="wire hot" marker-end="url(#ah)"/>
+<path d="M550 118 L588 118" class="wire hot" marker-end="url(#ah)"/>
+<rect x="590" y="84" width="122" height="68" rx="8" class="k-serve"/><text x="651" y="106" class="small b" text-anchor="middle">Score + top k</text><text x="651" y="123" class="sm" text-anchor="middle">BM25, then</text><text x="651" y="139" class="sm" text-anchor="middle">business signals</text>
+<text x="361" y="222" class="sm" text-anchor="middle">Index and query must use the same analyzer, or "Headphones" in a query never meets "headphone" in the index.</text>
+</svg><figcaption>Search moves the work to write time: analyze once when a document changes, then answer every query with a few lookups.</figcaption></figure>
+<p>The search index is almost never the source of truth. The database owns the data; the index is a derived copy, built to be queried by words, and rebuilt from the database whenever needed.</p></section>
+
+<section id="analyzers"><h2>Tokens and analyzers</h2>
+<p>An <strong>analyzer</strong> turns text into terms. It runs in three steps: character filters clean the raw text (strip HTML, fold accents), a <strong>tokenizer</strong> splits it into tokens, and token filters change or drop tokens.</p>
+<div class="table"><table><thead><tr><th>Step</th><th>Example</th><th>Why</th></tr></thead><tbody>
+<tr><td>Tokenize</td><td><code>"Noise-cancelling headphones!"</code> → <code>Noise</code> <code>cancelling</code> <code>headphones</code></td><td>Split on spaces and punctuation. Languages without spaces (Chinese, Japanese, Thai) need dictionary or n-gram tokenizers.</td></tr>
+<tr><td>Lowercase</td><td><code>Noise</code> → <code>noise</code></td><td>"Redis" and "redis" should match</td></tr>
+<tr><td>Stop words</td><td>drop <code>the</code>, <code>a</code>, <code>of</code></td><td>Smaller index. Many engines now keep them, because BM25 already gives them almost no weight and phrases like "to be or not to be" need them.</td></tr>
+<tr><td>Stemming</td><td><code>headphones</code> → <code>headphon</code>, <code>cancelling</code> → <code>cancel</code></td><td>"run", "runs" and "running" all match. Stemmers are crude; a lemmatizer uses a dictionary and is slower but more accurate.</td></tr>
+<tr><td>Synonyms</td><td><code>tv</code> → <code>tv</code>, <code>television</code></td><td>Match words the user didn't type. Usually applied at query time so the list can change without reindexing.</td></tr>
+<tr><td>N-grams</td><td><code>head</code> → <code>he</code> <code>hea</code> <code>head</code></td><td>Prefix and typo-tolerant matching for search-as-you-type, at the cost of a much bigger index</td></tr>
+</tbody></table></div>
+<div class="note"><p>Changing the analyzer changes which terms are in the index, so it means a full reindex. Pick it early, test it on real queries, and plan for reindexing (an index alias makes the switch instant; see <a href="#elasticsearch">Elasticsearch basics</a>).</p></div>
+<p>Not every field should be analyzed. A product title is <strong>text</strong>: analyzed, searchable by word. A SKU, a status or an email is a <strong>keyword</strong>: stored as one exact term, used for filters, sorting and facet counts.</p></section>
+
+<section id="index"><h2>The inverted index</h2>
+<p>A normal (forward) index maps a document to its words. An <strong>inverted</strong> index flips it: each term points to a <strong>posting list</strong>, the sorted list of document IDs that contain it. The set of all terms is the <strong>term dictionary</strong>.</p>
+<figure class="fig"><svg viewBox="0 0 722 222" class="dg" role="img" aria-label="Three documents on the left; the term dictionary in the middle points to posting lists of document IDs with term counts on the right">
+<text x="20" y="22" class="cap">DOCUMENTS</text>
+<rect x="20" y="34" width="210" height="40" rx="8" class="k-src"/><text x="32" y="58" class="sm mono">1 · red running shoes</text>
+<rect x="20" y="84" width="210" height="40" rx="8" class="k-src"/><text x="32" y="108" class="sm mono">2 · blue running jacket</text>
+<rect x="20" y="134" width="210" height="40" rx="8" class="k-src"/><text x="32" y="158" class="sm mono">3 · red shoes, red laces</text>
+<path d="M230 104 L278 104" class="wire" marker-end="url(#ah)"/>
+<text x="290" y="22" class="cap">TERM DICTIONARY</text>
+<text x="470" y="22" class="cap">POSTING LISTS · DOC:COUNT</text>
+<g class="mono">
+<rect x="290" y="34" width="120" height="24" rx="5" class="box"/><text x="302" y="51" class="small">blue</text><path d="M410 46 L466 46" class="wire" marker-end="url(#ah)"/><text x="470" y="51" class="small">2:1</text>
+<rect x="290" y="62" width="120" height="24" rx="5" class="box"/><text x="302" y="79" class="small">jacket</text><path d="M410 74 L466 74" class="wire" marker-end="url(#ah)"/><text x="470" y="79" class="small">2:1</text>
+<rect x="290" y="90" width="120" height="24" rx="5" class="box"/><text x="302" y="107" class="small">lace</text><path d="M410 102 L466 102" class="wire" marker-end="url(#ah)"/><text x="470" y="107" class="small">3:1</text>
+<rect x="290" y="118" width="120" height="24" rx="5" class="k-serve"/><text x="302" y="135" class="small b">red</text><path d="M410 130 L466 130" class="wire hot" marker-end="url(#ah)"/><text x="470" y="135" class="small b">1:1  3:2</text>
+<rect x="290" y="146" width="120" height="24" rx="5" class="box"/><text x="302" y="163" class="small">run</text><path d="M410 158 L466 158" class="wire" marker-end="url(#ah)"/><text x="470" y="163" class="small">1:1  2:1</text>
+<rect x="290" y="174" width="120" height="24" rx="5" class="k-serve"/><text x="302" y="191" class="small b">shoe</text><path d="M410 186 L466 186" class="wire hot" marker-end="url(#ah)"/><text x="470" y="191" class="small b">1:1  3:1</text>
+</g>
+<text x="560" y="150" class="sm">"red shoes" = intersect</text><text x="560" y="166" class="sm">[1, 3] ∩ [1, 3] → 1, 3</text>
+<text x="560" y="182" class="sm">doc 3 says "red" twice,</text><text x="560" y="198" class="sm">so it scores higher</text>
+</svg><figcaption>Posting lists are sorted by document ID, so an AND query is a merge of sorted lists and an OR query is a union.</figcaption></figure>
+<h3>What a posting list holds</h3>
+<ul>
+<li><strong>Document IDs</strong>, sorted. Stored as gaps between IDs rather than the IDs themselves: <code>3, 7, 21, 22, 40</code> becomes <code>3, 4, 14, 1, 18</code>, and small numbers pack into a few bits. Lucene packs blocks of 128 gaps using just enough bits for the largest one.</li>
+<li><strong>Term frequency</strong>: how often the term appears in each document, for scoring.</li>
+<li><strong>Positions</strong> (optional): where in the document each occurrence is, so a phrase query like <code>"red shoes"</code> can check that the words are next to each other. Positions often make the index twice as big, so turn them off on fields that never need phrases.</li>
+</ul>
+<h3>Answering a query</h3>
+<p>For <code>red AND shoes</code>, walk both sorted lists with two pointers and keep the IDs that appear in both. Start from the shortest list: if "red" has 2 million entries and "suede" has 3,000, the result can have at most 3,000. Skip pointers let the engine jump ahead in the long list instead of reading every entry.</p>
+<p>The term dictionary itself has to be fast to look up. Lucene keeps it as a compressed prefix structure (a finite state transducer) small enough to sit in memory, so finding a term's posting list is a memory lookup plus, at most, one disk read.</p>
+<h3>Immutable segments</h3>
+<p>Posting lists are packed tightly and sorted, so editing them in place would be slow. Instead, new documents go into a new small <strong>segment</strong>, a complete mini-index that never changes once written. A query searches every segment and merges the results. A background job merges small segments into bigger ones, just like compaction in an <a href="databases.html">LSM tree</a>.</p>
+<p>Because segments are immutable, a <strong>delete</strong> only marks the document as gone in a bitmap, and an <strong>update</strong> is a delete plus a new insert. The space comes back when segments merge. A workload that updates the same documents all day (prices, stock counts) makes a lot of merge work.</p></section>
+
+<section id="lab"><h2>Try it: build an index</h2>
+<p>Each line below is one document. Edit them, type a query, and watch the inverted index and the BM25 ranking update. The stemmer is a deliberately crude suffix stripper, so you can see both what stemming catches and what it mangles.</p>
+<div class="lab" id="sxlab">
+  <div class="lab-row"><label class="full" for="sx-docs">Documents, one per line<textarea id="sx-docs" spellcheck="false">Redis is an in-memory cache for hot keys
+Caching hot keys in Redis cuts database reads
+Elasticsearch builds an inverted index for full-text search
+An inverted index maps each term to the documents that contain it
+Search engines rank matching documents with BM25
+A B-tree index finds rows by key in a database</textarea></label></div>
+  <div class="lab-row"><label for="sx-q" style="flex:1 1 260px">Query <input type="text" id="sx-q" value="inverted index search"></label></div>
+  <div class="lab-row"><label for="sx-stop"><input type="checkbox" id="sx-stop" checked> Drop stop words</label><label for="sx-stem"><input type="checkbox" id="sx-stem" checked> Stem</label><span class="lab-k">Match</span><span class="seg" role="group" aria-label="Match mode" id="sx-mode"><button type="button" data-v="or" aria-pressed="true">Any term (OR)</button><button type="button" data-v="and" aria-pressed="false">All terms (AND)</button></span></div>
+  <h4>Query after the analyzer</h4>
+  <ul class="toks" id="sx-qt"></ul>
+  <h4>Ranked results</h4>
+  <ol class="res" id="sx-res"></ol>
+  <p class="lab-out" id="sx-out" aria-live="polite"></p>
+  <h4>Inverted index · query terms highlighted</h4>
+  <div class="ix"><table><thead><tr><th>Term</th><th>Docs</th><th>Posting list · doc:count</th></tr></thead><tbody id="sx-ix"></tbody></table></div>
+  <div class="metrics" id="sx-m"></div>
+</div>
+<p class="muted" style="font-size:13.5px">Scores use BM25 with k1 = 1.2 and b = 0.75 and Lucene's IDF formula. With only a few documents, IDF swings a lot; on a real corpus it is much steadier.</p></section>
+
+<section id="ranking"><h2>Ranking with BM25</h2>
+<p>Matching gives a set of documents. Ranking decides the order, and users rarely look past the first ten. Three ideas carry most of the weight:</p>
+<ul>
+<li><strong>Term frequency.</strong> A document that says "kafka" five times is probably more about Kafka than one that says it once. But not five times more.</li>
+<li><strong>Inverse document frequency.</strong> A rare term tells you more than a common one. In a million documents, a term found in 1,000 of them has an IDF of about 6.9; a term found in half of them has about 0.7. The rare word counts ten times as much.</li>
+<li><strong>Length normalization.</strong> One mention in a 20-word title means more than one mention in a 5,000-word manual.</li>
+</ul>
+<p>The older TF-IDF formula multiplies the first two. <strong>BM25</strong>, the default in Lucene, Elasticsearch, OpenSearch and Solr, adds saturation and length normalization. For each query term in a document:</p>
+<div class="formula">score = IDF × tf × (k1 + 1) / (tf + k1 × (1 − b + b × doclen / avgdoclen))</div>
+<div class="formula">IDF = ln(1 + (N − n + 0.5) / (n + 0.5))   N = docs in the index, n = docs with the term</div>
+<p>The document's score is the sum over the query terms. Two knobs:</p>
+<div class="table"><table><thead><tr><th>Knob</th><th>Default</th><th>What it does</th></tr></thead><tbody>
+<tr><td><code>k1</code></td><td>1.2</td><td>How fast repeats stop helping. For an average-length document the tf part is 1.0 at one mention, 1.38 at two, 1.77 at five and 1.96 at ten, and can never pass k1 + 1 = 2.2. Keyword stuffing hits a ceiling.</td></tr>
+<tr><td><code>b</code></td><td>0.75</td><td>How much length matters. 0 ignores length; 1 fully divides by relative length.</td></tr>
+</tbody></table></div>
+<h3>Beyond text relevance</h3>
+<p>BM25 only knows about words. Real ranking mixes it with other signals: popularity, freshness, ratings, price, the user's location. A common shape is two stages: a cheap first pass (BM25 plus filters) picks the top few hundred candidates per shard, then a heavier model reranks only those. Many systems now add a vector search beside BM25 and merge the two lists (hybrid search), because embeddings catch meaning ("cheap flights" ≈ "low-cost airfare") while BM25 catches exact words, part numbers and names.</p></section>
+
+<section id="sharding"><h2>Sharding a search index</h2>
+<p>One machine can hold an index of tens of millions of documents. Past that, or for more query throughput, you split it. There are two ways to split an inverted index.</p>
+<figure class="fig"><svg viewBox="0 0 722 262" class="dg" role="img" aria-label="Left: sharding by document, where every query goes to every shard and a coordinator merges the top results. Right: sharding by term, where a query goes only to the shards that own its terms.">
+<text x="20" y="22" class="cap">BY DOCUMENT · LOCAL INDEX</text>
+<rect x="110" y="36" width="120" height="40" rx="8" class="k-serve"/><text x="170" y="61" class="small b" text-anchor="middle">Coordinator</text>
+<path d="M140 76 L60 124" class="wire hot" marker-end="url(#ah)"/><path d="M170 76 L170 124" class="wire hot" marker-end="url(#ah)"/><path d="M200 76 L280 124" class="wire hot" marker-end="url(#ah)"/>
+<rect x="20" y="126" width="90" height="62" rx="8" class="k-kb"/><text x="65" y="148" class="small b" text-anchor="middle">Shard 1</text><text x="65" y="164" class="sm" text-anchor="middle">docs 1–1M</text><text x="65" y="178" class="sm" text-anchor="middle">all terms</text>
+<rect x="125" y="126" width="90" height="62" rx="8" class="k-kb"/><text x="170" y="148" class="small b" text-anchor="middle">Shard 2</text><text x="170" y="164" class="sm" text-anchor="middle">docs 1M–2M</text><text x="170" y="178" class="sm" text-anchor="middle">all terms</text>
+<rect x="230" y="126" width="90" height="62" rx="8" class="k-kb"/><text x="275" y="148" class="small b" text-anchor="middle">Shard 3</text><text x="275" y="164" class="sm" text-anchor="middle">docs 2M–3M</text><text x="275" y="178" class="sm" text-anchor="middle">all terms</text>
+<text x="170" y="214" class="sm" text-anchor="middle">every query → every shard → merge each shard's top k</text>
+<text x="170" y="232" class="sm okt" text-anchor="middle">a write touches one shard</text>
+<path d="M361 30 L361 240" class="rule"/>
+<text x="384" y="22" class="cap">BY TERM · GLOBAL INDEX</text>
+<rect x="476" y="36" width="120" height="40" rx="8" class="k-serve"/><text x="536" y="61" class="small b" text-anchor="middle">Coordinator</text>
+<path d="M506 76 L428 124" class="wire hot" marker-end="url(#ah)"/><path d="M566 76 L644 124" class="wire hot" marker-end="url(#ah)"/>
+<rect x="384" y="126" width="90" height="62" rx="8" class="k-kb"/><text x="429" y="148" class="small b" text-anchor="middle">Shard A</text><text x="429" y="164" class="sm" text-anchor="middle">terms a–h</text><text x="429" y="178" class="sm mono" text-anchor="middle">"blue"</text>
+<rect x="490" y="126" width="90" height="62" rx="8" class="box"/><text x="535" y="148" class="small b mute" text-anchor="middle">Shard B</text><text x="535" y="164" class="sm" text-anchor="middle">terms i–r</text><text x="535" y="178" class="sm" text-anchor="middle">idle</text>
+<rect x="596" y="126" width="90" height="62" rx="8" class="k-kb"/><text x="641" y="148" class="small b" text-anchor="middle">Shard C</text><text x="641" y="164" class="sm" text-anchor="middle">terms s–z</text><text x="641" y="178" class="sm mono" text-anchor="middle">"shoes"</text>
+<text x="536" y="214" class="sm" text-anchor="middle">"blue shoes" → only shards A and C</text>
+<text x="536" y="232" class="sm bad" text-anchor="middle">a write touches many shards; lists ship to intersect</text>
+</svg><figcaption>Nearly every production engine shards by document. Sharding by term looks efficient on paper but moves the hard work into the network.</figcaption></figure>
+<div class="table"><table><thead><tr><th></th><th>By document (local index)</th><th>By term (global index)</th></tr></thead><tbody>
+<tr><td>Each shard holds</td><td>A full index over a slice of documents</td><td>The full posting lists for a slice of terms</td></tr>
+<tr><td>A query touches</td><td>Every shard (scatter-gather)</td><td>Only the shards that own its terms</td></tr>
+<tr><td>A write touches</td><td>One shard</td><td>One shard per distinct term in the document, often dozens</td></tr>
+<tr><td>Multi-term AND</td><td>Done inside each shard</td><td>Posting lists, possibly millions of IDs long, cross the network to be intersected</td></tr>
+<tr><td>Ranking</td><td>Each shard scores locally; IDF differs a little per shard</td><td>Exact global statistics</td></tr>
+<tr><td>Hot spots</td><td>Even, if documents are spread by hash</td><td>Popular terms make hot shards</td></tr>
+</tbody></table></div>
+<p>The cost of sharding by document is <strong>tail latency</strong>. A query is as slow as its slowest shard. If each shard has a 1% chance of a slow response, a query fanned out to 20 shards hits at least one slow shard 18% of the time (1 − 0.99<sup>20</sup>). Fixes: keep the shard count modest, add replicas and send a backup request when a shard is late, and set a timeout that returns partial results rather than waiting.</p>
+<p>Replicas are how a search cluster scales <strong>reads</strong>: each shard has copies on other nodes, and any copy can answer a query. More shards help with data size and indexing speed; more replicas help with query throughput and survive node failures. Global term statistics matter less than they sound: with documents spread by hash, each big shard sees nearly the same term frequencies.</p>
+<p>A search with a strong filter can skip the fan-out. If every query is scoped to one tenant, route by tenant ID so a query hits one shard, as in <a href="sharding.html">sharding</a>. Watch for a tenant that outgrows its shard (see <a href="hot-partitions.html">hot partitions</a>).</p></section>
+
+<section id="nrt"><h2>Near-real-time refresh</h2>
+<p>Writing a new segment and making it searchable is not free, so engines batch it. Elasticsearch is "near real time": a new document becomes searchable about one second after it is written.</p>
+<figure class="fig"><svg viewBox="0 0 722 196" class="dg" role="img" aria-label="A write goes to an in-memory buffer and the transaction log. A refresh every second turns the buffer into a searchable segment. A flush commits segments to disk and clears the log. Merges combine small segments.">
+<rect x="20" y="70" width="100" height="44" rx="8" class="k-user"/><text x="70" y="97" class="small b" text-anchor="middle">Write</text>
+<path d="M120 84 L178 56" class="wire" marker-end="url(#ah)"/><path d="M120 100 L178 128" class="wire" marker-end="url(#ah)"/>
+<rect x="180" y="30" width="140" height="44" rx="8" class="k-ingest"/><text x="250" y="50" class="small b" text-anchor="middle">Memory buffer</text><text x="250" y="66" class="sm" text-anchor="middle">not searchable yet</text>
+<rect x="180" y="110" width="140" height="44" rx="8" class="k-cross"/><text x="250" y="130" class="small b" text-anchor="middle">Translog</text><text x="250" y="146" class="sm" text-anchor="middle">fsync'd, for crashes</text>
+<path d="M320 52 L388 52" class="wire hot" marker-end="url(#ah)"/><text x="354" y="42" class="sm" text-anchor="middle">refresh</text><text x="354" y="72" class="sm" text-anchor="middle">~1 s</text>
+<rect x="390" y="30" width="140" height="44" rx="8" class="k-kb"/><text x="460" y="50" class="small b" text-anchor="middle">New segment</text><text x="460" y="66" class="sm" text-anchor="middle">searchable, in page cache</text>
+<path d="M530 52 L588 52" class="wire" marker-end="url(#ah)"/><text x="559" y="42" class="sm" text-anchor="middle">flush</text>
+<rect x="590" y="30" width="122" height="44" rx="8" class="k-kb"/><text x="651" y="50" class="small b" text-anchor="middle">Committed</text><text x="651" y="66" class="sm" text-anchor="middle">fsync'd to disk</text>
+<path d="M651 74 C651 110 460 110 460 132" class="wire dash" marker-end="url(#ah)"/>
+<rect x="390" y="134" width="322" height="40" rx="8" class="box"/><text x="551" y="152" class="small b" text-anchor="middle">Background merges</text><text x="551" y="167" class="sm" text-anchor="middle">many small segments → fewer big ones; deleted docs dropped</text>
+</svg><figcaption>Refresh makes data visible; flush makes it durable without the log; merging keeps the segment count low.</figcaption></figure>
+<ul>
+<li><strong>Refresh</strong> (default every 1 s) turns the in-memory buffer into a new segment that queries can see. It does not fsync; the new segment lives in the OS page cache.</li>
+<li><strong>Translog</strong>: every write is also appended to a log and, by default, fsync'd before the write is acknowledged. If the node crashes, it replays the log.</li>
+<li><strong>Flush</strong> commits segments to disk and trims the log.</li>
+<li><strong>Merge</strong> combines small segments so a query doesn't search hundreds of them.</li>
+</ul>
+<p>The trade-off is freshness against indexing cost. Refreshing every second creates many tiny segments and lots of merging. For a bulk load, turn refresh off (<code>refresh_interval: -1</code>) and replicas to zero, then restore both at the end. For a user who must see their own edit straight away, ask that one write to wait for the next refresh (<code>refresh=wait_for</code>), or show the edit from the database rather than the index.</p>
+<h3>Keeping the index in sync with the database</h3>
+<p>Writing to the database and the index from the application (a dual write) drifts apart the first time one write fails. The reliable pattern is <strong>change data capture</strong>: read the database's change log (with Debezium, for example) into Kafka, and have an indexer consume it and write to the search engine. Use the database row version as the document version, so an old event that arrives late can't overwrite a newer one. Keep a full reindex job ready, because you will need one after every analyzer or mapping change. See <a href="queues.html">queues and the outbox pattern</a>.</p></section>
+
+<section id="elasticsearch"><h2>Elasticsearch basics</h2>
+<p>Elasticsearch (and its fork OpenSearch) wraps the Lucene library in a distributed service with a JSON API. Each Elasticsearch shard is a Lucene index made of segments.</p>
+<div class="table"><table><thead><tr><th>Term</th><th>Meaning</th><th>Rough SQL analogue</th></tr></thead><tbody>
+<tr><td>Index</td><td>A named collection of documents with one mapping</td><td>Table</td></tr>
+<tr><td>Document</td><td>A JSON object with an <code>_id</code></td><td>Row</td></tr>
+<tr><td>Mapping</td><td>Field types: <code>text</code> (analyzed), <code>keyword</code> (exact), numbers, dates, geo points</td><td>Schema</td></tr>
+<tr><td>Shard</td><td>One slice of an index. Primaries take writes; replicas are copies that serve reads and take over on failure.</td><td>Partition</td></tr>
+<tr><td>Node, cluster</td><td>A server; a group of servers with an elected master that tracks where shards live</td><td>Database cluster</td></tr>
+<tr><td>Alias</td><td>A name that points at one or more indexes</td><td>View</td></tr>
+</tbody></table></div>
+<p>Things that matter in a design:</p>
+<ul>
+<li><strong>The primary shard count is fixed when the index is created.</strong> Changing it means reindexing (or the split and shrink APIs, which only multiply or divide it). Elastic's guidance is shards of roughly 10 to 50 GB. Too many small shards waste memory and slow every query; too few big ones make recovery slow.</li>
+<li><strong>Query vs filter.</strong> <code>match</code> analyzes the input and scores; <code>term</code> looks up one exact term. Inside a <code>bool</code> query, clauses in <code>must</code> and <code>should</code> affect the score, while clauses in <code>filter</code> only include or exclude and can be cached. Put "in stock", "price under 100" and "tenant = 42" in <code>filter</code>.</li>
+<li><strong>Aggregations</strong> count and bucket the matching documents: "Brand: Sony (120), Bose (85)". They power the facets beside search results and read from column-oriented doc values, not the inverted index.</li>
+<li><strong>Zero-downtime reindex</strong>: build <code>products_v2</code> next to <code>products_v1</code>, replay changes into both, then move the <code>products</code> alias in one atomic step.</li>
+</ul>
+<pre><code>GET /products/_search
+{
+  "query": { "bool": {
+    "must":   [ { "match": { "title": "wireless headphones" } } ],
+    "filter": [ { "term":  { "in_stock": true } },
+                { "range": { "price": { "lte": 200 } } } ]
+  } },
+  "aggs": { "brands": { "terms": { "field": "brand" } } },
+  "size": 20
+}</code></pre></section>
+
+<section id="failure"><h2>How search fails</h2>
+<h3>Deep pagination</h3>
+<p>Page 500 with 20 results a page asks each shard for its top 10,000 results, then the coordinator sorts all of them to keep 20. Cost grows with the page number times the shard count. Elasticsearch refuses past 10,000 results by default (<code>index.max_result_window</code>). Use <code>search_after</code> with the last result's sort values for "next page", and cap how deep users can go.</p>
+<h3>Index out of sync with the database</h3>
+<p>A dropped event or a failed dual write leaves a product that is sold out in the database but "in stock" in search. Use change data capture with versions, alert on indexer lag, and run a periodic job that compares counts or checksums and repairs the difference. Re-check critical facts (price, stock) against the database at the moment of purchase.</p>
+<h3>Too many shards or mapping explosion</h3>
+<p>Thousands of tiny shards, or a mapping that grows a new field for every user-supplied key, eat cluster memory and slow the master. Size shards to tens of GB, put arbitrary keys in a <code>flattened</code> field or a key/value pair, and leave dynamic mapping off for user data.</p>
+<h3>Expensive queries</h3>
+<p>A leading wildcard (<code>*phone</code>), a regex, or a huge <code>terms</code> list can scan the whole term dictionary. One bad query can slow the whole cluster. Block or rewrite them at the API layer, set timeouts, and use n-gram fields when you really need infix matching.</p>
+<h3>Relevance quietly getting worse</h3>
+<p>A ranking change ships, nothing errors, and click-through drops 5%. Keep a set of judged queries and measure precision and NDCG on every change, then A/B test ranking changes on live traffic before rolling them out.</p>
+<h3>Indexing load starving queries</h3>
+<p>Bulk indexing, frequent refreshes and heavy merges compete with queries for CPU and disk. Throttle bulk jobs, lengthen the refresh interval for write-heavy indexes, or separate indexing and query work onto different nodes or replicas.</p></section>
+
+<section id="interview"><h2>Saying it in an interview</h2>
+<div class="say"><p>"Search won't run on the main database: a leading-wildcard LIKE scans every row and can't rank. I'd keep Postgres as the source of truth and feed an Elasticsearch index through change data capture into Kafka, with the row version as the document version so late events can't overwrite newer ones. Titles and descriptions are analyzed text fields; brand, category and stock are keyword fields used as filters and facets. Ranking starts with BM25 and adds popularity and freshness in a rerank step. I'd shard by document, since that keeps writes on one shard; with 200 GB of index that's about 8 primaries of 25 GB, plus replicas for query load. New products show up within about a second thanks to the refresh interval, and I'd use search_after instead of deep page numbers."</p></div></section>
+
+<section id="real-world"><h2>In the real world</h2>
+<div class="table"><table><thead><tr><th>Need</th><th>Real options</th><th>Notes</th></tr></thead><tbody>
+<tr><td>General full-text search cluster</td><td>Elasticsearch, OpenSearch, Apache Solr</td><td>All three are built on Lucene, so they share analyzers, segments and BM25</td></tr>
+<tr><td>Search inside the database you already run</td><td>PostgreSQL full-text search (tsvector with a GIN index), MySQL FULLTEXT, MongoDB Atlas Search</td><td>No second system to sync; fine for modest scale and simple ranking</td></tr>
+<tr><td>Lightweight, typo-tolerant site search</td><td>Typesense, Meilisearch</td><td>Simple to run, good defaults for search-as-you-type</td></tr>
+<tr><td>Hosted search as a service</td><td>Algolia, Elastic Cloud, Amazon OpenSearch Service</td><td>Pay to skip running the cluster</td></tr>
+<tr><td>Text, vectors and ranking models together</td><td>Vespa, plus the vector features of the engines above</td><td>Hybrid search with BM25 and embeddings in one query</td></tr>
+</tbody></table></div>
+<p class="muted" style="font-size:13.5px;color:var(--muted)">Products change quickly; names here are examples, not endorsements. Check current docs before choosing.</p></section>
+
+<section id="related"><h2>Related</h2><ul class="related"><li><a href="databases.html">Databases and indexes</a></li><li><a href="sharding.html">Sharding and consistent hashing</a></li><li><a href="hot-partitions.html">Hot partitions</a></li><li><a href="queues.html">Message queues and streams</a></li><li><a href="caching.html">Caching</a></li><li><a href="ecommerce.html">E-commerce store</a></li><li><a href="web-crawler.html">Web crawler</a></li><li><a href="nearby-places.html">Nearby places</a></li></ul></section>
+  </article>
+</div>
+</main>
+<footer class="site"><div class="wrap">Part of Classic System Design, a companion to the <a href="https://devlcodes.github.io/agentic-ai-notebook/system-design/index.html">agentic system designs</a>. Figures marked illustrative show the shape of a system, not measured numbers. Check vendor docs before relying on a specific product limit.</div></footer>
+<script>
+(function(){
+  var $ = function(id){ return document.getElementById(id); }, mode = 'or';
+  var STOP = {a:1,an:1,the:1,is:1,are:1,in:1,of:1,for:1,to:1,and:1,or:1,with:1,it:1,that:1,each:1,by:1,on:1,as:1,at:1,be:1,this:1,from:1};
+  var K1 = 1.2, B = 0.75;
+  function esc(s){ return s.replace(/[&<>"]/g, function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]; }); }
+  function stem(w){
+    if (w.length > 5 && /ing$/.test(w)) w = w.slice(0, -3);
+    else if (w.length > 4 && /ies$/.test(w)) w = w.slice(0, -3) + 'y';
+    else if (w.length > 4 && /(s|x|ch|sh)es$/.test(w)) w = w.slice(0, -2);
+    else if (w.length > 4 && /ed$/.test(w)) w = w.slice(0, -2);
+    else if (w.length > 3 && /[^s]s$/.test(w)) w = w.slice(0, -1);
+    if (w.length > 4 && /e$/.test(w)) w = w.slice(0, -1);
+    return w;
+  }
+  function analyze(text, keepDropped){
+    var opts = { stop: $('sx-stop').checked, stem: $('sx-stem').checked }, out = [];
+    (text.toLowerCase().match(/[a-z0-9]+/g) || []).forEach(function(w){
+      if (opts.stop && STOP[w]) { if (keepDropped) out.push({ t: w, drop: true }); return; }
+      var t = opts.stem ? stem(w) : w;
+      out.push(keepDropped ? { t: t, raw: w } : t);
+    });
+    return out;
+  }
+  function run(){
+    var lines = $('sx-docs').value.split('\n').map(function(s){ return s.trim(); }).filter(Boolean).slice(0, 40);
+    var ix = {}, lens = [], total = 0;
+    lines.forEach(function(line, d){
+      var toks = analyze(line); lens.push(toks.length); total += toks.length;
+      toks.forEach(function(t){ var p = ix[t] || (ix[t] = {}); p[d] = (p[d] || 0) + 1; });
+    });
+    var N = lines.length, avg = N ? total / N : 0;
+    var qa = analyze($('sx-q').value, true), qterms = [];
+    qa.forEach(function(x){ if (!x.drop && qterms.indexOf(x.t) < 0) qterms.push(x.t); });
+    $('sx-qt').innerHTML = qa.length ? qa.map(function(x){ return x.drop ? '<li class="drop" title="stop word">' + esc(x.t) + '</li>' : '<li title="from ' + esc(x.raw) + '">' + esc(x.t) + '</li>'; }).join('') : '<li class="drop">no terms</li>';
+    var idf = {};
+    qterms.forEach(function(t){ var n = ix[t] ? Object.keys(ix[t]).length : 0; idf[t] = Math.log(1 + (N - n + 0.5) / (n + 0.5)); });
+    var scored = [];
+    for (var d = 0; d < N; d++){
+      var s = 0, matched = 0;
+      qterms.forEach(function(t){
+        var tf = ix[t] && ix[t][d] || 0; if (!tf) return; matched++;
+        s += idf[t] * tf * (K1 + 1) / (tf + K1 * (1 - B + B * lens[d] / (avg || 1)));
+      });
+      if (matched && (mode === 'or' || matched === qterms.length)) scored.push({ d: d, s: s, m: matched });
+    }
+    scored.sort(function(x, y){ return y.s - x.s || x.d - y.d; });
+    var qset = {}; qterms.forEach(function(t){ qset[t] = 1; });
+    function hl(line){
+      return line.split(/([A-Za-z0-9]+)/).map(function(part, i){
+        if (i % 2 === 0) return esc(part);
+        var a = analyze(part); return a.length && qset[a[0]] ? '<mark>' + esc(part) + '</mark>' : esc(part);
+      }).join('');
+    }
+    $('sx-res').innerHTML = scored.length ? scored.map(function(r){ return '<li><span class="d">#' + (r.d + 1) + '</span><span class="t">' + hl(lines[r.d]) + '</span><span class="s">' + r.s.toFixed(2) + '</span></li>'; }).join('') : '<li><span class="d">–</span><span class="t muted">No document matches' + (mode === 'and' && qterms.length > 1 ? ' every term. Try "Any term (OR)".' : '.') + '</span><span></span></li>';
+    var terms = Object.keys(ix).sort();
+    $('sx-ix').innerHTML = terms.map(function(t){
+      var p = ix[t], ds = Object.keys(p).map(Number).sort(function(a, b){ return a - b; });
+      return '<tr' + (qset[t] ? ' class="q"' : '') + '><td>' + esc(t) + '</td><td>' + ds.length + '</td><td class="pl">' + ds.map(function(d){ return (d + 1) + ':' + p[d]; }).join('  ') + '</td></tr>';
+    }).join('') || '<tr><td colspan="3" class="muted">Add a document above.</td></tr>';
+    var postings = terms.reduce(function(a, t){ return a + Object.keys(ix[t]).length; }, 0);
+    $('sx-m').innerHTML = '<div class="metric"><span class="n">' + N + '</span><span class="l">documents</span></div><div class="metric"><span class="n">' + terms.length + '</span><span class="l">unique terms</span></div><div class="metric"><span class="n">' + postings + '</span><span class="l">postings</span><small>one per term per doc</small></div><div class="metric"><span class="n">' + avg.toFixed(1) + '</span><span class="l">avg terms per doc</span></div>';
+    var msg = '';
+    if (!qterms.length) msg = 'The query has no terms left after the analyzer, so nothing can match.';
+    else {
+      var missing = qterms.filter(function(t){ return !ix[t]; });
+      var rare = qterms.filter(function(t){ return ix[t]; }).sort(function(a, b){ return idf[b] - idf[a]; });
+      msg = scored.length + ' of ' + N + ' documents match. ';
+      if (rare.length > 1) msg += '"' + rare[0] + '" is the rarest term (IDF ' + idf[rare[0]].toFixed(2) + ' vs ' + idf[rare[rare.length - 1]].toFixed(2) + ' for "' + rare[rare.length - 1] + '"), so documents containing it rise. ';
+      if (missing.length) msg += 'No document contains "' + missing.join('", "') + '". ' + ($('sx-stem').checked ? '' : 'Turn on stemming to match other word forms. ');
+      if (!$('sx-stem').checked && ix['index'] && ix['indexes']) msg += '"index" and "indexes" are separate terms without stemming. ';
+    }
+    $('sx-out').textContent = msg;
+  }
+  $('sx-mode').addEventListener('click', function(e){ var b = e.target.closest('button'); if (!b) return; mode = b.dataset.v; this.querySelectorAll('button').forEach(function(x){ x.setAttribute('aria-pressed', x === b); }); run(); });
+  ['sx-docs', 'sx-q'].forEach(function(id){ $(id).addEventListener('input', run); });
+  ['sx-stop', 'sx-stem'].forEach(function(id){ $(id).addEventListener('change', run); });
+  run();
+})();
+</script>
+</body>
+</html>
