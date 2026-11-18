@@ -1,5 +1,5 @@
 {
-  "title": "Java threads",
+  "title": "Threads, locks and wait/notify",
   "page": "threads.html",
   "cards": [
     {"front": "What is a thread?", "back": "A worker that runs code. Every program starts with one, main, and threads you start run at the same time and share the same objects.", "link": "threads.html#what"},
