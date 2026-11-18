@@ -631,7 +631,7 @@ task.run();                  // run it with the lock released</code></pre></sect
   function render(){
     var fr = frames[i];
     $('th-step').textContent = 'Step ' + (i + 1) + ' / ' + frames.length;
-    $('th-note').textContent = fr.note || ' ';
+    $('th-note').textContent = fr.note || ''; $('th-note').hidden = !fr.note;
     $('th-ms').textContent = ST[fr.m[0]]; $('th-ms').className = 'st ' + fr.m[0]; $('th-mt').textContent = fr.m[1];
     $('th-ws').textContent = ST[fr.w[0]]; $('th-ws').className = 'st ' + fr.w[0]; $('th-wt').textContent = fr.w[1];
     $('th-clock').textContent = 't = ' + fr.t.toLocaleString('en-US') + ' ms';
