@@ -1,0 +1,147 @@
+{
+  "title": "Load balancing",
+  "page": "load-balancing.html",
+  "cards": [
+    {
+      "front": "Three things a load balancer gives you",
+      "back": "Scale (add servers to add capacity), availability (dead servers are skipped) and one stable entry point for TLS, rate limits and gradual rollouts.",
+      "link": "load-balancing.html#what"
+    },
+    {
+      "front": "Why servers behind a balancer should be stateless",
+      "back": "So any server can handle any request; session data lives in a shared store like Redis or the database, not one server's memory.",
+      "link": "load-balancing.html#what"
+    },
+    {
+      "front": "Layer 4 load balancing",
+      "back": "Sees IPs and ports and decides per connection: very fast, cheap, any protocol. Examples: AWS NLB, Maglev, IPVS.",
+      "link": "load-balancing.html#layers"
+    },
+    {
+      "front": "Layer 7 load balancing",
+      "back": "Reads full HTTP and decides per request: path routing, TLS termination, retries, canary splits, at more CPU per request.",
+      "link": "load-balancing.html#layers"
+    },
+    {
+      "front": "Round robin's weakness",
+      "back": "It ignores load, so a slow server still gets its full share and builds a queue.",
+      "link": "load-balancing.html#algorithms"
+    },
+    {
+      "front": "Power of two choices",
+      "back": "Pick two servers at random and send to the less busy one. It makes the worst queue much shorter without every balancer needing global counts.",
+      "link": "load-balancing.html#algorithms"
+    },
+    {
+      "front": "Why plain hash % N hurts",
+      "back": "When N changes almost every key moves to a different server. Use consistent hashing instead.",
+      "link": "load-balancing.html#algorithms"
+    },
+    {
+      "front": "Liveness vs readiness check",
+      "back": "Liveness asks whether the process is up; readiness asks whether it can serve right now (database reachable, caches warm). Keep readiness cheap.",
+      "link": "load-balancing.html#health"
+    },
+    {
+      "front": "Connection draining",
+      "back": "On deploy or scale-in, stop sending new requests to a server but let in-flight ones finish for a grace period, often 30 seconds.",
+      "link": "load-balancing.html#health"
+    },
+    {
+      "front": "Sticky sessions' cost",
+      "back": "Pinning users to a server makes load uneven, and a server failure logs everyone on it out. Prefer stateless servers with a shared session store.",
+      "link": "load-balancing.html#health"
+    },
+    {
+      "front": "Safe retry policy",
+      "back": "Cap retries (one retry, or a budget of about 10% of traffic), retry only idempotent requests, and add jittered backoff.",
+      "link": "load-balancing.html#health"
+    }
+  ],
+  "quiz": [
+    {
+      "q": "One of four servers develops a bad disk and runs 3× slower. Which algorithm keeps latency lowest?",
+      "choices": [
+        "Round robin",
+        "Random",
+        "Weighted round robin with equal weights",
+        "Power of two choices or least connections"
+      ],
+      "answer": 3,
+      "why": "Load-aware choices steer traffic away from the slow server; round robin keeps feeding it.",
+      "link": "load-balancing.html#lab"
+    },
+    {
+      "q": "Every deploy causes a short burst of 5xx errors. What is most likely missing?",
+      "choices": [
+        "Sticky sessions",
+        "Connection draining",
+        "A bigger instance type",
+        "Layer 4 balancing"
+      ],
+      "answer": 1,
+      "why": "Without draining, in-flight requests are cut off when a server is removed.",
+      "link": "load-balancing.html#health"
+    },
+    {
+      "q": "You need /api and /images routed to different server pools. Which balancer do you need?",
+      "choices": [
+        "Layer 4",
+        "Layer 7",
+        "DNS round robin",
+        "Any balancer using IP hashing"
+      ],
+      "answer": 1,
+      "why": "Only an L7 balancer reads the HTTP path.",
+      "link": "load-balancing.html#layers"
+    },
+    {
+      "q": "During a partial outage, traffic to healthy servers triples and they fall over too. What likely caused it?",
+      "choices": [
+        "Health checks that were too cheap",
+        "Uncapped retries",
+        "Too many availability zones",
+        "Stateless servers"
+      ],
+      "answer": 1,
+      "why": "Retries add load exactly when the system is struggling; cap them and add backoff.",
+      "link": "load-balancing.html#health"
+    },
+    {
+      "q": "Users are logged out whenever a server dies. What design change fixes this?",
+      "choices": [
+        "More sticky sessions",
+        "Move sessions to a shared store like Redis and keep servers stateless",
+        "Use round robin",
+        "Lengthen health-check intervals"
+      ],
+      "answer": 1,
+      "why": "With shared session storage any server can serve any user.",
+      "link": "load-balancing.html#health"
+    },
+    {
+      "q": "A huge fleet needs to spread millions of connections cheaply across many HTTP proxies. What is the usual setup?",
+      "choices": [
+        "One L7 proxy in front of everything",
+        "An L4 tier spreading connections across a fleet of L7 proxies",
+        "DNS round robin only",
+        "Sticky sessions on every proxy"
+      ],
+      "answer": 1,
+      "why": "L4 forwards connections fast; the L7 fleet then routes each request.",
+      "link": "load-balancing.html#layers"
+    },
+    {
+      "q": "Your readiness check runs a heavy database query every 2 seconds on every server. What is the risk?",
+      "choices": [
+        "None, more checking is safer",
+        "The checks themselves become load",
+        "The balancer switches to layer 4",
+        "Draining stops working"
+      ],
+      "answer": 1,
+      "why": "Keep readiness checks cheap or they add meaningful load.",
+      "link": "load-balancing.html#health"
+    }
+  ]
+}

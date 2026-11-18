@@ -1,1 +1,8 @@
-[]
+[
+  "api-gateways",
+  "dns",
+  "load-balancing",
+  "protocols",
+  "rate-limiting",
+  "requirements"
+]

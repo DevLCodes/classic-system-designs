@@ -1,0 +1,147 @@
+{
+  "title": "Non-functional requirements",
+  "page": "requirements.html",
+  "cards": [
+    {
+      "front": "Functional vs non-functional requirements",
+      "back": "Functional says what a user can do (shorten a URL). Non-functional says under what load, how fast, how reliably and at what cost, and that is what decides caches, queues, sharding and regions.",
+      "link": "requirements.html#what"
+    },
+    {
+      "front": "SLI, SLO and SLA",
+      "back": "An SLI is what you measure (share of requests under 300 ms), an SLO is the target for it (99.9% over 30 days), and an SLA is a contract with consequences, usually looser than the SLO.",
+      "link": "requirements.html#numbers"
+    },
+    {
+      "front": "Error budget",
+      "back": "The gap between 100% and the SLO. At 99.9% that is about 43 minutes of failure a month you can spend on deploys, experiments and bad luck.",
+      "link": "requirements.html#numbers"
+    },
+    {
+      "front": "Why percentiles, not averages",
+      "back": "An 80 ms average can hide a 2 s p99. A page making 50 backend calls hits at least one call's p99 on about 40% of loads, so tail latency is what users feel.",
+      "link": "requirements.html#numbers"
+    },
+    {
+      "front": "RPO",
+      "back": "How much recent data you may lose. An RPO of zero needs synchronous replication before acknowledging a write; 5 minutes can be met with async replication or log shipping.",
+      "link": "requirements.html#numbers"
+    },
+    {
+      "front": "RTO",
+      "back": "How long until service is back. Minutes needs a warm standby that can take traffic; hours can be met by restoring from backups.",
+      "link": "requirements.html#numbers"
+    },
+    {
+      "front": "99.95% availability",
+      "back": "About 22 minutes of downtime a month.",
+      "link": "requirements.html#checklist"
+    },
+    {
+      "front": "Cost of each extra nine",
+      "back": "Roughly ten times as much effort. Ask what downtime actually costs the business before defaulting to five nines.",
+      "link": "requirements.html#failure"
+    },
+    {
+      "front": "What to size for",
+      "back": "The evening peak or the sale day, typically 3 to 10× the average, not the daily mean.",
+      "link": "requirements.html#failure"
+    },
+    {
+      "front": "Pushing durability to RPO 0 costs…",
+      "back": "Write latency, because each write must wait for copies in another zone or region.",
+      "link": "requirements.html#tradeoffs"
+    },
+    {
+      "front": "How many checklist rows to use",
+      "back": "Pick the three or four that will shape the design, not every row for every problem.",
+      "link": "requirements.html#checklist"
+    }
+  ],
+  "quiz": [
+    {
+      "q": "A team says the system must be 'highly available and scalable'. What is the most useful next step?",
+      "choices": [
+        "Turn it into numbers such as 99.95% and 50k reads/s at peak",
+        "Add a second region straight away",
+        "Choose a NoSQL database",
+        "Accept it as the requirement and start drawing"
+      ],
+      "answer": 0,
+      "why": "Adjectives decide nothing; numbers like a nines target and peak throughput do.",
+      "link": "requirements.html#failure"
+    },
+    {
+      "q": "Your SLO is 99.9% over 30 days. Roughly how much failure can you spend each month?",
+      "choices": [
+        "About 4 minutes",
+        "About 43 minutes",
+        "About 7 hours",
+        "About 22 minutes"
+      ],
+      "answer": 1,
+      "why": "The error budget at 99.9% is about 43 minutes a month.",
+      "link": "requirements.html#numbers"
+    },
+    {
+      "q": "Average latency is 80 ms but users complain the page is slow. The page makes 50 backend calls. What should you look at?",
+      "choices": [
+        "The median of each call",
+        "Average CPU on the web tier",
+        "The p99 of the backend calls",
+        "The number of web servers"
+      ],
+      "answer": 2,
+      "why": "With 50 calls, about 40% of page loads hit at least one call's p99, so tail latency is what users feel.",
+      "link": "requirements.html#numbers"
+    },
+    {
+      "q": "The business says no acknowledged write may ever be lost, even if a zone fails. What does that require?",
+      "choices": [
+        "Nightly backups",
+        "Synchronous replication to another zone before acknowledging",
+        "Asynchronous log shipping every 5 minutes",
+        "A bigger primary database"
+      ],
+      "answer": 1,
+      "why": "An RPO of zero needs the write copied synchronously before it is acknowledged, at the cost of slower writes.",
+      "link": "requirements.html#numbers"
+    },
+    {
+      "q": "An interviewer wants checkout and the product page designed. Which consistency choice fits best?",
+      "choices": [
+        "Strong consistency everywhere",
+        "Eventual consistency everywhere",
+        "Checkout strong, product page eventual",
+        "Product page strong, checkout eventual"
+      ],
+      "answer": 2,
+      "why": "Most systems need strong consistency in one or two places, such as checkout to avoid overselling, and eventual elsewhere.",
+      "link": "requirements.html#tradeoffs"
+    },
+    {
+      "q": "Daily mean traffic is 10k requests/s. What should capacity plans be based on?",
+      "choices": [
+        "10k/s, the daily mean",
+        "The evening or sale-day peak, often 3 to 10× the mean",
+        "The quietest hour",
+        "The yearly average"
+      ],
+      "answer": 1,
+      "why": "Size for the peak, not the mean.",
+      "link": "requirements.html#failure"
+    },
+    {
+      "q": "A recovery plan needs service back within minutes after a region loss. Which setup meets that RTO?",
+      "choices": [
+        "Restore from last night's backup",
+        "A warm standby that can take traffic",
+        "Rebuild servers by hand",
+        "Asynchronous replication with no standby compute"
+      ],
+      "answer": 1,
+      "why": "An RTO of minutes needs a warm standby; restoring from backups takes hours.",
+      "link": "requirements.html#numbers"
+    }
+  ]
+}
