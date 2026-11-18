@@ -1,0 +1,512 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Architecture styles · Classic System Design</title>
+<meta name="description" content="Monolith vs modular monolith vs microservices, hexagonal architecture (ports and adapters), service boundaries and data ownership, sync vs async calls, with a lab on how latency and failure odds grow with every service a request touches.">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700&family=Instrument+Sans:ital,wght@0,400;0,500;0,600;1,400&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+  /* Layout: a slim site bar, then either a card grid (home), a sticky contents rail + reading column (articles), or a filterable term list (glossary). Light, single look. */
+  :root {
+    color-scheme: light;
+    --bg: #e9ecef; --paper: #f7f8f9; --ink: #1c2530; --muted: #586473; --line: #cdd4dc; --line-strong: #9aa5b1;
+    --accent: #4255d4; --accent-ink: #ffffff; --track: #d3d9e0; --code-bg: #eef1f4; --wire: #7d8996;
+    --c-ingest: #2a9d8f; --c-kb: #4d5fd8; --c-serve: #d7932a; --c-model: #e2674f; --c-gov: #b2456e; --c-cross: #4a5562; --c-dlq: #b23a3a; --c-ok: #2f8f5b;
+    --t-src: #e4e8ec; --t-ingest: #d8eeea; --t-kb: #dfe3fa; --t-serve: #f8ead2; --t-model: #fbe1da; --t-gov: #f3dde6; --t-cross: #dfe2e6; --t-dlq: #f6dddb;
+    --font-display: "Bricolage Grotesque", "Avenir Next", "Segoe UI", system-ui, sans-serif;
+    --font-body: "Instrument Sans", "Helvetica Neue", "Segoe UI", system-ui, sans-serif;
+    --font-mono: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  @media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
+  body { margin: 0; background: var(--bg); color: var(--ink); font-family: var(--font-body); font-size: 16px; line-height: 1.6; }
+  a { color: var(--accent); }
+  .wrap { max-width: 1240px; margin: 0 auto; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
+
+  .sitebar { border-bottom: 1px solid var(--line); background: var(--paper); }
+  .sitebar .wrap { display: flex; align-items: center; gap: 18px; flex-wrap: wrap; padding-block: 12px; }
+  .brand { font-family: var(--font-display); font-weight: 700; font-size: 17px; color: var(--ink); text-decoration: none; margin-right: auto; }
+  .sitebar nav { display: flex; gap: 16px; flex-wrap: wrap; font-size: 14px; }
+  .sitebar nav a { color: var(--muted); text-decoration: none; }
+  .sitebar nav a:hover, .sitebar nav a[aria-current="page"] { color: var(--ink); }
+  .sitebar nav a[aria-current="page"] { font-weight: 600; }
+
+  .intro { padding-block: 40px 8px; display: grid; gap: 10px; max-width: 820px; }
+  .eyebrow { margin: 0; font-family: var(--font-mono); font-size: 12px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+  h1 { margin: 0; font-family: var(--font-display); font-weight: 700; font-size: clamp(30px, 5vw, 46px); line-height: 1.05; text-wrap: balance; }
+  .intro .lead { font-size: 18px; margin: 0; }
+
+  .doc { display: grid; grid-template-columns: 220px minmax(0, 1fr); gap: 48px; padding-block: 36px 72px; }
+  .toc { position: sticky; top: calc(env(safe-area-inset-top, 0px) + 20px); align-self: start; }
+  .toc p { margin: 0 0 8px; font-family: var(--font-mono); font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+  .toc ol { margin: 0; padding: 0; list-style: none; display: grid; gap: 2px; counter-reset: toc; }
+  .toc li { counter-increment: toc; }
+  .toc a { display: flex; gap: 8px; padding: 3px 0; font-size: 14px; color: var(--muted); text-decoration: none; }
+  .toc a::before { content: counter(toc, decimal-leading-zero); font-family: var(--font-mono); font-size: 11.5px; padding-top: 2px; color: var(--line-strong); }
+  .toc a:hover { color: var(--ink); }
+  article { min-width: 0; max-width: 760px; }
+  section { padding-bottom: 36px; margin-bottom: 36px; border-bottom: 1px solid var(--line); scroll-margin-top: 20px; }
+  section:last-child { border-bottom: 0; }
+  h2 { margin: 0 0 10px; font-family: var(--font-display); font-weight: 700; font-size: 28px; line-height: 1.15; text-wrap: balance; }
+  h3 { margin: 26px 0 6px; font-family: var(--font-display); font-weight: 600; font-size: 19px; line-height: 1.25; }
+  p { margin: 0 0 14px; }
+  .lead { font-size: 18px; }
+  ul.plain, ol.plain { margin: 0 0 16px; padding-left: 22px; display: grid; gap: 6px; }
+  code { font-family: var(--font-mono); font-size: 0.88em; background: var(--code-bg); padding: 1px 5px; border-radius: 4px; }
+  pre { margin: 0 0 16px; padding: 14px 16px; background: var(--code-bg); border-radius: 10px; overflow-x: auto; font-size: 13px; line-height: 1.55; }
+  pre code { background: none; padding: 0; font-size: inherit; }
+  .table { overflow-x: auto; margin: 0 0 18px; }
+  table { width: 100%; border-collapse: collapse; font-size: 14.5px; line-height: 1.45; }
+  th, td { text-align: left; vertical-align: top; padding: 8px 10px; border-bottom: 1px solid var(--line); }
+  th { font-family: var(--font-mono); font-size: 11.5px; font-weight: 500; letter-spacing: .05em; text-transform: uppercase; color: var(--muted); }
+  td.num { font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .note { border-left: 3px solid var(--accent); background: var(--paper); padding: 12px 16px; border-radius: 0 10px 10px 0; margin: 0 0 18px; }
+  .note p:last-child { margin: 0; }
+  .formula { font-family: var(--font-mono); font-size: 14px; background: var(--paper); border: 1px solid var(--line); border-radius: 10px; padding: 12px 16px; margin: 0 0 16px; overflow-x: auto; white-space: nowrap; }
+  .related { display: flex; flex-wrap: wrap; gap: 8px; margin: 0; padding: 0; list-style: none; }
+  .related a { display: inline-block; padding: 4px 12px; border: 1px solid var(--line); border-radius: 999px; font-size: 14px; color: var(--ink); text-decoration: none; background: var(--paper); }
+  .related a:hover { border-color: var(--ink); }
+  .pager { display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; font-size: 14px; }
+  footer.site { border-top: 1px solid var(--line); padding-block: 20px 40px; font-size: 13px; color: var(--muted); }
+  a:focus-visible, input:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+  /* home */
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 16px; margin: 0 0 40px; padding: 0; list-style: none; }
+  .card { display: grid; gap: 8px; height: 100%; padding: 18px; background: var(--paper); border: 1px solid var(--line); border-radius: 14px; color: var(--ink); text-decoration: none; }
+  .card:hover { border-color: var(--ink); }
+  .card .k { font-family: var(--font-mono); font-size: 11px; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
+  .card h3 { margin: 0; font-size: 20px; }
+  .card p { margin: 0; font-size: 14.5px; color: var(--muted); }
+  .card svg { width: 100%; height: auto; display: block; }
+  .card.feature svg { max-width: 420px; justify-self: center; }
+  .card.feature { grid-column: 1 / -1; grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr); align-items: center; gap: 24px; }
+  .home-h { margin: 28px 0 12px; font-family: var(--font-display); font-size: 24px; }
+
+  /* glossary */
+  .gl-tools { position: sticky; top: 0; z-index: 2; background: var(--bg); padding-block: 12px; display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+  .gl-tools input { flex: 1 1 260px; min-width: 0; font: 15px var(--font-body); padding: 9px 12px; border-radius: 10px; border: 1px solid var(--line-strong); background: #fff; color: var(--ink); }
+  .gl-letters { display: flex; flex-wrap: wrap; gap: 4px; font-family: var(--font-mono); font-size: 13px; }
+  .gl-letters a { padding: 2px 6px; border-radius: 6px; text-decoration: none; color: var(--muted); }
+  .gl-letters a:hover { background: var(--paper); color: var(--ink); }
+  .gl { max-width: 860px; }
+  .gl-item { margin: 0; }
+  .gl-item { display: grid; grid-template-columns: 220px minmax(0, 1fr); gap: 16px; padding: 12px 0; border-bottom: 1px solid var(--line); scroll-margin-top: 70px; }
+  .gl-item dt { font-weight: 600; }
+  .gl-item dt small { display: block; font-weight: 400; font-family: var(--font-mono); font-size: 11px; color: var(--muted); letter-spacing: .04em; text-transform: uppercase; margin-top: 2px; }
+  .gl-item dd { margin: 0; }
+  .gl-item dd .see { font-size: 13.5px; }
+  .gl-letter { margin: 26px 0 4px; font-family: var(--font-display); font-size: 22px; scroll-margin-top: 70px; }
+
+  @media (max-width: 900px) {
+    .doc { grid-template-columns: minmax(0, 1fr); gap: 24px; padding-block: 28px 56px; }
+    .toc { position: static; }
+    .toc ol { grid-template-columns: repeat(2, minmax(0, 1fr)); column-gap: 12px; }
+    .card.feature { grid-template-columns: minmax(0, 1fr); }
+  }
+  @media (max-width: 640px) {
+    .gl-item { grid-template-columns: minmax(0, 1fr); gap: 4px; }
+    h2 { font-size: 24px; }
+    .intro .lead, .lead { font-size: 16.5px; }
+  }
+
+  /* diagrams */
+  .fig { margin: 6px 0 24px; overflow-x: auto; }
+  .fig svg { display: block; width: 100%; height: auto; min-width: 600px; }
+  .fig figcaption { margin-top: 8px; font-size: 13px; line-height: 1.45; color: var(--muted); }
+  .dg text { font-family: var(--font-body); font-size: 13px; fill: var(--ink); }
+  .dg .sm { font-size: 11.5px; fill: var(--muted); }
+  .dg .small { font-size: 12px; }
+  .dg .b { font-weight: 600; }
+  .dg .mono { font-family: var(--font-mono); }
+  .dg .it { font-style: italic; }
+  .dg .mute { fill: var(--muted); }
+  .dg .gov { fill: var(--c-gov); font-weight: 600; }
+  .dg .okt { fill: var(--c-ok); font-weight: 600; }
+  .dg .bad { fill: var(--c-dlq); font-weight: 600; }
+  .dg .cap { font-family: var(--font-mono); font-size: 11px; letter-spacing: .06em; fill: var(--muted); }
+  .dg .big { font-family: var(--font-display); font-size: 30px; font-weight: 700; fill: var(--ink); }
+  .dg .box { fill: var(--paper); stroke: var(--line-strong); stroke-width: 1.25; }
+  .dg .ghost { fill: none; stroke: var(--line-strong); stroke-width: 1.25; stroke-dasharray: 5 5; }
+  .dg .track { fill: var(--track); }
+  .dg .rule { stroke: var(--line); stroke-width: 1; }
+  .dg .axis { stroke: var(--line-strong); stroke-width: 1.25; }
+  .dg .wire { fill: none; stroke: var(--wire); stroke-width: 1.4; }
+  .dg .wire.dash { stroke-dasharray: 4 4; }
+  .dg .wire.hot { stroke: var(--accent); stroke-width: 2; }
+  .dg .wire.red { stroke: var(--c-dlq); }
+  .dg .ah { fill: var(--wire); }
+  .dg .xmark { stroke: var(--c-dlq); stroke-width: 1.8; fill: none; }
+  .dg .tick { stroke: var(--c-ok); stroke-width: 2; fill: none; }
+  .dg .k-src { fill: var(--t-src); stroke: #8795a3; stroke-width: 1.5; }
+  .dg .k-ingest { fill: var(--t-ingest); stroke: var(--c-ingest); stroke-width: 1.5; }
+  .dg .k-kb { fill: var(--t-kb); stroke: var(--c-kb); stroke-width: 1.5; }
+  .dg .k-serve { fill: var(--t-serve); stroke: var(--c-serve); stroke-width: 1.5; }
+  .dg .k-model { fill: var(--t-model); stroke: var(--c-model); stroke-width: 1.5; }
+  .dg .k-gov { fill: var(--t-gov); stroke: var(--c-gov); stroke-width: 1.5; }
+  .dg .k-cross { fill: var(--t-cross); stroke: var(--c-cross); stroke-width: 1.5; }
+  .dg .k-dlq { fill: var(--t-dlq); stroke: var(--c-dlq); stroke-width: 1.5; }
+  .dg .k-user { fill: #ffffff; stroke: var(--line-strong); stroke-width: 1.5; }
+  .dg .f-serve { fill: var(--c-serve); } .dg .f-kb { fill: var(--c-kb); } .dg .f-model { fill: var(--c-model); } .dg .f-gov { fill: var(--c-gov); } .dg .f-ingest { fill: var(--c-ingest); } .dg .f-cross { fill: #b8c0c9; } .dg .f-dlq { fill: var(--c-dlq); } .dg .f-ok { fill: var(--c-ok); }
+  .dg .cell { fill: var(--paper); stroke: var(--line-strong); stroke-width: 1; }
+  .dg .cell.hot { fill: var(--t-ingest); stroke: var(--c-ingest); stroke-width: 1.5; }
+  .dg .cell.old { fill: var(--t-kb); stroke: var(--c-kb); }
+  .dg .cell.new { fill: var(--t-ingest); stroke: var(--c-ingest); stroke-width: 1.5; }
+  .dg .cell.gone { fill: var(--paper); stroke: var(--line); }
+  .dg .dot-hr { fill: var(--c-gov); } .dg .dot-it { fill: var(--c-kb); } .dg .dot-eng { fill: var(--c-ingest); } .dg .dot-q { fill: var(--c-serve); stroke: var(--ink); stroke-width: 1.5; }
+  .dg .halo { fill: none; stroke: var(--c-serve); stroke-width: 1.5; stroke-dasharray: 4 4; }
+  .dg .zone { fill: var(--paper); stroke: var(--line); stroke-width: 1; }
+</style>
+
+<style>
+  .lab { margin: 6px 0 26px; padding: 14px 16px 16px; background: var(--paper); border: 1px solid var(--line); border-radius: 14px; }
+  .lab-row { display: flex; flex-wrap: wrap; gap: 10px 18px; align-items: center; margin: 0 0 12px; }
+  .lab-k { font-family: var(--font-mono); font-size: 11px; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
+  .lab label { display: inline-flex; gap: 8px; align-items: center; font-size: 14px; }
+  .lab input[type=range] { width: 150px; accent-color: var(--accent); }
+  .lab input[type=checkbox] { width: 16px; height: 16px; accent-color: var(--accent); }
+  .lab input[type=text] { flex: 1 1 260px; min-width: 0; font: 15px var(--font-body); padding: 8px 11px; border-radius: 9px; border: 1px solid var(--line-strong); background: #fff; color: var(--ink); }
+  .lab output { font-family: var(--font-mono); font-size: 12.5px; min-width: 6ch; font-variant-numeric: tabular-nums; }
+  .seg { display: inline-flex; flex-wrap: wrap; gap: 6px; }
+  .seg button, .chips button { font: 600 13px var(--font-body); color: var(--ink); background: #fff; border: 1px solid var(--line); border-radius: 8px; padding: 6px 12px; cursor: pointer; }
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; }
+  .chips button { font-weight: 500; border-radius: 999px; padding: 4px 11px; font-size: 13px; }
+  .seg button:hover, .chips button:hover { border-color: var(--ink); }
+  .seg button[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+  .seg button:focus-visible, .chips button:focus-visible, .lab input:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .lab-out { margin: 12px 0 0; padding: 10px 12px; background: #fff; border: 1px solid var(--line); border-radius: 10px; font-size: 14.5px; line-height: 1.5; font-variant-numeric: tabular-nums; }
+  .chunks { display: grid; gap: 8px; max-height: 470px; overflow: auto; padding-right: 4px; }
+  .chunk { min-width: 0; padding: 8px 11px; background: #fff; border: 1px solid var(--line); border-left: 4px solid var(--c-kb); border-radius: 8px; font-size: 14px; line-height: 1.5; overflow-wrap: anywhere; }
+  .chunk:nth-child(even) { border-left-color: var(--c-ingest); }
+  .chunk.ans { box-shadow: 0 0 0 2px var(--c-serve); }
+  .chunk .ch { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-bottom: 4px; font-family: var(--font-mono); font-size: 11px; color: var(--muted); }
+  .chunk .pfx { display: block; font-family: var(--font-mono); font-size: 11.5px; color: var(--c-kb); }
+  .chunk .ov { background: var(--track); border-radius: 3px; }
+  .chunk mark { background: #ffe9b3; border-radius: 3px; padding: 0 2px; }
+  .chunk table { width: auto; font-size: 13px; margin: 4px 0; }
+  .chunk td { padding: 2px 10px 2px 0; border-bottom: 1px solid var(--line); }
+  .badge { display: inline-block; padding: 0 7px; border-radius: 999px; border: 1px solid; font-family: var(--font-mono); font-size: 10.5px; line-height: 1.6; }
+  .badge.bad { color: var(--c-dlq); border-color: var(--c-dlq); background: var(--t-dlq); }
+  .badge.ok { color: var(--c-ok); border-color: var(--c-ok); background: #e3f3ea; }
+  .badge.info { color: var(--c-kb); border-color: var(--c-kb); background: var(--t-kb); }
+  .bars { display: grid; gap: 8px; margin: 4px 0 0; }
+  .bar-row { display: grid; grid-template-columns: minmax(0, 150px) minmax(0, 1fr) 46px; gap: 10px; align-items: center; font-size: 14px; }
+  .bar { position: relative; height: 14px; border-radius: 7px; background: var(--track); }
+  .bar i { position: absolute; inset: 0 auto 0 0; border-radius: 7px; background: var(--c-kb); transition: width .3s; }
+  .bar b { position: absolute; top: -4px; bottom: -4px; width: 2px; background: var(--c-dlq); }
+  .bar-row .v { font-family: var(--font-mono); font-size: 12.5px; text-align: right; }
+  .stages { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 10px; padding: 0; list-style: none; font-size: 13px; }
+  .stages li { padding: 2px 10px; border-radius: 999px; border: 1px solid var(--line); color: var(--muted); background: #fff; }
+  .stages li.hit { border-color: var(--accent); color: var(--accent-ink); background: var(--accent); }
+  .stages li.skip { text-decoration: line-through; }
+  .rlist { display: grid; gap: 6px; margin: 0; padding: 0; list-style: none; counter-reset: r; }
+  .rlist li { counter-increment: r; display: grid; grid-template-columns: 28px minmax(0, 1fr) auto; gap: 10px; align-items: center; padding: 6px 10px; background: #fff; border: 1px solid var(--line); border-radius: 8px; font-size: 14px; }
+  .rlist li::before { content: counter(r); font-family: var(--font-mono); font-size: 12px; color: var(--muted); }
+  .rlist li.rel { border-color: var(--c-ok); background: #f0f8f3; }
+  .rlist button { font: 600 12px var(--font-body); padding: 3px 10px; border-radius: 999px; border: 1px solid var(--line-strong); background: #fff; color: var(--ink); cursor: pointer; white-space: nowrap; }
+  .rlist li.rel button { background: var(--c-ok); border-color: var(--c-ok); color: #fff; }
+  .metrics { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 8px; margin: 12px 0 0; }
+  .metric { padding: 8px 10px; background: #fff; border: 1px solid var(--line); border-radius: 10px; }
+  .metric .n { display: block; font-family: var(--font-display); font-size: 24px; font-weight: 700; font-variant-numeric: tabular-nums; }
+  .metric .l { font-family: var(--font-mono); font-size: 11px; letter-spacing: .04em; text-transform: uppercase; color: var(--muted); }
+  .metric small { display: block; font-size: 12px; color: var(--muted); line-height: 1.35; margin-top: 2px; }
+  td.pass { color: var(--c-ok); font-weight: 600; } td.fail { color: var(--c-dlq); font-weight: 600; }
+  .say { border-left: 3px solid var(--c-serve); background: var(--paper); padding: 12px 16px; border-radius: 0 10px 10px 0; margin: 0 0 16px; font-size: 15.5px; }
+  .say p:last-child { margin: 0; }
+</style>
+
+<style>
+  .lab-chart { display: block; width: 100%; height: auto; margin: 4px 0 0; }
+  .lab-chart text { font-family: var(--font-body); font-size: 12px; fill: var(--muted); }
+  .grid-cells { display: grid; gap: 4px; }
+  .srv { display: grid; grid-template-columns: 92px minmax(0,1fr) 70px; gap: 10px; align-items: center; font-size: 14px; }
+  .muted { color: var(--muted); }
+  .lab select { font: 14px var(--font-body); padding: 6px 8px; border-radius: 8px; border: 1px solid var(--line-strong); background: #fff; color: var(--ink); }
+  .lab input[type=number] { width: 9ch; font: 14px var(--font-mono); padding: 6px 8px; border-radius: 8px; border: 1px solid var(--line-strong); background: #fff; color: var(--ink); }
+</style>
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs><marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" class="ah" style="fill:#7d8996"/></marker></defs></svg>
+<header class="sitebar"><div class="wrap"><a class="brand" href="index.html">Classic System Design</a><nav aria-label="Site"><a href="index.html">Home</a><a href="index.html#blocks" aria-current="page">Building blocks</a><a href="index.html#designs">Designs</a><a href="https://devlcodes.github.io/agentic-ai-notebook/system-design/index.html">Agentic designs ↗</a></nav></div></header>
+<main>
+<div class="wrap"><div class="intro"><p class="eyebrow">Building block · structure</p><h1>Monoliths, microservices and hexagonal architecture</h1><p class="lead">How to cut a system into pieces: one deployable app, one app with strict modules inside, or many small services that talk over the network. And how to keep business rules apart from databases and frameworks, whichever you pick.</p></div></div>
+<div class="wrap doc">
+  <nav class="toc" aria-label="On this page"><p>On this page</p><ol><li><a href="#what">Three ways to cut a system</a></li><li><a href="#hexagonal">Ports and adapters</a></li><li><a href="#boundaries">Boundaries and data ownership</a></li><li><a href="#calls">Sync and async calls</a></li><li><a href="#lab">Try it: a request that calls N services</a></li><li><a href="#when">When splitting pays off</a></li><li><a href="#failure">How it goes wrong</a></li><li><a href="#interview">Saying it in an interview</a></li><li><a href="#real-world">In the real world</a></li><li><a href="#related">Related</a></li></ol></nav>
+  <article>
+<section id="what"><h2>Three ways to cut a system</h2>
+<p class="lead">The question is not "monolith or microservices". It is where the boundaries go, and whether crossing one is a function call or a network call.</p>
+<figure class="fig"><svg viewBox="0 0 722 280" class="dg" role="img" aria-label="Three styles side by side: a monolith with tangled modules and one database, a modular monolith with walled modules and a schema per module, and microservices that each own a database and call each other over the network">
+<text x="123" y="24" class="cap" text-anchor="middle">MONOLITH</text>
+<text x="361" y="24" class="cap" text-anchor="middle">MODULAR MONOLITH</text>
+<text x="601" y="24" class="cap" text-anchor="middle">MICROSERVICES</text>
+<rect x="20" y="40" width="206" height="130" rx="10" class="box"/>
+<rect x="34" y="58" width="80" height="34" rx="6" class="k-kb"/><text x="74" y="80" class="small b" text-anchor="middle">Orders</text>
+<rect x="132" y="58" width="80" height="34" rx="6" class="k-kb"/><text x="172" y="80" class="small b" text-anchor="middle">Users</text>
+<rect x="34" y="118" width="80" height="34" rx="6" class="k-kb"/><text x="74" y="140" class="small b" text-anchor="middle">Payments</text>
+<rect x="132" y="118" width="80" height="34" rx="6" class="k-kb"/><text x="172" y="140" class="small b" text-anchor="middle">Catalog</text>
+<path d="M114 75 L132 75 M74 92 L74 118 M172 92 L172 118 M114 135 L132 135 M110 92 L136 118 M136 92 L110 118" class="wire red"/>
+<rect x="73" y="196" width="100" height="40" rx="8" class="k-cross"/><text x="123" y="220" class="small b" text-anchor="middle">One database</text>
+<path d="M123 170 L123 194" class="wire" marker-end="url(#ah)"/>
+<text x="123" y="258" class="sm" text-anchor="middle">1 deploy · any code calls any code</text>
+<text x="123" y="274" class="sm bad" text-anchor="middle">any table, any join</text>
+<rect x="256" y="40" width="210" height="130" rx="10" class="box"/>
+<rect x="270" y="58" width="84" height="34" rx="6" class="k-ingest"/><text x="312" y="80" class="small b" text-anchor="middle">Orders</text>
+<rect x="368" y="58" width="84" height="34" rx="6" class="k-ingest"/><text x="410" y="80" class="small b" text-anchor="middle">Users</text>
+<rect x="270" y="118" width="84" height="34" rx="6" class="k-ingest"/><text x="312" y="140" class="small b" text-anchor="middle">Payments</text>
+<rect x="368" y="118" width="84" height="34" rx="6" class="k-ingest"/><text x="410" y="140" class="small b" text-anchor="middle">Catalog</text>
+<path d="M354 75 L366 75" class="wire" marker-end="url(#ah)"/><path d="M312 92 L312 116" class="wire" marker-end="url(#ah)"/>
+<text x="361" y="108" class="sm" text-anchor="middle">public API</text>
+<rect x="276" y="196" width="170" height="40" rx="8" class="k-cross"/><text x="361" y="214" class="small b" text-anchor="middle">One database</text><text x="361" y="229" class="sm" text-anchor="middle">a schema per module</text>
+<path d="M361 170 L361 194" class="wire" marker-end="url(#ah)"/>
+<text x="361" y="258" class="sm" text-anchor="middle">1 deploy · modules call public APIs only</text>
+<text x="361" y="274" class="sm okt" text-anchor="middle">walls checked at build time</text>
+<rect x="496" y="44" width="94" height="36" rx="8" class="k-serve"/><text x="543" y="67" class="small b" text-anchor="middle">Orders</text>
+<rect x="612" y="44" width="94" height="36" rx="8" class="k-serve"/><text x="659" y="67" class="small b" text-anchor="middle">Users</text>
+<rect x="513" y="84" width="60" height="18" rx="9" class="k-cross"/><text x="543" y="97" class="sm" text-anchor="middle">DB</text>
+<rect x="629" y="84" width="60" height="18" rx="9" class="k-cross"/><text x="659" y="97" class="sm" text-anchor="middle">DB</text>
+<rect x="496" y="136" width="94" height="36" rx="8" class="k-serve"/><text x="543" y="159" class="small b" text-anchor="middle">Payments</text>
+<rect x="612" y="136" width="94" height="36" rx="8" class="k-serve"/><text x="659" y="159" class="small b" text-anchor="middle">Catalog</text>
+<rect x="513" y="176" width="60" height="18" rx="9" class="k-cross"/><text x="543" y="189" class="sm" text-anchor="middle">DB</text>
+<rect x="629" y="176" width="60" height="18" rx="9" class="k-cross"/><text x="659" y="189" class="sm" text-anchor="middle">DB</text>
+<path d="M590 62 L610 62" class="wire hot" marker-end="url(#ah)"/><path d="M543 104 L543 134" class="wire hot" marker-end="url(#ah)"/><path d="M590 154 L610 154" class="wire hot" marker-end="url(#ah)"/>
+<text x="601" y="222" class="sm" text-anchor="middle">network calls (blue)</text>
+<text x="601" y="258" class="sm" text-anchor="middle">N deploys · a database each</text>
+<text x="601" y="274" class="sm bad" text-anchor="middle">every call can be slow or fail</text>
+</svg><figcaption>Same four business areas, three ways. The modular monolith keeps one deploy but draws the walls microservices would draw; the walls are just not network hops yet.</figcaption></figure>
+<div class="table"><table><thead><tr><th></th><th>Monolith</th><th>Modular monolith</th><th>Microservices</th></tr></thead><tbody>
+<tr><td>Deploy unit</td><td>One</td><td>One</td><td>One per service</td></tr>
+<tr><td>Call between parts</td><td>Function call, about 1 µs or less</td><td>Function call through a module API</td><td>Network call, about 0.5 to 5 ms in one data centre</td></tr>
+<tr><td>Data</td><td>Shared tables, joins everywhere</td><td>One DB, each module owns its tables</td><td>Each service owns its database</td></tr>
+<tr><td>Transactions</td><td>One ACID transaction</td><td>One ACID transaction</td><td>Sagas, outbox, idempotency</td></tr>
+<tr><td>Scale</td><td>Whole app together</td><td>Whole app together</td><td>Each service on its own</td></tr>
+<tr><td>Teams</td><td>Works up to a few teams</td><td>Many teams, one release train</td><td>Teams ship on their own schedule</td></tr>
+<tr><td>Main risk</td><td>Turns into a tangle nobody can change</td><td>Walls erode if nothing enforces them</td><td>Network, ops and data consistency cost</td></tr>
+</tbody></table></div>
+<p>A <strong>monolith</strong> is not a bad word. One codebase, one deploy, one database is the fastest way to build and the easiest to debug. It goes wrong when every part reaches into every other part, so a change anywhere can break anything.</p>
+<p>A <strong>modular monolith</strong> keeps one deploy but splits the code into modules with clear public interfaces. Orders may call <code>payments.charge()</code>, but may not read the payments tables. A build check enforces it. This gives most of the design benefit of services with none of the network cost.</p>
+<p><strong>Microservices</strong> make each module its own process with its own database, deployed and scaled on its own. You gain independent releases and independent scaling. You pay with network calls, partial failures, data spread across stores, and a lot more to operate.</p></section>
+
+<section id="hexagonal"><h2>Ports and adapters</h2>
+<p>Hexagonal architecture (Alistair Cockburn, 2005) is about the inside of one app or one service. Keep the business rules in a core that knows nothing about HTTP, SQL or a vendor SDK. The core declares <strong>ports</strong>: interfaces for what it needs and what it offers. <strong>Adapters</strong> plug real technology into those ports.</p>
+<figure class="fig"><svg viewBox="0 0 722 264" class="dg" role="img" aria-label="A hexagonal domain core with ports; driving adapters such as a REST controller and a queue consumer on the left, driven adapters such as Postgres, Stripe and in-memory fakes on the right, all depending on the core">
+<text x="105" y="44" class="cap" text-anchor="middle">DRIVING SIDE · CALLS IN</text>
+<text x="627" y="34" class="cap" text-anchor="middle">DRIVEN SIDE · CALLED OUT</text>
+<path d="M261 140 L311 53 L411 53 L461 140 L411 227 L311 227 Z" class="k-ingest"/>
+<text x="361" y="98" class="small b" text-anchor="middle">Domain core</text>
+<text x="361" y="116" class="sm" text-anchor="middle">order rules · no SQL · no HTTP</text>
+<text x="361" y="146" class="cap" text-anchor="middle">PORTS (INTERFACES)</text>
+<text x="361" y="166" class="mono sm" text-anchor="middle">PlaceOrder</text>
+<text x="361" y="182" class="mono sm" text-anchor="middle">OrderRepository</text>
+<text x="361" y="198" class="mono sm" text-anchor="middle">PaymentGateway</text>
+<rect x="30" y="76" width="150" height="40" rx="8" class="k-serve"/><text x="105" y="94" class="small b" text-anchor="middle">REST controller</text><text x="105" y="109" class="sm" text-anchor="middle">HTTP → PlaceOrder</text>
+<rect x="30" y="164" width="150" height="40" rx="8" class="k-serve"/><text x="105" y="182" class="small b" text-anchor="middle">Queue consumer</text><text x="105" y="197" class="sm" text-anchor="middle">event → PlaceOrder</text>
+<path d="M180 96 L283 96" class="wire" marker-end="url(#ah)"/><path d="M180 184 L283 184" class="wire" marker-end="url(#ah)"/>
+<rect x="552" y="50" width="150" height="40" rx="8" class="k-cross"/><text x="627" y="68" class="small b" text-anchor="middle">Postgres adapter</text><text x="627" y="83" class="sm" text-anchor="middle">is an OrderRepository</text>
+<rect x="552" y="120" width="150" height="40" rx="8" class="k-model"/><text x="627" y="138" class="small b" text-anchor="middle">Stripe adapter</text><text x="627" y="153" class="sm" text-anchor="middle">is a PaymentGateway</text>
+<rect x="552" y="190" width="150" height="40" rx="8" class="ghost"/><text x="627" y="208" class="small b" text-anchor="middle">In-memory fakes</text><text x="627" y="223" class="sm" text-anchor="middle">for fast tests</text>
+<path d="M552 72 L440 96" class="wire" marker-end="url(#ah)"/><path d="M552 140 L465 140" class="wire" marker-end="url(#ah)"/><path d="M552 208 L440 184" class="wire dash" marker-end="url(#ah)"/>
+<text x="361" y="254" class="sm" text-anchor="middle">Arrows show who depends on whom: every adapter knows the core; the core knows only its own ports.</text>
+</svg><figcaption>Driving adapters call into the core. Driven adapters are called by the core, through interfaces the core owns. Swap Postgres for DynamoDB, or Stripe for another provider, and the core does not change.</figcaption></figure>
+<p>The rule that makes it work is the <strong>dependency direction</strong>: source code dependencies point inward. The core defines <code>OrderRepository</code>; the Postgres adapter implements it. The core never imports the database driver.</p>
+<ul>
+<li><strong>Tests get fast.</strong> Run the core against in-memory fakes. Thousands of business-rule tests finish in seconds with no database or network.</li>
+<li><strong>Vendors stay replaceable.</strong> A payment provider change touches one adapter, not every place that charges a card.</li>
+<li><strong>It makes a later split cheaper.</strong> If the Orders core only talks to Payments through a port, turning that port into a network client is a local change.</li>
+</ul>
+<p>Clean architecture and onion architecture are close cousins with the same inward rule. The cost is more interfaces and mapping code. For a small CRUD app with almost no rules, that can be more ceremony than it is worth.</p></section>
+
+<section id="boundaries"><h2>Boundaries and data ownership</h2>
+<p>Most of the value, and most of the pain, of splitting comes from where you draw the lines.</p>
+<h3>Cut by business capability</h3>
+<p>Good boundaries follow the business: orders, payments, catalog, shipping. Domain-driven design calls each one a <strong>bounded context</strong>: an area where words have one meaning. "Product" in the catalog has photos and descriptions; in the warehouse it has a bin location and a weight. Two contexts, two models, and that is fine.</p>
+<p>Bad boundaries follow technical layers: a "database service", a "validation service", an "email-templates service". Every feature then has to change all of them, so they must deploy together anyway.</p>
+<div class="note"><p>A quick test: can one team ship a typical feature by changing one service? If most features touch three services, the boundaries are wrong, and you have the costs of microservices without the independence.</p></div>
+<h3>One owner per piece of data</h3>
+<p>Each service owns its tables. Nobody else reads or writes them directly. Other services get the data in one of three ways:</p>
+<div class="table"><table><thead><tr><th>How</th><th>Example</th><th>Trade-off</th></tr></thead><tbody>
+<tr><td>Ask the owner (API call)</td><td>Checkout calls Users for the shipping address</td><td>Always fresh; adds latency and a runtime dependency</td></tr>
+<tr><td>Listen to its events</td><td>Search keeps its own copy of products from <code>product-updated</code> events</td><td>Fast local reads; the copy is a little stale</td></tr>
+<tr><td>Change data capture</td><td>A connector streams the owner's database log into Kafka</td><td>No code change in the owner; you depend on its table layout</td></tr>
+</tbody></table></div>
+<p>A shared database between services looks like a shortcut. It is the most common way to end up with a <strong>distributed monolith</strong>: separate deploys that still break each other on every schema change.</p>
+<h3>Conway's law</h3>
+<p>Melvin Conway observed in 1968 that systems end up shaped like the teams that build them. Use it on purpose: one team should own one service end to end. If two teams share a service, they will fight over its release schedule. If one team owns ten tiny services, it pays the overhead ten times.</p></section>
+
+<section id="calls"><h2>Sync and async calls</h2>
+<figure class="fig"><svg viewBox="0 0 722 248" class="dg" role="img" aria-label="Top: a synchronous chain where the client waits on Orders, which waits on Inventory, which waits on Payments. Bottom: Orders publishes an event to a topic and Inventory, Email and Analytics consume it on their own schedule">
+<text x="20" y="20" class="cap">SYNC · REQUEST AND WAIT</text>
+<rect x="20" y="30" width="120" height="44" rx="8" class="k-user"/><text x="80" y="57" class="small b" text-anchor="middle">Client</text>
+<rect x="190" y="30" width="120" height="44" rx="8" class="k-serve"/><text x="250" y="57" class="small b" text-anchor="middle">Orders</text>
+<rect x="360" y="30" width="120" height="44" rx="8" class="k-serve"/><text x="420" y="57" class="small b" text-anchor="middle">Inventory</text>
+<rect x="530" y="30" width="120" height="44" rx="8" class="k-serve"/><text x="590" y="57" class="small b" text-anchor="middle">Payments</text>
+<path d="M140 52 L188 52" class="wire hot" marker-end="url(#ah)"/><path d="M310 52 L358 52" class="wire hot" marker-end="url(#ah)"/><path d="M480 52 L528 52" class="wire hot" marker-end="url(#ah)"/>
+<text x="335" y="94" class="sm" text-anchor="middle">the client waits for the whole chain: latencies add up, and every service must be up</text>
+<text x="20" y="122" class="cap">ASYNC · PUBLISH AND MOVE ON</text>
+<rect x="20" y="148" width="120" height="44" rx="8" class="k-serve"/><text x="80" y="175" class="small b" text-anchor="middle">Orders</text>
+<rect x="210" y="148" width="160" height="44" rx="8" class="k-ingest"/><text x="290" y="167" class="small b" text-anchor="middle">Topic</text><text x="290" y="183" class="mono sm" text-anchor="middle">order-placed</text>
+<rect x="500" y="132" width="150" height="30" rx="8" class="k-serve"/><text x="575" y="152" class="small b" text-anchor="middle">Inventory</text>
+<rect x="500" y="170" width="150" height="30" rx="8" class="k-serve"/><text x="575" y="190" class="small b" text-anchor="middle">Email</text>
+<rect x="500" y="208" width="150" height="30" rx="8" class="k-serve"/><text x="575" y="228" class="small b" text-anchor="middle">Analytics</text>
+<path d="M140 170 L208 170" class="wire" marker-end="url(#ah)"/>
+<path d="M370 166 L498 147" class="wire dash" marker-end="url(#ah)"/><path d="M370 170 L498 185" class="wire dash" marker-end="url(#ah)"/><path d="M370 176 L498 222" class="wire dash" marker-end="url(#ah)"/>
+<text x="435" y="140" class="sm" text-anchor="middle">consumers pull</text>
+</svg><figcaption>Sync calls are simple and give an answer now. Async events decouple services in time: if Email is down for ten minutes, orders still go through and the emails catch up.</figcaption></figure>
+<div class="table"><table><thead><tr><th></th><th>Sync (REST, gRPC)</th><th>Async (queue, Kafka topic)</th></tr></thead><tbody>
+<tr><td>Caller gets</td><td>An answer now</td><td>An acknowledgement; the result comes later</td></tr>
+<tr><td>If the callee is down</td><td>The caller fails or waits</td><td>Messages wait in the broker</td></tr>
+<tr><td>Latency</td><td>Adds up along the chain</td><td>Off the user's path</td></tr>
+<tr><td>Consistency</td><td>Easier to reason about</td><td>Eventual; duplicates and reordering happen</td></tr>
+<tr><td>Use for</td><td>Reads the user waits for; checks that must pass first (stock, fraud)</td><td>Side effects: email, search indexing, analytics, fan-out</td></tr>
+</tbody></table></div>
+<h3>Rules for sync calls</h3>
+<ul>
+<li><strong>Set a timeout on every call.</strong> Shorter than the caller's own deadline, and pass the remaining deadline downstream so deep calls give up when the user already has.</li>
+<li><strong>Retry only idempotent calls</strong>, with backoff and jitter, and with a retry budget so retries cannot multiply load during an outage. See the retry storm lab in <a href="api-gateways.html">API gateways</a>.</li>
+<li><strong>Use a circuit breaker</strong> so a dead dependency fails fast instead of tying up threads.</li>
+<li><strong>Fan out in parallel</strong> when calls do not depend on each other, and degrade gracefully: a product page without recommendations is better than no page.</li>
+</ul>
+<h3>Rules for async calls</h3>
+<ul>
+<li>Assume <strong>at-least-once</strong> delivery: make consumers idempotent with a dedupe key.</li>
+<li>Write the event in the same transaction as the state change with a <strong>transactional outbox</strong>, or you will one day update the row and lose the event.</li>
+<li>A workflow across services (reserve stock, charge card, ship) is a <strong>saga</strong>: a series of local steps, each with a compensating step to undo it. See <a href="queues.html">queues</a> and <a href="consistency.html">consistency</a>.</li>
+</ul></section>
+
+<section id="lab"><h2>Try it: a request that calls N services</h2>
+<p>One user request needs data from N downstream services. Each call usually takes 10 ms, but 1 in 100 calls is slow (its p99). Each service is up with the availability you pick. Compare calling them one after another with calling them all at once.</p>
+<div class="lab" id="nlab">
+  <div class="lab-row"><label for="n-n">Services called <input type="range" id="n-n" min="1" max="20" step="1" value="5"><output id="n-n-o"></output></label><label for="n-p">Per-call p99 <input type="range" id="n-p" min="20" max="200" step="10" value="50"><output id="n-p-o"></output></label></div>
+  <div class="lab-row"><span class="lab-k">Calls</span><span class="seg" role="group" aria-label="Call pattern" id="n-mode"><button type="button" data-v="seq" aria-pressed="true">One after another</button><button type="button" data-v="par" aria-pressed="false">All in parallel</button></span></div>
+  <div class="lab-row"><span class="lab-k">Each service up</span><span class="seg" role="group" aria-label="Availability per service" id="n-av"><button type="button" data-v="0.9999" aria-pressed="false">99.99%</button><button type="button" data-v="0.999" aria-pressed="true">99.9%</button><button type="button" data-v="0.995" aria-pressed="false">99.5%</button><button type="button" data-v="0.99" aria-pressed="false">99%</button></span></div>
+  <div class="metrics" id="n-m"></div>
+  <svg class="lab-chart" id="n-chart" viewBox="0 0 640 230" role="img" aria-label="Request p99 latency against number of services, for sequential and parallel calls"></svg>
+  <p class="lab-out" id="n-out" aria-live="polite"></p>
+</div>
+<p class="muted" style="font-size:13.5px">Each call's time is drawn from a log-normal curve with a 10 ms median and the p99 you set; 20,000 simulated requests per setting, with a fixed seed so results repeat. Failures assume services fail independently and no retries. Illustrative.</p>
+<p>Two lessons fall out. First, <strong>sequential chains add up</strong>: five calls with a 10 ms median give a median request of about 60 ms and a p99 of about 130 ms. Second, <strong>parallel calls fix the average but not the tail</strong>: the request waits for the slowest call, so the more calls you make, the more likely one is slow. At 10 calls, about 1 request in 10 hits at least one call's p99 (1 − 0.99<sup>10</sup> ≈ 9.6%). At 100 calls it is 63%. This is the "tail at scale" effect Google wrote about in 2013.</p>
+<div class="formula">chance a request fails = 1 − a<sup>N</sup> &nbsp;·&nbsp; chance it meets a slow call = 1 − 0.99<sup>N</sup></div>
+<p>Fixes: call fewer services on the hot path (combine data in a read model), cache, give each call a tight timeout with a fallback, and for idempotent reads send a <strong>hedged request</strong> to a second replica if the first has not answered by about the p95.</p></section>
+
+<section id="when"><h2>When splitting pays off</h2>
+<p>Start with a well-structured monolith, ideally modular with hexagonal cores. Split a piece out when a specific pain shows up, not because the system "should" be microservices.</p>
+<div class="table"><table><thead><tr><th>Signal</th><th>Why a split helps</th></tr></thead><tbody>
+<tr><td>Many teams block each other on one release train</td><td>Independent deploys let each team ship on its own schedule</td></tr>
+<tr><td>One part needs very different scale</td><td>Scale the image resizer to 200 machines without scaling the admin pages</td></tr>
+<tr><td>One part needs different hardware or runtime</td><td>GPU inference, a JVM search engine, a Go websocket gateway</td></tr>
+<tr><td>A failure in one part takes everything down</td><td>A process boundary contains a memory leak or a crash loop</td></tr>
+<tr><td>Strict compliance scope</td><td>Keep card data in a small PCI-scoped service, away from the rest</td></tr>
+</tbody></table></div>
+<p>Reasons that do <strong>not</strong> justify a split on their own: "the code is messy" (fix the modules first; a messy monolith becomes messy services), "we might need to scale" (one well-tuned database and a few app servers go a very long way, see <a href="numbers.html">numbers to know</a>), and "everyone else does it".</p>
+<h3>What a split costs</h3>
+<ul>
+<li>Network calls: latency, timeouts, retries and partial failure on every boundary.</li>
+<li>No cross-service transactions: sagas, outboxes and reconciliation instead of one <code>COMMIT</code>.</li>
+<li>Operations: a deploy pipeline, dashboards, alerts, on-call and capacity plan per service.</li>
+<li>Debugging: you need <a href="observability.html">distributed tracing</a> to see one request across ten processes.</li>
+<li>Versioning: APIs and event schemas must stay backward compatible while callers upgrade.</li>
+</ul>
+<h3>How to split: the strangler fig</h3>
+<p>Do not rewrite. Put a routing layer (often the <a href="api-gateways.html">API gateway</a>) in front of the monolith. Build the new service for one capability, send its routes to it, and keep the rest going to the monolith. Move the data last: dual-write or stream it with change data capture, compare, then cut over. Repeat. The old system shrinks until it can be retired. Martin Fowler named the pattern after a vine that grows around a tree.</p></section>
+
+<section id="failure"><h2>How it goes wrong</h2>
+<h3>The distributed monolith</h3>
+<p>Services that must be deployed together, share a database, or call each other in long chains. You pay all the costs of microservices and get none of the independence. Fix the boundaries, or merge the services back.</p>
+<h3>Chatty services</h3>
+<p>A page that makes 40 calls to render, or a loop that calls another service once per item. Batch the calls (<code>getUsers(ids)</code>, not 50 × <code>getUser(id)</code>), or keep a local read model fed by events.</p>
+<h3>Cascading failure</h3>
+<p>One slow dependency fills every caller's thread pool, and the callers stop answering their own callers. Timeouts, circuit breakers, bulkheads (a separate pool per dependency) and load shedding stop the spread.</p>
+<h3>Breaking changes</h3>
+<p>A service renames a field and three consumers crash. Only add fields, never remove or rename without a deprecation window, and test against consumers' expectations with contract tests.</p>
+<h3>Too many, too small</h3>
+<p>Fifty services for a ten-person team means each engineer owns five pipelines and five on-call rotations. A service should be big enough that one team can own it end to end and small enough that it can.</p>
+<h3>Leaking frameworks into the core</h3>
+<p>Inside a service, the domain code imports ORM entities, HTTP request objects and a vendor SDK. Now a framework upgrade touches business rules, and tests need a database. Ports and adapters fix this.</p></section>
+
+<section id="interview"><h2>Saying it in an interview</h2>
+<div class="say"><p>"I'd start with a modular monolith: one deployable with orders, payments and catalog as separate modules, each owning its tables, each with a hexagonal core so business rules don't depend on Postgres or the payment SDK. I'd split a module into its own service only when there's a concrete reason: a team needs to deploy independently, it needs very different scale, or it should be isolated for compliance, like card data. Across services, the user-facing path stays synchronous and short, with timeouts and parallel fan-out; side effects like email, search indexing and analytics go through Kafka with an outbox and idempotent consumers. I'd watch the call depth, because with five sequential 10 ms calls the p99 is already well over 100 ms, and every extra 99.9% dependency adds about 0.1% failed requests."</p></div></section>
+
+<section id="real-world"><h2>In the real world</h2>
+<div class="table"><table><thead><tr><th>Need</th><th>Real options</th><th>Notes</th></tr></thead><tbody>
+<tr><td>Enforce module walls in a monolith</td><td>Spring Modulith, ArchUnit (Java), Packwerk (Ruby), import-linter (Python), Nx module boundaries (TypeScript)</td><td>Fail the build when one module reaches into another's internals</td></tr>
+<tr><td>Sync calls between services</td><td>gRPC, REST over HTTP, GraphQL federation</td><td>gRPC gives typed contracts and deadlines that propagate</td></tr>
+<tr><td>Async events</td><td>Kafka, Amazon SNS and SQS, Google Pub/Sub, RabbitMQ, NATS</td><td>See <a href="queues.html">queues</a> for delivery guarantees</td></tr>
+<tr><td>Long-running workflows (sagas)</td><td>Temporal, AWS Step Functions, Camunda</td><td>Durable state and retries for multi-step flows</td></tr>
+<tr><td>Running many services</td><td>Kubernetes, a service mesh (Istio, Linkerd), OpenTelemetry tracing</td><td>The platform cost is real; budget a team for it</td></tr>
+</tbody></table></div>
+<p>Public stories worth knowing: Shopify runs one of the largest Rails monoliths as a modular monolith and built Packwerk to enforce its boundaries. Segment wrote "Goodbye Microservices" (2018) after merging more than 140 near-identical destination services back into one. In 2023 a Prime Video team moved an audio and video quality-monitoring tool from distributed serverless components into a single process and reported over 90% lower infrastructure cost. Netflix and Amazon, on the other side, run thousands of services because they have thousands of engineers who need to ship independently.</p>
+<p class="muted" style="font-size:13.5px;color:var(--muted)">Products change quickly; names here are examples, not endorsements. Check current docs before choosing.</p></section>
+
+<section id="related"><h2>Related</h2><ul class="related"><li><a href="api-gateways.html">API gateways and service mesh</a></li><li><a href="queues.html">Message queues and streams</a></li><li><a href="consistency.html">Consistency and CAP</a></li><li><a href="requirements.html">Non-functional requirements</a></li><li><a href="observability.html">Monitoring, logging and tracing</a></li><li><a href="payments.html">Payments</a></li></ul></section>
+  </article>
+</div>
+</main>
+<footer class="site"><div class="wrap">Part of Classic System Design, a companion to the <a href="https://devlcodes.github.io/agentic-ai-notebook/system-design/index.html">agentic system designs</a>. Figures marked illustrative show the shape of a system, not measured numbers. Check vendor docs before relying on a specific product limit.</div></footer>
+<script>
+(function(){
+  function rng(seed){ return function(){ seed |= 0; seed = seed + 0x6D2B79F5 | 0; var t = Math.imul(seed ^ seed >>> 15, 1 | seed); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
+  var $ = function(id){ return document.getElementById(id); }, mode = 'seq', av = 0.999, MED = 10, MAXN = 20, S = 20000, curves = {};
+  function q(a, p){ return a[Math.min(a.length - 1, Math.floor(p * a.length))]; }
+  // One pass per p99 setting: for every N from 1 to 20, the sorted request times for sequential (sum) and parallel (max) calls.
+  function build(p99){
+    if (curves[p99]) return curves[p99];
+    var sig = Math.log(p99 / MED) / 2.326, r = rng(11), out = { seq: [], par: [] };
+    for (var n = 1; n <= MAXN; n++){
+      var sq = new Float64Array(S), pa = new Float64Array(S);
+      for (var i = 0; i < S; i++){
+        var s = 0, m = 0;
+        for (var k = 0; k < n; k++){
+          var u = r() || 1e-12, v = r(), z = Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v), l = MED * Math.exp(sig * z);
+          s += l; if (l > m) m = l;
+        }
+        sq[i] = s; pa[i] = m;
+      }
+      sq.sort(); pa.sort();
+      out.seq.push({ p50: q(sq, .5), p99: q(sq, .99) }); out.par.push({ p50: q(pa, .5), p99: q(pa, .99) });
+    }
+    return curves[p99] = out;
+  }
+  function pct(x){ return x < 0.001 ? (x * 100).toFixed(3) + '%' : x < 0.1 ? (x * 100).toFixed(2) + '%' : (x * 100).toFixed(1) + '%'; }
+  function chart(c, n, p99){
+    var W = 640, H = 230, L = 46, R = 14, T = 14, B = 34, top = c.seq[MAXN - 1].p99, ymax = Math.ceil(top / 100) * 100;
+    function X(i){ return L + (i - 1) / (MAXN - 1) * (W - L - R); } function Y(v){ return T + (1 - v / ymax) * (H - T - B); }
+    var g = '';
+    for (var t = 0; t <= 4; t++){ var v = ymax * t / 4, y = Y(v); g += '<line x1="' + L + '" x2="' + (W - R) + '" y1="' + y + '" y2="' + y + '" stroke="#cdd4dc"/><text x="' + (L - 6) + '" y="' + (y + 4) + '" text-anchor="end">' + Math.round(v) + '</text>'; }
+    [1, 5, 10, 15, 20].forEach(function(i){ g += '<text x="' + X(i) + '" y="' + (H - 14) + '" text-anchor="middle">' + i + '</text>'; });
+    g += '<text x="' + (W - R) + '" y="' + (H - 1) + '" text-anchor="end">services called</text><text x="' + L + '" y="' + (T - 2) + '">request p99, ms</text>';
+    g += '<line x1="' + L + '" x2="' + (W - R) + '" y1="' + Y(p99) + '" y2="' + Y(p99) + '" stroke="#9aa5b1" stroke-dasharray="4 4"/><text x="' + (W - R) + '" y="' + (Y(p99) - 5) + '" text-anchor="end">one call\'s p99</text>';
+    [['seq', '#d7932a', 'one after another'], ['par', '#4255d4', 'parallel']].forEach(function(s){
+      var d = c[s[0]].map(function(o, i){ return (i ? 'L' : 'M') + X(i + 1).toFixed(1) + ' ' + Y(o.p99).toFixed(1); }).join(' ');
+      var on = mode === s[0];
+      g += '<path d="' + d + '" fill="none" stroke="' + s[1] + '" stroke-width="' + (on ? 3 : 1.6) + '"' + (on ? '' : ' opacity=".55"') + '/>';
+      var last = c[s[0]][MAXN - 1].p99; g += '<text x="' + (X(MAXN) - 4) + '" y="' + (Y(last) - 7) + '" text-anchor="end" style="fill:' + s[1] + ';font-weight:600">' + s[2] + '</text>';
+    });
+    var cur = c[mode][n - 1].p99; g += '<circle cx="' + X(n) + '" cy="' + Y(cur) + '" r="5" fill="#1c2530"/>';
+    $('n-chart').innerHTML = g;
+  }
+  function run(){
+    var n = +$('n-n').value, p99 = +$('n-p').value, c = build(p99), o = c[mode][n - 1];
+    $('n-n-o').textContent = n; $('n-p-o').textContent = p99 + ' ms';
+    var fail = 1 - Math.pow(av, n), slow = 1 - Math.pow(0.99, n);
+    $('n-m').innerHTML = '<div class="metric"><span class="n">' + Math.round(o.p50) + ' ms</span><span class="l">request p50</span><small>one call: 10 ms</small></div>' +
+      '<div class="metric"><span class="n">' + Math.round(o.p99) + ' ms</span><span class="l">request p99</span><small>one call: ' + p99 + ' ms</small></div>' +
+      '<div class="metric"><span class="n">' + pct(fail) + '</span><span class="l">requests that fail</span><small>' + (fail > 0 ? 'about 1 in ' + Math.round(1 / fail).toLocaleString('en-US') : '') + '</small></div>' +
+      '<div class="metric"><span class="n">' + pct(slow) + '</span><span class="l">meet a slow call</span><small>at least one call at its p99</small></div>';
+    chart(c, n, p99);
+    var other = c[mode === 'seq' ? 'par' : 'seq'][n - 1], msg;
+    if (n === 1) msg = 'With one call, the request is exactly as fast and as reliable as that service. Add services to see what changes.';
+    else if (mode === 'seq') msg = 'Calling ' + n + ' services one after another, the times add up: the median request takes ' + Math.round(o.p50) + ' ms and the p99 ' + Math.round(o.p99) + ' ms. In parallel the p99 would be ' + Math.round(other.p99) + ' ms. ';
+    else msg = 'In parallel the request waits only for the slowest of ' + n + ' calls, so the median drops to ' + Math.round(o.p50) + ' ms (vs ' + Math.round(other.p50) + ' ms one after another). But the p99 still climbs to ' + Math.round(o.p99) + ' ms, because the more calls you make, the more often one of them is slow. ';
+    if (n > 1) msg += 'Parallel or not, the request needs all ' + n + ' services, so ' + pct(fail) + ' of requests fail' + (av >= 0.9999 ? '.' : ': that is ' + (fail / (1 - av)).toFixed(1) + '× the failure rate of one service.');
+    $('n-out').textContent = msg;
+  }
+  function seg(id, fn){ $(id).addEventListener('click', function(e){ var b = e.target.closest('button'); if (!b) return; this.querySelectorAll('button').forEach(function(x){ x.setAttribute('aria-pressed', x === b); }); fn(b.dataset.v); run(); }); }
+  seg('n-mode', function(v){ mode = v; }); seg('n-av', function(v){ av = +v; });
+  $('n-n').addEventListener('input', run);
+  $('n-p').addEventListener('input', function(){ $('n-p-o').textContent = this.value + ' ms'; });
+  $('n-p').addEventListener('change', run);
+  run();
+})();
+</script>
+</body>
+</html>
