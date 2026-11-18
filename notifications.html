@@ -601,8 +601,8 @@ POST /hooks/{provider}/receipts   (delivery reports from providers)</code></pre>
   var NS = [1e6, 5e6, 10e6, 25e6, 50e6];
   var CH = {
     sms: { name: 'SMS', p: 2000, b: 800 },
-    email: { name: 'Email', p: 5000, b: 2000 },
-    push: { name: 'Push', p: 40000, b: 0 }
+    email: { name: 'email', p: 5000, b: 2000 },
+    push: { name: 'push', p: 40000, b: 0 }
   };
   var ch = 'sms', OUT = 15, START = 5;
   function fmt(n){ if (n >= 1e6) return +(n/1e6).toFixed(1) + 'M'; if (n >= 1e3) return +(n/1e3).toFixed(n < 1e4 ? 1 : 0) + 'k'; return String(Math.round(n)); }
@@ -751,7 +751,7 @@ D.failover3d = {
     c.packet({ pts: [V(5, -4), V(2, -4), V(2, 0), V(-0.5, 0), V(-6, 0), V(-6, -5)], t0: 3.4, t1: 4.6, kind: 'span', color: P.bad, to: rq, label: 'timeout' });
     c.packet({ pts: [V(-0.5, 0), V(2, 0), V(2, -4), V(5, -4)], t0: 5.0, t1: 5.8, n: 3, st: 0.2, kind: 'chunk', color: P.bad, to: pa });
     c.pulse(rt, 6.2);
-    c.note('breaker open · A down', 2, -6.6);
+    c.note('breaker open · A down', -0.5, 2.2);
     c.packet({ pts: [V(-6, -5), V(-6, 0), V(-0.5, 0), V(2, 0), V(2, 4), V(5, 4)], t0: 7.1, t1: 8.3, kind: 'env', to: pb, label: 'retry · otp-55' });
     c.packet({ pts: [V(5, 4), V(8, 4), V(8, 0), V(11, 0)], t0: 8.4, t1: 9.2, kind: 'env', color: P.ship, to: ph, label: 'code 4821' });
     c.packet({ pts: [V(-0.5, 0), V(2, 0), V(2, -4), V(5, -4)], t0: 9.8, t1: 10.6, kind: 'ask', to: pa, label: 'trial' });
