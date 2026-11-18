@@ -216,70 +216,21 @@
 <svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs><marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" class="ah" style="fill:#7d8996"/></marker><marker id="ahb" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" style="fill:#4255d4"/></marker><pattern id="hatch" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><rect width="6" height="6" fill="#dfe3fa"/><line x1="0" y1="0" x2="0" y2="6" stroke="#4d5fd8" stroke-width="1.2" opacity=".35"/></pattern></defs></svg>
 <header class="sitebar"><div class="wrap"><a class="brand" href="index.html">Classic System Design</a><nav aria-label="Site"><a href="index.html">Home</a><a href="index.html#blocks" aria-current="page">Building blocks</a><a href="index.html#designs">Designs</a><a href="https://devlcodes.github.io/agentic-ai-notebook/system-design/index.html">Agentic designs ↗</a></nav></div></header>
 <main>
-<div class="wrap"><div class="intro"><p class="eyebrow">Building block · concurrency</p><h1>Threads, locks and wait/notify</h1><p class="lead">How one Java program does two things at once: a background thread waits for work, other threads hand it work, and one lock keeps them from trampling each other.</p></div></div>
+<div class="wrap"><div class="intro"><p class="eyebrow">Building block · concurrency</p><h1>Threads, locks and wait/notify</h1><p class="lead">start() vs run(), synchronized, wait() and notify(), and daemon threads, explained with one kitchen and one knife.</p></div></div>
 <div class="wrap doc">
-  <nav class="toc" aria-label="On this page"><p>On this page</p><ol><li><a href="#what">What a thread is</a></li><li><a href="#start">Starting a thread</a></li><li><a href="#states">The states of a thread</a></li><li><a href="#locks">Shared data and locks</a></li><li><a href="#wait">wait() and notify()</a></li><li><a href="#lab">Try it: step through two threads</a></li><li><a href="#failure">How it goes wrong</a></li><li><a href="#interview">Saying it in an interview</a></li><li><a href="#real-world">In the real world</a></li><li><a href="#related">Related</a></li></ol></nav>
+  <nav class="toc" aria-label="On this page"><p>On this page</p><ol><li><a href="#what">The big picture</a></li><li><a href="#start">start() vs run()</a></li><li><a href="#sync">synchronized</a></li><li><a href="#wait">wait() and notify()</a></li><li><a href="#daemon">Daemon threads</a></li><li><a href="#lab">Try it: step through</a></li><li><a href="#cheat">Cheat sheet</a></li><li><a href="#related">Related</a></li></ol></nav>
   <article>
 
-<section id="what"><h2>What a thread is</h2>
-<p class="lead">A thread is one line of execution: it runs one statement after another. A Java program starts with one thread, <code>main</code>. Every extra thread you start runs its own code at the same time, inside the same program.</p>
-<figure class="fig"><svg viewBox="0 0 722 250" class="dg" role="img" aria-label="One JVM process holds a shared heap. The main thread and a worker thread each have their own stack and both point into the shared heap.">
-<rect x="10" y="26" width="702" height="214" rx="12" class="zone"/>
-<text x="26" y="48" class="cap">ONE JAVA PROCESS (THE JVM)</text>
-<rect x="30" y="62" width="300" height="140" rx="10" class="k-ingest"/>
-<text x="180" y="84" class="small b" text-anchor="middle">Heap: shared by every thread</text>
-<rect x="50" y="98" width="120" height="40" rx="6" class="box"/><text x="110" y="116" class="small" text-anchor="middle">task queue</text><text x="110" y="131" class="sm" text-anchor="middle">one object</text>
-<rect x="190" y="98" width="120" height="40" rx="6" class="box"/><text x="250" y="116" class="small" text-anchor="middle">its lock</text><text x="250" y="131" class="sm" text-anchor="middle">built into the object</text>
-<text x="180" y="166" class="sm" text-anchor="middle">Both threads read and change</text><text x="180" y="181" class="sm" text-anchor="middle">these same objects</text>
-<rect x="380" y="62" width="150" height="140" rx="10" class="k-kb"/>
-<text x="455" y="84" class="small b" text-anchor="middle">main thread</text>
-<rect x="400" y="96" width="110" height="22" rx="4" class="box"/><text x="455" y="111" class="sm mono" text-anchor="middle">schedule()</text>
-<rect x="400" y="120" width="110" height="22" rx="4" class="box"/><text x="455" y="135" class="sm mono" text-anchor="middle">main()</text>
-<text x="455" y="164" class="sm" text-anchor="middle">its own stack:</text><text x="455" y="179" class="sm" text-anchor="middle">local variables, calls</text>
-<rect x="550" y="62" width="150" height="140" rx="10" class="k-serve"/>
-<text x="625" y="84" class="small b" text-anchor="middle">worker thread</text>
-<rect x="570" y="120" width="110" height="22" rx="4" class="box"/><text x="625" y="135" class="sm mono" text-anchor="middle">loop()</text>
-<text x="625" y="164" class="sm" text-anchor="middle">its own stack:</text><text x="625" y="179" class="sm" text-anchor="middle">local variables, calls</text>
-<path d="M380 118 L332 118" class="wire dash" marker-end="url(#ah)"/>
-<path d="M625 202 L625 222 L180 222 L180 204" class="wire dash" marker-end="url(#ah)"/>
-<text x="402" y="236" class="sm" text-anchor="middle">both point at the same queue</text>
-</svg><figcaption>Threads share the heap but not their stacks. Local variables are private to a thread. Objects are shared, and shared objects are where the bugs live.</figcaption></figure>
-<p>Use a thread when work must happen <strong>in the background</strong> while the caller carries on. Examples are a task that should run in 5 seconds, a server handling many requests at once, or a slow file write that shouldn't freeze the program.</p>
-<p>The rest of this page uses one small example: a <strong>delayed task runner</strong>. Callers say "run a task in N ms" and return at once. One background worker thread keeps the tasks in a min-heap ordered by due time and runs each when it is due.</p>
-<pre><code>class DelayedRunner {
-    // due times in ms, earliest on top (a min-heap)
-    private final PriorityQueue&lt;Long&gt; due = new PriorityQueue&lt;&gt;();
+<section id="what"><h2>The big picture</h2>
+<p class="lead">A thread is a worker that runs code. Every program starts with one, <code>main</code>. You can start more, and they all run at the same time.</p>
+<p>Think of a <strong>kitchen with one knife</strong>. Each thread is a cook. They all share the same food (your objects, like a <code>PriorityQueue</code>). The knife is the <strong>lock</strong>: only the cook holding it may touch the shared food.</p>
+<p>Four ideas cover almost everything: how a cook starts, how the knife works, how cooks nap and wake each other, and which cooks Java waits for before closing the kitchen.</p></section>
 
-    void init() {
-        Thread worker = new Thread(this::loop, "worker");
-        worker.setDaemon(true);
-        worker.start();
-    }
-
-    synchronized void schedule(long delayMs) {
-        due.add(System.currentTimeMillis() + delayMs);
-        notify();
-    }
-
-    private synchronized void loop() {
-        try {
-            while (true) {
-                if (due.isEmpty()) { wait(); continue; }
-                long left = due.peek() - System.currentTimeMillis();
-                if (left &gt; 0) { wait(left); continue; }
-                due.poll();
-                System.out.println("Task ran");
-            }
-        } catch (InterruptedException e) { /* asked to stop */ }
-    }
-}</code></pre>
-<p>Every line in it is there for a threading reason. The next sections take them one at a time.</p></section>
-
-<section id="start"><h2>Starting a thread</h2>
-<h3><code>new Thread(...)</code> creates an object, not a thread</h3>
-<p><code>new Thread(this::loop)</code> builds a Thread object and remembers which code to run. Nothing runs yet. The thread is in the <code>NEW</code> state.</p>
-<h3><code>start()</code> launches it, <code>run()</code> does not</h3>
-<p><code>start()</code> asks the JVM and the operating system for a real new thread with its own stack. That new thread calls your code. <code>start()</code> itself returns straight away, so the caller and the new thread now run side by side. You can call <code>start()</code> only once per Thread object.</p>
+<section id="start"><h2>start() vs run()</h2>
+<div class="note"><p><code>start()</code> hires a new cook who does the work. <code>run()</code> means you do the work yourself.</p></div>
+<pre><code>Thread t = new Thread(this::loop);
+t.start();   // new thread runs loop(); this line returns at once
+t.run();     // NO new thread: you run loop() yourself and get stuck</code></pre>
 <figure class="fig"><svg viewBox="0 0 722 214" class="dg" role="img" aria-label="With start, main returns at once and a second thread runs loop. With run, main itself runs loop forever and never reaches schedule.">
 <text x="20" y="24" class="cap">WORKER.START()</text>
 <text x="20" y="56" class="small b">main</text>
@@ -299,68 +250,33 @@
 <path d="M500 186 L540 186" class="wire dash" marker-end="url(#ah)"/>
 <path d="M556 178 L572 194 M572 178 L556 194" class="xmark"/>
 <text x="584" y="190" class="small bad">schedule() never runs</text>
-</svg><figcaption><code>run()</code> is just an ordinary method. Calling it yourself runs the loop on the current thread, which is a classic interview trick question.</figcaption></figure>
-<h3><code>setDaemon(true)</code>: don't keep the program alive for me</h3>
-<p>The JVM exits only when every <strong>non-daemon</strong> thread has finished. New threads are non-daemon by default. Our worker loops forever, so without <code>setDaemon(true)</code> the program would never exit. Call it <em>before</em> <code>start()</code>; calling it afterwards throws <code>IllegalThreadStateException</code>.</p>
-<figure class="fig"><svg viewBox="0 0 722 170" class="dg" role="img" aria-label="When main returns, a daemon worker is stopped and the JVM exits. A non-daemon worker keeps the JVM running forever.">
-<text x="20" y="24" class="cap">WORKER IS A DAEMON</text>
-<text x="20" y="52" class="small b">main</text><rect x="110" y="40" width="300" height="16" rx="4" class="k-kb"/>
-<text x="20" y="80" class="small b">worker</text><rect x="110" y="68" width="300" height="16" rx="4" class="k-serve"/>
-<line x1="410" y1="34" x2="410" y2="92" class="axis"/>
-<path d="M422 62 l6 7 l12 -14" class="tick"/><text x="450" y="58" class="small okt">main() returns:</text><text x="450" y="74" class="sm">JVM stops the worker and exits</text>
-<line x1="10" y1="104" x2="712" y2="104" class="rule"/>
-<text x="20" y="126" class="cap">WORKER IS NOT A DAEMON (THE DEFAULT)</text>
-<text x="20" y="150" class="small b">main</text><rect x="110" y="138" width="300" height="16" rx="4" class="k-kb"/>
-<text x="20" y="168" class="small b">worker</text><rect x="110" y="156" width="560" height="10" rx="4" class="k-serve"/>
-<path d="M670 161 L700 161" class="wire red" marker-end="url(#ah)"/>
-<text x="430" y="150" class="small bad">program never exits</text>
-</svg><figcaption>A daemon thread is a background helper. The catch: it is killed without warning, so never leave a daemon half way through writing a file.</figcaption></figure></section>
+</svg><figcaption><code>start()</code>: two threads. <code>run()</code>: still one thread, and it gets stuck in the loop.</figcaption></figure>
+<ul class="plain"><li><code>new Thread(...)</code> only creates an object. Nothing runs until <code>start()</code>.</li><li>You can call <code>start()</code> once per thread.</li></ul></section>
 
-<section id="states"><h2>The states of a thread</h2>
-<p>At any moment a thread is in exactly one state. Knowing which one, and what moves it to the next, explains almost every threading question.</p>
-<figure class="fig"><svg viewBox="0 0 722 262" class="dg" role="img" aria-label="Thread states: NEW goes to RUNNABLE on start. RUNNABLE goes to BLOCKED when a lock is busy, to WAITING on wait or join, to TIMED_WAITING on sleep or wait with a timeout, and to TERMINATED when run returns.">
-<rect x="20" y="110" width="96" height="40" rx="8" class="k-src"/><text x="68" y="135" class="small b mono" text-anchor="middle">NEW</text>
-<path d="M116 130 L198 130" class="wire" marker-end="url(#ah)"/><text x="157" y="122" class="sm mono" text-anchor="middle">start()</text>
-<rect x="200" y="100" width="140" height="60" rx="10" class="k-ingest"/><text x="270" y="126" class="small b mono" text-anchor="middle">RUNNABLE</text><text x="270" y="144" class="sm" text-anchor="middle">running or ready</text>
-<rect x="380" y="20" width="170" height="44" rx="8" class="k-dlq"/><text x="465" y="40" class="small b mono" text-anchor="middle">BLOCKED</text><text x="465" y="56" class="sm" text-anchor="middle">wants a lock</text>
-<rect x="380" y="150" width="170" height="44" rx="8" class="k-kb"/><text x="465" y="170" class="small b mono" text-anchor="middle">WAITING</text><text x="465" y="186" class="sm" text-anchor="middle">until someone wakes it</text>
-<rect x="380" y="206" width="170" height="44" rx="8" class="k-kb"/><text x="465" y="226" class="small b mono" text-anchor="middle">TIMED_WAITING</text><text x="465" y="242" class="sm" text-anchor="middle">until woken or time is up</text>
-<rect x="604" y="110" width="108" height="40" rx="8" class="k-cross"/><text x="658" y="135" class="small b mono" text-anchor="middle">TERMINATED</text>
-<path d="M340 130 L602 130" class="wire" marker-end="url(#ah)"/><text x="470" y="122" class="sm" text-anchor="middle">run() returns</text>
-<path d="M300 100 C300 60 330 42 378 42" class="wire" marker-start="url(#ah)" marker-end="url(#ah)"/>
-<path d="M300 160 C300 172 330 172 378 172" class="wire" marker-start="url(#ah)" marker-end="url(#ah)"/>
-<path d="M240 160 C240 228 330 228 378 228" class="wire" marker-start="url(#ah)" marker-end="url(#ah)"/>
-<text x="560" y="36" class="sm">in: lock is held by another</text><text x="560" y="51" class="sm">out: gets the lock</text>
-<text x="560" y="168" class="sm">in: wait(), join()</text><text x="560" y="183" class="sm">out: notify(), notifyAll()</text>
-<text x="560" y="224" class="sm">in: sleep(ms), wait(ms)</text><text x="560" y="239" class="sm">out: time up, or notify()</text>
-</svg><figcaption>These are the real names from <code>Thread.State</code>. Only RUNNABLE threads use the CPU; the other states cost nothing but memory.</figcaption></figure>
-<div class="table"><table><thead><tr><th>Call</th><th>State</th><th>Holds its locks?</th><th>Ends when</th></tr></thead><tbody>
-<tr><td><code>Thread.sleep(ms)</code></td><td>TIMED_WAITING</td><td><strong>Yes</strong>, keeps every lock</td><td>time is up</td></tr>
-<tr><td><code>wait()</code></td><td>WAITING</td><td><strong>No</strong>, releases that object's lock</td><td><code>notify()</code> / <code>notifyAll()</code>, or a spurious wakeup</td></tr>
-<tr><td><code>wait(ms)</code></td><td>TIMED_WAITING</td><td><strong>No</strong>, releases that object's lock</td><td>notify, time up, or a spurious wakeup</td></tr>
-<tr><td>enter <code>synchronized</code> while busy</td><td>BLOCKED</td><td>n/a</td><td>the holder leaves <code>synchronized</code> or calls <code>wait()</code></td></tr>
-<tr><td><code>t.join()</code></td><td>WAITING</td><td>Yes</td><td>thread <code>t</code> finishes</td></tr>
-</tbody></table></div></section>
+<section id="sync"><h2>synchronized: one knife</h2>
+<div class="note"><p>To enter a <code>synchronized</code> block you must pick up the knife (the lock). If someone else has it, you wait. When you leave, the knife is put down for you.</p></div>
+<pre><code>synchronized (this) {   // pick up the knife (or wait for it)
+    queue.add(x);       // only one thread here at a time
+}                       // knife put down automatically</code></pre>
+<figure class="fig"><svg viewBox="0 0 722 170" class="dg" role="img" aria-label="Thread A is inside the synchronized block holding the lock. Thread B is blocked outside until A leaves.">
+<rect x="250" y="24" width="230" height="120" rx="12" class="k-kb"/>
+<text x="365" y="46" class="small b" text-anchor="middle">synchronized block</text>
+<circle cx="365" cy="86" r="22" class="k-ingest"/><text x="365" y="91" class="small b" text-anchor="middle">A</text>
+<text x="365" y="128" class="sm" text-anchor="middle">A holds the lock (the knife)</text>
+<circle cx="110" cy="86" r="22" class="k-dlq"/><text x="110" y="91" class="small b" text-anchor="middle">B</text>
+<text x="110" y="128" class="sm bad" text-anchor="middle">B is BLOCKED:</text><text x="110" y="142" class="sm" text-anchor="middle">waits at the door</text>
+<path d="M134 86 L246 86" class="wire red dash" marker-end="url(#ah)"/><text x="190" y="78" class="sm" text-anchor="middle">wants in</text>
+<path d="M480 86 L600 86" class="wire" marker-end="url(#ah)"/><text x="540" y="78" class="sm" text-anchor="middle">A leaves</text>
+<text x="610" y="82" class="sm">lock put down,</text><text x="610" y="96" class="sm">now B can enter</text>
+</svg><figcaption>Only one thread inside at a time. Everyone else waits at the door.</figcaption></figure>
+<p>A <code>synchronized</code> method is the same thing, wrapped around the whole method. <strong>Why bother?</strong> If two threads change the same queue at the same moment, it can break. The lock makes them take turns.</p></section>
 
-<section id="locks"><h2>Shared data and locks</h2>
-<h3>The problem: a race condition</h3>
-<p>Even <code>count++</code> is three steps: read the value, add one, write it back. If two threads interleave those steps, one update is lost. A heap is far worse: two threads adding at once can leave it corrupted.</p>
-<figure class="fig"><svg viewBox="0 0 722 214" class="dg" role="img" aria-label="Lost update: thread A and thread B both read 5, both write 6, so two increments only add one.">
-<text x="150" y="22" class="cap" text-anchor="middle">THREAD A</text><text x="361" y="22" class="cap" text-anchor="middle">COUNT IN MEMORY</text><text x="572" y="22" class="cap" text-anchor="middle">THREAD B</text>
-<line x1="361" y1="32" x2="361" y2="176" class="rule"/>
-<rect x="70" y="36" width="160" height="30" rx="6" class="k-kb"/><text x="150" y="56" class="small" text-anchor="middle">read count → 5</text>
-<text x="361" y="56" class="small mono" text-anchor="middle">5</text>
-<rect x="492" y="72" width="160" height="30" rx="6" class="k-serve"/><text x="572" y="92" class="small" text-anchor="middle">read count → 5</text>
-<text x="361" y="92" class="small mono" text-anchor="middle">5</text>
-<rect x="70" y="108" width="160" height="30" rx="6" class="k-kb"/><text x="150" y="128" class="small" text-anchor="middle">write 5 + 1 = 6</text>
-<text x="361" y="128" class="small mono" text-anchor="middle">6</text>
-<rect x="492" y="144" width="160" height="30" rx="6" class="k-serve"/><text x="572" y="164" class="small" text-anchor="middle">write 5 + 1 = 6</text>
-<text x="361" y="164" class="small mono bad" text-anchor="middle">6</text>
-<path d="M20 34 L20 176" class="axis" marker-end="url(#ah)"/><text x="30" y="194" class="sm">time</text>
-<text x="361" y="204" class="small bad" text-anchor="middle">two increments, but count only went up by one</text>
-</svg><figcaption>A race condition: the result depends on the timing of the threads. It passes in testing and fails under load.</figcaption></figure>
-<h3>The fix: <code>synchronized</code></h3>
-<p>Every Java object has one built-in lock, called its <strong>monitor</strong>. A <code>synchronized</code> method takes the lock of <code>this</code> on the way in and gives it back on the way out, even if it throws. Only one thread can hold a lock at a time, so only one thread is ever inside <code>schedule()</code> or <code>loop()</code>, and the heap is never touched by two threads at once.</p>
+<section id="wait"><h2>wait() and notify()</h2>
+<div class="table"><table><thead><tr><th></th><th>What it says</th><th>What happens</th></tr></thead><tbody>
+<tr><td><code>wait()</code></td><td>"Nothing to do yet. I'll nap."</td><td>Puts the knife <strong>down</strong> and sleeps until notified. <code>wait(ms)</code> also wakes when time is up.</td></tr>
+<tr><td><code>notify()</code></td><td>"Wake up, something changed."</td><td>Wakes one napping thread. It picks the knife back up, then checks again.</td></tr>
+</tbody></table></div>
+<p>Both must be called <strong>while holding the knife</strong>, inside <code>synchronized</code>. Otherwise Java throws <code>IllegalMonitorStateException</code>.</p>
 <figure class="fig"><svg viewBox="0 0 722 286" class="dg" role="img" aria-label="An object's monitor: threads blocked in the entry set wait for the lock; one owner runs inside; wait moves the owner to the wait set and releases the lock; notify moves one waiting thread back to the entry set.">
 <text x="110" y="50" class="cap" text-anchor="middle">ENTRY SET</text>
 <rect x="20" y="60" width="180" height="120" rx="10" class="ghost"/>
@@ -381,17 +297,22 @@
 <path d="M610 180 C610 240 110 240 110 182" class="wire hot" marker-end="url(#ahb)"/>
 <text x="361" y="258" class="small" text-anchor="middle">notify(): moves one waiting thread back to the entry set.</text>
 <text x="361" y="276" class="sm" text-anchor="middle">It still has to win the lock before it continues.</text>
-</svg><figcaption>Picture the object as a room with one key. The entry set is the queue at the door, and the wait set is a side room for threads that chose to step out and nap.</figcaption></figure>
-<div class="note"><p><strong>Lock what you share, and nothing more.</strong> Every read and every write of the shared heap happens inside <code>synchronized</code> on the same object. A lock only protects data if every thread that touches the data takes that same lock.</p></div></section>
+</svg><figcaption>One lock per object. BLOCKED threads queue at the door. <code>wait()</code> steps out to the side room and puts the lock down. <code>notify()</code> sends one napper back to the door.</figcaption></figure>
+<h3>In the alarm problem</h3>
+<pre><code>synchronized void schedule(long delay) {
+    due.add(now() + delay);
+    notify();   // "new alarm, go check"
+}
 
-<section id="wait"><h2>wait() and notify()</h2>
-<p>The worker needs to sleep until the next task is due, but wake up early if someone adds a task that is due sooner. Neither a lock nor <code>sleep()</code> can do that; <code>wait()</code> and <code>notify()</code> can.</p>
-<ul class="plain">
-<li><strong><code>wait()</code></strong> releases the lock and sleeps. When it wakes, it takes the lock back before returning. Releasing the lock is the whole point: it lets <code>schedule()</code> get in while the worker sleeps.</li>
-<li><strong><code>wait(ms)</code></strong> does the same, but also wakes by itself when the time is up.</li>
-<li><strong><code>notify()</code></strong> wakes one thread waiting on this object. <strong><code>notifyAll()</code></strong> wakes all of them. Use <code>notifyAll()</code> when several threads wait for different reasons.</li>
-<li>All three must be called <strong>while holding that object's lock</strong>, inside <code>synchronized</code>. Otherwise Java throws <code>IllegalMonitorStateException</code>.</li>
-</ul>
+synchronized void loop() throws InterruptedException {
+    while (true) {
+        if (due.isEmpty()) { wait(); continue; }      // nap until notified
+        long left = due.peek() - now();
+        if (left &gt; 0) { wait(left); continue; }  // nap until due, or notified
+        due.poll();
+        System.out.println("Alarm Triggered!!");
+    }
+}</code></pre>
 <figure class="fig"><svg viewBox="0 0 722 248" class="dg" role="img" aria-label="Timeline: main schedules tasks due at 5, 2 and 5 seconds and sleeps. Each schedule notifies the worker, which re-checks and waits 2 seconds, runs a task at 2 s, waits until 5 s, runs two tasks, then waits with an empty queue until main ends.">
 <text x="20" y="62" class="small b">main</text>
 <text x="20" y="142" class="small b">worker</text>
@@ -410,22 +331,38 @@
 <g class="sm"><text x="120" y="224" text-anchor="middle">0 s</text><text x="215" y="224" text-anchor="middle">1</text><text x="310" y="224" text-anchor="middle">2</text><text x="405" y="224" text-anchor="middle">3</text><text x="500" y="224" text-anchor="middle">4</text><text x="595" y="224" text-anchor="middle">5</text><text x="690" y="224" text-anchor="middle">6 s</text></g>
 <rect x="120" y="234" width="14" height="10" rx="2" fill="url(#hatch)" stroke="#4d5fd8" stroke-width="1"/><text x="140" y="243" class="sm">waiting or sleeping: no CPU used</text>
 <rect x="360" y="234" width="14" height="10" rx="2" class="f-serve"/><text x="380" y="243" class="sm">running</text>
-</svg><figcaption>The 2-second task was added <em>after</em> the 5-second one, yet runs first. That only works because <code>notify()</code> woke the worker so it could re-check the top of the heap.</figcaption></figure>
-<h3>Always re-check in a loop</h3>
-<p>Waking up tells you <em>something</em> happened, not <em>what</em>. It could be a notify for a task due in an hour, a timeout, or a <strong>spurious wakeup</strong> (the JVM may wake a waiting thread for no reason). So every <code>wait()</code> sits inside a <code>while</code> loop that re-checks the condition, which is why <code>loop()</code> says <code>continue</code> after each wait.</p>
-<pre><code>// wrong: assumes waking up means "the task is due"
-if (left &gt; 0) wait(left);
-due.poll();                         // may run a task early
+</svg><figcaption>The 2 s alarm was added after the 5 s one but rings first, because <code>notify()</code> woke the worker to re-check.</figcaption></figure>
+<div class="note"><p><strong>Always <code>continue</code> after waking.</strong> Waking means "something happened", not "the alarm is due". Go back and check.</p></div>
+<h3>What about Thread.sleep()?</h3>
+<div class="table"><table><thead><tr><th></th><th><code>Thread.sleep(ms)</code></th><th><code>wait()</code> / <code>wait(ms)</code></th></tr></thead><tbody>
+<tr><td>The knife while napping</td><td><strong>Keeps it</strong></td><td><strong>Puts it down</strong></td></tr>
+<tr><td>Woken early by <code>notify()</code>?</td><td>No</td><td>Yes</td></tr>
+<tr><td>Needs <code>synchronized</code>?</td><td>No</td><td>Yes</td></tr>
+</tbody></table></div>
+<p>If the alarm worker used <code>Thread.sleep(5000)</code> inside <code>synchronized</code>, it would hold the knife for 5 s. <code>schedule(2000)</code> could not get in, and the 2 s alarm would ring late. <code>sleep()</code> is fine when you hold no lock, like <code>Thread.sleep(6000)</code> in <code>main</code>.</p></section>
 
-// right: wake, then check again
-while (true) {
-    long left = due.peek() - now();
-    if (left &gt; 0) { wait(left); continue; }
-    due.poll();
-}</code></pre></section>
+<section id="daemon"><h2>Daemon threads</h2>
+<div class="note"><p>A daemon is a background helper. Java closes the kitchen when all the <em>normal</em> cooks are done. It does not wait for daemons.</p></div>
+<pre><code>Thread t = new Thread(this::loop);
+t.setDaemon(true);   // must be before start()
+t.start();</code></pre>
+<figure class="fig"><svg viewBox="0 0 722 170" class="dg" role="img" aria-label="When main returns, a daemon worker is stopped and the JVM exits. A non-daemon worker keeps the JVM running forever.">
+<text x="20" y="24" class="cap">WORKER IS A DAEMON</text>
+<text x="20" y="52" class="small b">main</text><rect x="110" y="40" width="300" height="16" rx="4" class="k-kb"/>
+<text x="20" y="80" class="small b">worker</text><rect x="110" y="68" width="300" height="16" rx="4" class="k-serve"/>
+<line x1="410" y1="34" x2="410" y2="92" class="axis"/>
+<path d="M422 62 l6 7 l12 -14" class="tick"/><text x="450" y="58" class="small okt">main() returns:</text><text x="450" y="74" class="sm">JVM stops the worker and exits</text>
+<line x1="10" y1="104" x2="712" y2="104" class="rule"/>
+<text x="20" y="126" class="cap">WORKER IS NOT A DAEMON (THE DEFAULT)</text>
+<text x="20" y="150" class="small b">main</text><rect x="110" y="138" width="300" height="16" rx="4" class="k-kb"/>
+<text x="20" y="168" class="small b">worker</text><rect x="110" y="156" width="560" height="10" rx="4" class="k-serve"/>
+<path d="M670 161 L700 161" class="wire red" marker-end="url(#ah)"/>
+<text x="430" y="150" class="small bad">program never exits</text>
+</svg><figcaption>Java waits for normal threads before exiting. It does not wait for daemons.</figcaption></figure>
+<p>The alarm worker loops forever. If it were a normal thread, the program would never end. As a daemon, it is shut down when <code>main</code> finishes.</p></section>
 
 <section id="lab"><h2>Try it: step through two threads</h2>
-<p>Walk through the program one step at a time: <code>init()</code>, then <code>schedule(5000)</code>, <code>schedule(2000)</code>, <code>schedule(5000)</code>, then <code>sleep(6000)</code>. Then pick a broken version and watch what changes.</p>
+<p>Press <strong>Next</strong> to watch both threads one step at a time. Then try a broken version and see what goes wrong.</p>
 <div class="lab" id="thlab">
   <div class="lab-row"><span class="lab-k">Version</span><span class="seg" role="group" aria-label="Code version" id="th-var"><button type="button" data-v="ok" aria-pressed="true">Correct</button><button type="button" data-v="nonotify" aria-pressed="false">Forget notify()</button><button type="button" data-v="sleep" aria-pressed="false">sleep() not wait()</button><button type="button" data-v="run" aria-pressed="false">run() not start()</button><button type="button" data-v="nodaemon" aria-pressed="false">Not a daemon</button></span></div>
   <div class="lab-row ctl"><button type="button" id="th-reset">⏮ Reset</button><button type="button" id="th-prev">◀ Back</button><button type="button" id="th-next">Next ▶</button><button type="button" id="th-play">Play</button><span class="step" id="th-step" aria-live="off"></span></div>
@@ -443,61 +380,18 @@ while (true) {
 </div>
 <p class="muted" style="font-size:13.5px">Times are idealised: schedule calls 10 ms apart, everything else instant. Steps that happen in a few microseconds are split up so you can see them. On a real machine either thread could reach the lock first; the correct version works in every order.</p></section>
 
-<section id="failure"><h2>How it goes wrong</h2>
-<div class="table"><table><thead><tr><th>Bug</th><th>What you see</th><th>Fix</th></tr></thead><tbody>
-<tr><td>Race condition: shared data touched without the lock</td><td>Lost updates, a corrupted heap, rare and impossible to reproduce</td><td>Every access to shared state inside <code>synchronized</code> on the same object, or use a thread-safe class</td></tr>
-<tr><td>Missed notify</td><td>The worker sleeps through new work; tasks run late or never</td><td>Call <code>notify()</code> after every change the waiter cares about, under the lock</td></tr>
-<tr><td><code>if</code> instead of <code>while</code> around <code>wait()</code></td><td>Work runs early or on an empty queue after a spurious or unrelated wakeup</td><td>Re-check the condition in a loop after every wake</td></tr>
-<tr><td><code>sleep()</code> while holding a lock</td><td>Every other thread blocks for the whole sleep</td><td>Use <code>wait(ms)</code>, which releases the lock</td></tr>
-<tr><td>Calling <code>run()</code> instead of <code>start()</code></td><td>No new thread; the caller is stuck running the loop</td><td><code>start()</code></td></tr>
-<tr><td><code>wait()</code> / <code>notify()</code> outside <code>synchronized</code></td><td><code>IllegalMonitorStateException</code></td><td>Call them while holding that object's lock</td></tr>
-<tr><td>Deadlock</td><td>Two threads each hold one lock and wait forever for the other's</td><td>Always take locks in the same global order; keep one lock where you can</td></tr>
-<tr><td>Non-daemon background thread</td><td>The program never exits</td><td><code>setDaemon(true)</code>, or a shutdown method that interrupts the thread</td></tr>
-<tr><td>Slow work inside the lock</td><td>Callers block while one task runs</td><td>Take the item out under the lock, run it after releasing the lock</td></tr>
+<section id="cheat"><h2>Cheat sheet</h2>
+<div class="table"><table><thead><tr><th>Thing</th><th>One line</th><th>Classic mistake</th></tr></thead><tbody>
+<tr><td><code>start()</code></td><td>Creates a new thread that runs <code>run()</code></td><td>Calling <code>run()</code> instead: no new thread</td></tr>
+<tr><td><code>synchronized</code></td><td>One thread inside at a time</td><td>Touching shared data outside it</td></tr>
+<tr><td><code>wait()</code></td><td>Put the lock down and nap</td><td>Calling it outside <code>synchronized</code>; not re-checking after waking</td></tr>
+<tr><td><code>notify()</code></td><td>Wake one napping thread</td><td>Forgetting it, so the napper never wakes</td></tr>
+<tr><td><code>Thread.sleep()</code></td><td>Nap but <strong>keep</strong> the lock</td><td>Using it inside <code>synchronized</code>: everyone else is stuck</td></tr>
+<tr><td><code>setDaemon(true)</code></td><td>Java won't wait for this thread to exit</td><td>Calling it after <code>start()</code></td></tr>
 </tbody></table></div>
-<figure class="fig"><svg viewBox="0 0 722 150" class="dg" role="img" aria-label="Deadlock: thread A holds lock 1 and wants lock 2, thread B holds lock 2 and wants lock 1.">
-<rect x="70" y="50" width="140" height="44" rx="8" class="k-kb"/><text x="140" y="77" class="small b" text-anchor="middle">Thread A</text>
-<rect x="512" y="50" width="140" height="44" rx="8" class="k-serve"/><text x="582" y="77" class="small b" text-anchor="middle">Thread B</text>
-<rect x="301" y="10" width="120" height="36" rx="8" class="box"/><text x="361" y="33" class="small mono" text-anchor="middle">lock 1</text>
-<rect x="301" y="98" width="120" height="36" rx="8" class="box"/><text x="361" y="121" class="small mono" text-anchor="middle">lock 2</text>
-<path d="M210 62 L299 30" class="wire" stroke-width="2.4"/><text x="236" y="34" class="sm">holds</text>
-<path d="M512 86 L423 114" class="wire" stroke-width="2.4"/><text x="470" y="120" class="sm">holds</text>
-<path d="M210 84 L299 112" class="wire red dash" marker-end="url(#ah)"/><text x="220" y="118" class="sm bad">wants</text>
-<path d="M512 62 L423 30" class="wire red dash" marker-end="url(#ah)"/><text x="470" y="34" class="sm bad">wants</text>
-</svg><figcaption>Neither thread can move. Our example uses a single lock, so it cannot deadlock this way.</figcaption></figure>
-<h3>The fix for slow work, in code</h3>
-<pre><code>Runnable task;
-synchronized (this) {
-    // ... wait until due ...
-    task = queue.poll();     // take it out under the lock
-}
-task.run();                  // run it with the lock released</code></pre></section>
+<p>In real code, use <code>ScheduledExecutorService</code> instead of writing this yourself. Interviewers usually ask you to build it by hand, so mention it at the end.</p></section>
 
-<section id="interview"><h2>Saying it in an interview</h2>
-<div class="say"><p>"I'd start one daemon worker thread in <code>init()</code> with <code>start()</code>. Scheduled items go into a min-heap of absolute due times, so the next one is an O(1) peek and inserts are O(log n). <code>schedule()</code> and the worker loop are both <code>synchronized</code> on the same object, so the heap is never touched by two threads at once. The worker waits with <code>wait(timeLeft)</code>, which releases the lock, and <code>schedule()</code> calls <code>notify()</code> so a new, earlier item wakes it. After every wake it loops and re-checks the top, which handles notifies, timeouts and spurious wakeups. In production I'd use <code>ScheduledExecutorService</code>, which is built the same way."</p></div>
-<dl class="qa">
-<dt>Why not just <code>Thread.sleep(delay)</code> in <code>schedule()</code>?</dt><dd>It blocks the caller. The point is that the caller returns at once and a background thread does the waiting.</dd>
-<dt>Why not one new thread per task?</dt><dd>Each thread has its own stack (around 0.5 to 1 MB reserved by default). Thousands of tasks waiting at once means thousands of threads. One worker with a heap waits on all of them for the cost of one.</dd>
-<dt><code>sleep()</code> vs <code>wait()</code>?</dt><dd><code>sleep()</code> keeps every lock and can only be ended by time or an interrupt. <code>wait()</code> releases the object's lock and can be ended by <code>notify()</code>.</dd>
-<dt><code>notify()</code> vs <code>notifyAll()</code>?</dt><dd><code>notify()</code> wakes one waiter, which is enough when exactly one thread waits. With several waiters, or waiters for different conditions, <code>notifyAll()</code> is the safe choice.</dd>
-<dt>Why store <code>now + delay</code> and not the delay?</dt><dd>A delay is relative to when the request arrived. The worker compares due times with the clock, so it needs absolute times. Prefer <code>System.nanoTime()</code> over <code>currentTimeMillis()</code> for this, as it never jumps when the wall clock is adjusted.</dd>
-<dt>What does <code>volatile</code> do, and do we need it here?</dt><dd>It makes writes to a field visible to other threads at once. We don't need it here, because entering and leaving <code>synchronized</code> already makes changes visible to the next thread that takes the lock.</dd>
-<dt>How would you stop the worker cleanly?</dt><dd>Keep a reference to it and call <code>worker.interrupt()</code>. A thread blocked in <code>wait()</code> or <code>sleep()</code> gets <code>InterruptedException</code> and leaves the loop.</dd>
-</dl></section>
-
-<section id="real-world"><h2>In the real world</h2>
-<p>Hand-written <code>wait()</code> and <code>notify()</code> are for learning and interviews. Production code uses <code>java.util.concurrent</code>, which wraps the same ideas in safer tools.</p>
-<div class="table"><table><thead><tr><th>Need</th><th>Use</th><th>Notes</th></tr></thead><tbody>
-<tr><td>Run a task later or on a schedule</td><td><code>ScheduledExecutorService</code></td><td><code>Executors.newSingleThreadScheduledExecutor().schedule(task, 5, SECONDS)</code>: a delay-ordered heap plus worker threads</td></tr>
-<tr><td>Hand work from one thread to another</td><td><code>BlockingQueue</code>, <code>DelayQueue</code></td><td><code>take()</code> waits for an item; <code>DelayQueue</code> only hands out items whose delay has passed</td></tr>
-<tr><td>A pool of reusable worker threads</td><td><code>ExecutorService</code></td><td>Avoids creating a thread per task</td></tr>
-<tr><td>A lock with more control</td><td><code>ReentrantLock</code> + <code>Condition</code></td><td><code>await()</code> / <code>signal()</code> are wait/notify with timeouts, fairness and several conditions per lock</td></tr>
-<tr><td>A shared counter or map</td><td><code>AtomicLong</code>, <code>ConcurrentHashMap</code></td><td>Thread-safe without writing any locks yourself</td></tr>
-<tr><td>Very many blocking tasks</td><td>Virtual threads (Java 21+)</td><td>Cheap threads managed by the JVM; one per task becomes affordable</td></tr>
-</tbody></table></div>
-<p class="muted" style="font-size:13.5px">APIs as of Java 21. Check the docs for your Java version.</p></section>
-
-<section id="related"><h2>Related</h2><ul class="related"><li><a href="queues.html">Message queues and streams</a></li><li><a href="rate-limiting.html">Rate limiting</a></li><li><a href="caching.html">Caching (stampede locks)</a></li><li><a href="consistency.html">Consistency</a></li><li><a href="numbers.html">Numbers to know</a></li></ul></section>
+<section id="related"><h2>Related</h2><ul class="related"><li><a href="queues.html">Message queues and streams</a></li><li><a href="rate-limiting.html">Rate limiting</a></li><li><a href="caching.html">Caching (stampede locks)</a></li></ul></section>
   </article>
 </div>
 </main>
