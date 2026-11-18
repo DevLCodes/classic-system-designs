@@ -25,6 +25,7 @@ Interactive pages on how large web systems are built, before any AI is involved:
 17. [Cassandra vs CockroachDB](https://devlcodes.github.io/classic-system-designs/cassandra-vs-cockroachdb.html)
 18. [Monitoring, logging and tracing](https://devlcodes.github.io/classic-system-designs/observability.html)
 19. [Numbers to know](https://devlcodes.github.io/classic-system-designs/numbers.html)
+20. [Threads, locks and wait/notify](https://devlcodes.github.io/classic-system-designs/threads.html)
 
 ## Worked designs
 
