@@ -582,7 +582,7 @@ context:     opaque version (vector clock) returned by get,
   function C(n, k){ if (k < 0 || k > n) return 0; var r = 1; for (var i = 1; i <= k; i++) r = r * (n - k + i) / i; return r; }
   // chance at least k of n succeed, each with probability p
   function atLeast(n, k, p){ var s = 0; for (var i = k; i <= n; i++) s += C(n, i) * Math.pow(p, i) * Math.pow(1 - p, n - i); return s; }
-  function nines(a){ if (a >= 1 - 1e-12) return '> 99.9999999%'; var d = Math.max(0, Math.floor(-Math.log10(1 - a))); var s = (a * 100).toFixed(Math.min(9, Math.max(1, d - 1))); return s + '%'; }
+  function nines(a){ if (a >= 1 - 1e-12) return '> 99.9999999%'; var d = Math.max(0, Math.floor(-Math.log10(1 - a))); var s = (a * 100).toFixed(Math.min(9, Math.max(1, d - 1))).replace(/0+$/, "").replace(/\.$/, ""); return s + "%"; }
   function downtime(a){ var m = (1 - a) * 525600; if (m < 1) return Math.max(1, Math.round(m * 60)) + ' s a year'; if (m < 120) return Math.round(m) + ' min a year'; return +(m / 60).toFixed(1) + ' h a year'; }
   function pct(x){ if (x === 0) return '0%'; if (x < 0.001) return '< 0.1%'; return +(x * 100).toFixed(x < 0.1 ? 1 : 0) + '%'; }
   function clamp(){
