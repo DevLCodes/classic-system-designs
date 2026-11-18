@@ -1,0 +1,667 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Threads, locks and wait/notify · Classic System Design</title>
+<meta name="description" content="Java multi-threading for interviews: what a thread is, start() vs run(), daemon threads, thread states, race conditions, synchronized, wait() and notify(), with a step-through lab of two threads.">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700&family=Instrument+Sans:ital,wght@0,400;0,500;0,600;1,400&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+  /* Layout: a slim site bar, then either a card grid (home), a sticky contents rail + reading column (articles), or a filterable term list (glossary). Light, single look. */
+  :root {
+    color-scheme: light;
+    --bg: #e9ecef; --paper: #f7f8f9; --ink: #1c2530; --muted: #586473; --line: #cdd4dc; --line-strong: #9aa5b1;
+    --accent: #4255d4; --accent-ink: #ffffff; --track: #d3d9e0; --code-bg: #eef1f4; --wire: #7d8996;
+    --c-ingest: #2a9d8f; --c-kb: #4d5fd8; --c-serve: #d7932a; --c-model: #e2674f; --c-gov: #b2456e; --c-cross: #4a5562; --c-dlq: #b23a3a; --c-ok: #2f8f5b;
+    --t-src: #e4e8ec; --t-ingest: #d8eeea; --t-kb: #dfe3fa; --t-serve: #f8ead2; --t-model: #fbe1da; --t-gov: #f3dde6; --t-cross: #dfe2e6; --t-dlq: #f6dddb;
+    --font-display: "Bricolage Grotesque", "Avenir Next", "Segoe UI", system-ui, sans-serif;
+    --font-body: "Instrument Sans", "Helvetica Neue", "Segoe UI", system-ui, sans-serif;
+    --font-mono: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  @media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
+  body { margin: 0; background: var(--bg); color: var(--ink); font-family: var(--font-body); font-size: 16px; line-height: 1.6; }
+  a { color: var(--accent); }
+  .wrap { max-width: 1240px; margin: 0 auto; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
+
+  .sitebar { border-bottom: 1px solid var(--line); background: var(--paper); }
+  .sitebar .wrap { display: flex; align-items: center; gap: 18px; flex-wrap: wrap; padding-block: 12px; }
+  .brand { font-family: var(--font-display); font-weight: 700; font-size: 17px; color: var(--ink); text-decoration: none; margin-right: auto; }
+  .sitebar nav { display: flex; gap: 16px; flex-wrap: wrap; font-size: 14px; }
+  .sitebar nav a { color: var(--muted); text-decoration: none; }
+  .sitebar nav a:hover, .sitebar nav a[aria-current="page"] { color: var(--ink); }
+  .sitebar nav a[aria-current="page"] { font-weight: 600; }
+
+  .intro { padding-block: 40px 8px; display: grid; gap: 10px; max-width: 820px; }
+  .eyebrow { margin: 0; font-family: var(--font-mono); font-size: 12px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+  h1 { margin: 0; font-family: var(--font-display); font-weight: 700; font-size: clamp(30px, 5vw, 46px); line-height: 1.05; text-wrap: balance; }
+  .intro .lead { font-size: 18px; margin: 0; }
+
+  .doc { display: grid; grid-template-columns: 220px minmax(0, 1fr); gap: 48px; padding-block: 36px 72px; }
+  .toc { position: sticky; top: calc(env(safe-area-inset-top, 0px) + 20px); align-self: start; }
+  .toc p { margin: 0 0 8px; font-family: var(--font-mono); font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+  .toc ol { margin: 0; padding: 0; list-style: none; display: grid; gap: 2px; counter-reset: toc; }
+  .toc li { counter-increment: toc; }
+  .toc a { display: flex; gap: 8px; padding: 3px 0; font-size: 14px; color: var(--muted); text-decoration: none; }
+  .toc a::before { content: counter(toc, decimal-leading-zero); font-family: var(--font-mono); font-size: 11.5px; padding-top: 2px; color: var(--line-strong); }
+  .toc a:hover { color: var(--ink); }
+  article { min-width: 0; max-width: 760px; }
+  section { padding-bottom: 36px; margin-bottom: 36px; border-bottom: 1px solid var(--line); scroll-margin-top: 20px; }
+  section:last-child { border-bottom: 0; }
+  h2 { margin: 0 0 10px; font-family: var(--font-display); font-weight: 700; font-size: 28px; line-height: 1.15; text-wrap: balance; }
+  h3 { margin: 26px 0 6px; font-family: var(--font-display); font-weight: 600; font-size: 19px; line-height: 1.25; }
+  p { margin: 0 0 14px; }
+  .lead { font-size: 18px; }
+  ul.plain, ol.plain { margin: 0 0 16px; padding-left: 22px; display: grid; gap: 6px; }
+  code { font-family: var(--font-mono); font-size: 0.88em; background: var(--code-bg); padding: 1px 5px; border-radius: 4px; }
+  pre { margin: 0 0 16px; padding: 14px 16px; background: var(--code-bg); border-radius: 10px; overflow-x: auto; font-size: 13px; line-height: 1.55; }
+  pre code { background: none; padding: 0; font-size: inherit; }
+  .table { overflow-x: auto; margin: 0 0 18px; }
+  table { width: 100%; border-collapse: collapse; font-size: 14.5px; line-height: 1.45; }
+  th, td { text-align: left; vertical-align: top; padding: 8px 10px; border-bottom: 1px solid var(--line); }
+  th { font-family: var(--font-mono); font-size: 11.5px; font-weight: 500; letter-spacing: .05em; text-transform: uppercase; color: var(--muted); }
+  td.num { font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .note { border-left: 3px solid var(--accent); background: var(--paper); padding: 12px 16px; border-radius: 0 10px 10px 0; margin: 0 0 18px; }
+  .note p:last-child { margin: 0; }
+  .formula { font-family: var(--font-mono); font-size: 14px; background: var(--paper); border: 1px solid var(--line); border-radius: 10px; padding: 12px 16px; margin: 0 0 16px; overflow-x: auto; white-space: nowrap; }
+  .related { display: flex; flex-wrap: wrap; gap: 8px; margin: 0; padding: 0; list-style: none; }
+  .related a { display: inline-block; padding: 4px 12px; border: 1px solid var(--line); border-radius: 999px; font-size: 14px; color: var(--ink); text-decoration: none; background: var(--paper); }
+  .related a:hover { border-color: var(--ink); }
+  .pager { display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; font-size: 14px; }
+  footer.site { border-top: 1px solid var(--line); padding-block: 20px 40px; font-size: 13px; color: var(--muted); }
+  a:focus-visible, input:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+  /* home */
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 16px; margin: 0 0 40px; padding: 0; list-style: none; }
+  .card { display: grid; gap: 8px; height: 100%; padding: 18px; background: var(--paper); border: 1px solid var(--line); border-radius: 14px; color: var(--ink); text-decoration: none; }
+  .card:hover { border-color: var(--ink); }
+  .card .k { font-family: var(--font-mono); font-size: 11px; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
+  .card h3 { margin: 0; font-size: 20px; }
+  .card p { margin: 0; font-size: 14.5px; color: var(--muted); }
+  .card svg { width: 100%; height: auto; display: block; }
+  .card.feature svg { max-width: 420px; justify-self: center; }
+  .card.feature { grid-column: 1 / -1; grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr); align-items: center; gap: 24px; }
+  .home-h { margin: 28px 0 12px; font-family: var(--font-display); font-size: 24px; }
+
+  /* glossary */
+  .gl-tools { position: sticky; top: 0; z-index: 2; background: var(--bg); padding-block: 12px; display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+  .gl-tools input { flex: 1 1 260px; min-width: 0; font: 15px var(--font-body); padding: 9px 12px; border-radius: 10px; border: 1px solid var(--line-strong); background: #fff; color: var(--ink); }
+  .gl-letters { display: flex; flex-wrap: wrap; gap: 4px; font-family: var(--font-mono); font-size: 13px; }
+  .gl-letters a { padding: 2px 6px; border-radius: 6px; text-decoration: none; color: var(--muted); }
+  .gl-letters a:hover { background: var(--paper); color: var(--ink); }
+  .gl { max-width: 860px; }
+  .gl-item { margin: 0; }
+  .gl-item { display: grid; grid-template-columns: 220px minmax(0, 1fr); gap: 16px; padding: 12px 0; border-bottom: 1px solid var(--line); scroll-margin-top: 70px; }
+  .gl-item dt { font-weight: 600; }
+  .gl-item dt small { display: block; font-weight: 400; font-family: var(--font-mono); font-size: 11px; color: var(--muted); letter-spacing: .04em; text-transform: uppercase; margin-top: 2px; }
+  .gl-item dd { margin: 0; }
+  .gl-item dd .see { font-size: 13.5px; }
+  .gl-letter { margin: 26px 0 4px; font-family: var(--font-display); font-size: 22px; scroll-margin-top: 70px; }
+
+  @media (max-width: 900px) {
+    .doc { grid-template-columns: minmax(0, 1fr); gap: 24px; padding-block: 28px 56px; }
+    .toc { position: static; }
+    .toc ol { grid-template-columns: repeat(2, minmax(0, 1fr)); column-gap: 12px; }
+    .card.feature { grid-template-columns: minmax(0, 1fr); }
+  }
+  @media (max-width: 640px) {
+    .gl-item { grid-template-columns: minmax(0, 1fr); gap: 4px; }
+    h2 { font-size: 24px; }
+    .intro .lead, .lead { font-size: 16.5px; }
+  }
+
+  /* diagrams */
+  .fig { margin: 6px 0 24px; overflow-x: auto; }
+  .fig svg { display: block; width: 100%; height: auto; min-width: 600px; }
+  .fig figcaption { margin-top: 8px; font-size: 13px; line-height: 1.45; color: var(--muted); }
+  .dg text { font-family: var(--font-body); font-size: 13px; fill: var(--ink); }
+  .dg .sm { font-size: 11.5px; fill: var(--muted); }
+  .dg .small { font-size: 12px; }
+  .dg .b { font-weight: 600; }
+  .dg .mono { font-family: var(--font-mono); }
+  .dg .it { font-style: italic; }
+  .dg .mute { fill: var(--muted); }
+  .dg .gov { fill: var(--c-gov); font-weight: 600; }
+  .dg .okt { fill: var(--c-ok); font-weight: 600; }
+  .dg .bad { fill: var(--c-dlq); font-weight: 600; }
+  .dg .cap { font-family: var(--font-mono); font-size: 11px; letter-spacing: .06em; fill: var(--muted); }
+  .dg .big { font-family: var(--font-display); font-size: 30px; font-weight: 700; fill: var(--ink); }
+  .dg .box { fill: var(--paper); stroke: var(--line-strong); stroke-width: 1.25; }
+  .dg .ghost { fill: none; stroke: var(--line-strong); stroke-width: 1.25; stroke-dasharray: 5 5; }
+  .dg .track { fill: var(--track); }
+  .dg .rule { stroke: var(--line); stroke-width: 1; }
+  .dg .axis { stroke: var(--line-strong); stroke-width: 1.25; }
+  .dg .wire { fill: none; stroke: var(--wire); stroke-width: 1.4; }
+  .dg .wire.dash { stroke-dasharray: 4 4; }
+  .dg .wire.hot { stroke: var(--accent); stroke-width: 2; }
+  .dg .wire.red { stroke: var(--c-dlq); }
+  .dg .ah { fill: var(--wire); }
+  .dg .xmark { stroke: var(--c-dlq); stroke-width: 1.8; fill: none; }
+  .dg .tick { stroke: var(--c-ok); stroke-width: 2; fill: none; }
+  .dg .k-src { fill: var(--t-src); stroke: #8795a3; stroke-width: 1.5; }
+  .dg .k-ingest { fill: var(--t-ingest); stroke: var(--c-ingest); stroke-width: 1.5; }
+  .dg .k-kb { fill: var(--t-kb); stroke: var(--c-kb); stroke-width: 1.5; }
+  .dg .k-serve { fill: var(--t-serve); stroke: var(--c-serve); stroke-width: 1.5; }
+  .dg .k-model { fill: var(--t-model); stroke: var(--c-model); stroke-width: 1.5; }
+  .dg .k-gov { fill: var(--t-gov); stroke: var(--c-gov); stroke-width: 1.5; }
+  .dg .k-cross { fill: var(--t-cross); stroke: var(--c-cross); stroke-width: 1.5; }
+  .dg .k-dlq { fill: var(--t-dlq); stroke: var(--c-dlq); stroke-width: 1.5; }
+  .dg .k-user { fill: #ffffff; stroke: var(--line-strong); stroke-width: 1.5; }
+  .dg .f-serve { fill: var(--c-serve); } .dg .f-kb { fill: var(--c-kb); } .dg .f-model { fill: var(--c-model); } .dg .f-gov { fill: var(--c-gov); } .dg .f-ingest { fill: var(--c-ingest); } .dg .f-cross { fill: #b8c0c9; } .dg .f-dlq { fill: var(--c-dlq); } .dg .f-ok { fill: var(--c-ok); }
+  .dg .cell { fill: var(--paper); stroke: var(--line-strong); stroke-width: 1; }
+  .dg .cell.hot { fill: var(--t-ingest); stroke: var(--c-ingest); stroke-width: 1.5; }
+  .dg .cell.old { fill: var(--t-kb); stroke: var(--c-kb); }
+  .dg .cell.new { fill: var(--t-ingest); stroke: var(--c-ingest); stroke-width: 1.5; }
+  .dg .cell.gone { fill: var(--paper); stroke: var(--line); }
+  .dg .dot-hr { fill: var(--c-gov); } .dg .dot-it { fill: var(--c-kb); } .dg .dot-eng { fill: var(--c-ingest); } .dg .dot-q { fill: var(--c-serve); stroke: var(--ink); stroke-width: 1.5; }
+  .dg .halo { fill: none; stroke: var(--c-serve); stroke-width: 1.5; stroke-dasharray: 4 4; }
+  .dg .zone { fill: var(--paper); stroke: var(--line); stroke-width: 1; }
+</style>
+<style>
+  .lab { margin: 6px 0 26px; padding: 14px 16px 16px; background: var(--paper); border: 1px solid var(--line); border-radius: 14px; }
+  .lab-row { display: flex; flex-wrap: wrap; gap: 10px 18px; align-items: center; margin: 0 0 12px; }
+  .lab-k { font-family: var(--font-mono); font-size: 11px; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
+  .seg { display: inline-flex; flex-wrap: wrap; gap: 6px; }
+  .seg button, .ctl button { font: 600 13px var(--font-body); color: var(--ink); background: #fff; border: 1px solid var(--line); border-radius: 8px; padding: 6px 12px; cursor: pointer; }
+  .seg button:hover, .ctl button:hover:not(:disabled) { border-color: var(--ink); }
+  .seg button[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+  .ctl { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+  .ctl button:disabled { opacity: .45; cursor: default; }
+  .ctl .step { font-family: var(--font-mono); font-size: 12.5px; color: var(--muted); margin-left: 6px; font-variant-numeric: tabular-nums; }
+  .seg button:focus-visible, .ctl button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .lab-out { margin: 12px 0 0; padding: 10px 12px; background: #fff; border: 1px solid var(--line); border-radius: 10px; font-size: 14.5px; line-height: 1.5; }
+  .muted { color: var(--muted); }
+
+  /* thread simulator */
+  .sim { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 10px; }
+  .sim-box { min-width: 0; background: #fff; border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; }
+  .sim-box h4 { margin: 0 0 6px; font-family: var(--font-mono); font-size: 11px; font-weight: 500; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); display: flex; justify-content: space-between; gap: 8px; }
+  .lane { border-left: 4px solid var(--c-kb); }
+  .lane.w { border-left-color: var(--c-serve); }
+  .lane .st { display: inline-block; padding: 0 8px; border-radius: 999px; border: 1px solid; font-family: var(--font-mono); font-size: 11px; line-height: 1.7; }
+  .st.run { color: var(--c-ok); border-color: var(--c-ok); background: #e3f3ea; }
+  .st.wait, .st.timed { color: var(--c-kb); border-color: var(--c-kb); background: var(--t-kb); }
+  .st.blocked { color: var(--c-dlq); border-color: var(--c-dlq); background: var(--t-dlq); }
+  .st.new, .st.done { color: var(--muted); border-color: var(--line-strong); background: var(--code-bg); }
+  .lane p { margin: 6px 0 0; font-size: 14px; line-height: 1.45; }
+  .lockv { display: flex; align-items: center; gap: 10px; font-size: 14px; }
+  .lockv .key { width: 30px; height: 30px; border-radius: 8px; display: grid; place-items: center; font-size: 16px; border: 1.5px solid var(--line-strong); background: var(--code-bg); flex: none; }
+  .lockv .key.m { border-color: var(--c-kb); background: var(--t-kb); }
+  .lockv .key.w { border-color: var(--c-serve); background: var(--t-serve); }
+  .heap { display: flex; flex-wrap: wrap; gap: 6px; min-height: 26px; }
+  .heap span { font-family: var(--font-mono); font-size: 12px; padding: 2px 8px; border-radius: 6px; border: 1px solid var(--c-ingest); background: var(--t-ingest); }
+  .heap span.top { box-shadow: 0 0 0 2px var(--c-ingest); }
+  .heap em { font-size: 13px; color: var(--muted); }
+  .clock { font-family: var(--font-display); font-size: 26px; font-weight: 700; font-variant-numeric: tabular-nums; line-height: 1.1; }
+  .code2 { display: grid; grid-template-columns: minmax(0, 1fr); gap: 10px; margin-top: 10px; }
+  .src { margin: 0; padding: 10px 0; background: var(--code-bg); border-radius: 10px; font-family: var(--font-mono); font-size: 12.5px; line-height: 1.6; overflow-x: auto; }
+  .src div { padding: 0 12px; white-space: pre; border-left: 3px solid transparent; }
+  .src div.hm { background: var(--t-kb); border-left-color: var(--c-kb); }
+  .src div.hw { background: var(--t-serve); border-left-color: var(--c-serve); }
+  .src div.chg { color: var(--c-dlq); font-weight: 500; }
+  .outlog { margin: 0; padding: 0; list-style: none; font-family: var(--font-mono); font-size: 12.5px; display: grid; gap: 2px; min-height: 24px; }
+  .outlog li.late { color: var(--c-dlq); }
+  .outlog li.ok { color: var(--c-ok); }
+  .legend { display: flex; flex-wrap: wrap; gap: 6px 14px; font-size: 13px; color: var(--muted); margin: 8px 0 0; }
+  .legend i { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 5px; vertical-align: -1px; }
+  .say { border-left: 3px solid var(--c-serve); background: var(--paper); padding: 12px 16px; border-radius: 0 10px 10px 0; margin: 0 0 16px; font-size: 15.5px; }
+  .say p:last-child { margin: 0; }
+  .qa dt { font-weight: 600; margin-top: 12px; }
+  .qa dd { margin: 2px 0 0; }
+  @media (max-width: 640px) { .sim { grid-template-columns: minmax(0, 1fr); } }
+</style>
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs><marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" class="ah" style="fill:#7d8996"/></marker><marker id="ahb" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" style="fill:#4255d4"/></marker><pattern id="hatch" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><rect width="6" height="6" fill="#dfe3fa"/><line x1="0" y1="0" x2="0" y2="6" stroke="#4d5fd8" stroke-width="1.2" opacity=".35"/></pattern></defs></svg>
+<header class="sitebar"><div class="wrap"><a class="brand" href="index.html">Classic System Design</a><nav aria-label="Site"><a href="index.html">Home</a><a href="index.html#blocks" aria-current="page">Building blocks</a><a href="index.html#designs">Designs</a><a href="https://devlcodes.github.io/agentic-ai-notebook/system-design/index.html">Agentic designs ↗</a></nav></div></header>
+<main>
+<div class="wrap"><div class="intro"><p class="eyebrow">Building block · concurrency</p><h1>Threads, locks and wait/notify</h1><p class="lead">How one Java program does two things at once: a background thread waits for work, other threads hand it work, and one lock keeps them from trampling each other.</p></div></div>
+<div class="wrap doc">
+  <nav class="toc" aria-label="On this page"><p>On this page</p><ol><li><a href="#what">What a thread is</a></li><li><a href="#start">Starting a thread</a></li><li><a href="#states">The states of a thread</a></li><li><a href="#locks">Shared data and locks</a></li><li><a href="#wait">wait() and notify()</a></li><li><a href="#lab">Try it: step through two threads</a></li><li><a href="#failure">How it goes wrong</a></li><li><a href="#interview">Saying it in an interview</a></li><li><a href="#real-world">In the real world</a></li><li><a href="#related">Related</a></li></ol></nav>
+  <article>
+
+<section id="what"><h2>What a thread is</h2>
+<p class="lead">A thread is one line of execution: it runs one statement after another. A Java program starts with one thread, <code>main</code>. Every extra thread you start runs its own code at the same time, inside the same program.</p>
+<figure class="fig"><svg viewBox="0 0 722 250" class="dg" role="img" aria-label="One JVM process holds a shared heap. The main thread and a worker thread each have their own stack and both point into the shared heap.">
+<rect x="10" y="26" width="702" height="214" rx="12" class="zone"/>
+<text x="26" y="48" class="cap">ONE JAVA PROCESS (THE JVM)</text>
+<rect x="30" y="62" width="300" height="140" rx="10" class="k-ingest"/>
+<text x="180" y="84" class="small b" text-anchor="middle">Heap: shared by every thread</text>
+<rect x="50" y="98" width="120" height="40" rx="6" class="box"/><text x="110" y="116" class="small" text-anchor="middle">task queue</text><text x="110" y="131" class="sm" text-anchor="middle">one object</text>
+<rect x="190" y="98" width="120" height="40" rx="6" class="box"/><text x="250" y="116" class="small" text-anchor="middle">its lock</text><text x="250" y="131" class="sm" text-anchor="middle">built into the object</text>
+<text x="180" y="166" class="sm" text-anchor="middle">Both threads read and change</text><text x="180" y="181" class="sm" text-anchor="middle">these same objects</text>
+<rect x="380" y="62" width="150" height="140" rx="10" class="k-kb"/>
+<text x="455" y="84" class="small b" text-anchor="middle">main thread</text>
+<rect x="400" y="96" width="110" height="22" rx="4" class="box"/><text x="455" y="111" class="sm mono" text-anchor="middle">schedule()</text>
+<rect x="400" y="120" width="110" height="22" rx="4" class="box"/><text x="455" y="135" class="sm mono" text-anchor="middle">main()</text>
+<text x="455" y="164" class="sm" text-anchor="middle">its own stack:</text><text x="455" y="179" class="sm" text-anchor="middle">local variables, calls</text>
+<rect x="550" y="62" width="150" height="140" rx="10" class="k-serve"/>
+<text x="625" y="84" class="small b" text-anchor="middle">worker thread</text>
+<rect x="570" y="120" width="110" height="22" rx="4" class="box"/><text x="625" y="135" class="sm mono" text-anchor="middle">loop()</text>
+<text x="625" y="164" class="sm" text-anchor="middle">its own stack:</text><text x="625" y="179" class="sm" text-anchor="middle">local variables, calls</text>
+<path d="M380 118 L332 118" class="wire dash" marker-end="url(#ah)"/>
+<path d="M625 202 L625 222 L180 222 L180 204" class="wire dash" marker-end="url(#ah)"/>
+<text x="402" y="236" class="sm" text-anchor="middle">both point at the same queue</text>
+</svg><figcaption>Threads share the heap but not their stacks. Local variables are private to a thread. Objects are shared, and shared objects are where the bugs live.</figcaption></figure>
+<p>Use a thread when work must happen <strong>in the background</strong> while the caller carries on. Examples are a task that should run in 5 seconds, a server handling many requests at once, or a slow file write that shouldn't freeze the program.</p>
+<p>The rest of this page uses one small example: a <strong>delayed task runner</strong>. Callers say "run a task in N ms" and return at once. One background worker thread keeps the tasks in a min-heap ordered by due time and runs each when it is due.</p>
+<pre><code>class DelayedRunner {
+    // due times in ms, earliest on top (a min-heap)
+    private final PriorityQueue&lt;Long&gt; due = new PriorityQueue&lt;&gt;();
+
+    void init() {
+        Thread worker = new Thread(this::loop, "worker");
+        worker.setDaemon(true);
+        worker.start();
+    }
+
+    synchronized void schedule(long delayMs) {
+        due.add(System.currentTimeMillis() + delayMs);
+        notify();
+    }
+
+    private synchronized void loop() {
+        try {
+            while (true) {
+                if (due.isEmpty()) { wait(); continue; }
+                long left = due.peek() - System.currentTimeMillis();
+                if (left &gt; 0) { wait(left); continue; }
+                due.poll();
+                System.out.println("Task ran");
+            }
+        } catch (InterruptedException e) { /* asked to stop */ }
+    }
+}</code></pre>
+<p>Every line in it is there for a threading reason. The next sections take them one at a time.</p></section>
+
+<section id="start"><h2>Starting a thread</h2>
+<h3><code>new Thread(...)</code> creates an object, not a thread</h3>
+<p><code>new Thread(this::loop)</code> builds a Thread object and remembers which code to run. Nothing runs yet. The thread is in the <code>NEW</code> state.</p>
+<h3><code>start()</code> launches it, <code>run()</code> does not</h3>
+<p><code>start()</code> asks the JVM and the operating system for a real new thread with its own stack. That new thread calls your code. <code>start()</code> itself returns straight away, so the caller and the new thread now run side by side. You can call <code>start()</code> only once per Thread object.</p>
+<figure class="fig"><svg viewBox="0 0 722 214" class="dg" role="img" aria-label="With start, main returns at once and a second thread runs loop. With run, main itself runs loop forever and never reaches schedule.">
+<text x="20" y="24" class="cap">WORKER.START()</text>
+<text x="20" y="56" class="small b">main</text>
+<rect x="110" y="44" width="590" height="16" rx="4" class="k-kb"/>
+<text x="230" y="40" class="sm" text-anchor="middle">start() returns at once</text>
+<text x="420" y="40" class="sm" text-anchor="middle">schedule(), schedule(), …</text>
+<path d="M200 60 L200 82" class="wire hot" marker-end="url(#ahb)"/>
+<text x="20" y="98" class="small b">worker</text>
+<rect x="200" y="86" width="500" height="16" rx="4" class="k-serve"/>
+<text x="450" y="120" class="sm" text-anchor="middle">a NEW thread runs loop() at the same time</text>
+<line x1="10" y1="136" x2="712" y2="136" class="rule"/>
+<text x="20" y="158" class="cap">WORKER.RUN()</text>
+<text x="20" y="190" class="small b">main</text>
+<rect x="110" y="178" width="90" height="16" rx="4" class="k-kb"/>
+<rect x="200" y="178" width="300" height="16" rx="4" class="k-serve"/>
+<text x="350" y="174" class="sm" text-anchor="middle">main itself runs loop(), forever</text>
+<path d="M500 186 L540 186" class="wire dash" marker-end="url(#ah)"/>
+<path d="M556 178 L572 194 M572 178 L556 194" class="xmark"/>
+<text x="584" y="190" class="small bad">schedule() never runs</text>
+</svg><figcaption><code>run()</code> is just an ordinary method. Calling it yourself runs the loop on the current thread, which is a classic interview trick question.</figcaption></figure>
+<h3><code>setDaemon(true)</code>: don't keep the program alive for me</h3>
+<p>The JVM exits only when every <strong>non-daemon</strong> thread has finished. New threads are non-daemon by default. Our worker loops forever, so without <code>setDaemon(true)</code> the program would never exit. Call it <em>before</em> <code>start()</code>; calling it afterwards throws <code>IllegalThreadStateException</code>.</p>
+<figure class="fig"><svg viewBox="0 0 722 170" class="dg" role="img" aria-label="When main returns, a daemon worker is stopped and the JVM exits. A non-daemon worker keeps the JVM running forever.">
+<text x="20" y="24" class="cap">WORKER IS A DAEMON</text>
+<text x="20" y="52" class="small b">main</text><rect x="110" y="40" width="300" height="16" rx="4" class="k-kb"/>
+<text x="20" y="80" class="small b">worker</text><rect x="110" y="68" width="300" height="16" rx="4" class="k-serve"/>
+<line x1="410" y1="34" x2="410" y2="92" class="axis"/>
+<path d="M422 62 l6 7 l12 -14" class="tick"/><text x="450" y="58" class="small okt">main() returns:</text><text x="450" y="74" class="sm">JVM stops the worker and exits</text>
+<line x1="10" y1="104" x2="712" y2="104" class="rule"/>
+<text x="20" y="126" class="cap">WORKER IS NOT A DAEMON (THE DEFAULT)</text>
+<text x="20" y="150" class="small b">main</text><rect x="110" y="138" width="300" height="16" rx="4" class="k-kb"/>
+<text x="20" y="168" class="small b">worker</text><rect x="110" y="156" width="560" height="10" rx="4" class="k-serve"/>
+<path d="M670 161 L700 161" class="wire red" marker-end="url(#ah)"/>
+<text x="430" y="150" class="small bad">program never exits</text>
+</svg><figcaption>A daemon thread is a background helper. The catch: it is killed without warning, so never leave a daemon half way through writing a file.</figcaption></figure></section>
+
+<section id="states"><h2>The states of a thread</h2>
+<p>At any moment a thread is in exactly one state. Knowing which one, and what moves it to the next, explains almost every threading question.</p>
+<figure class="fig"><svg viewBox="0 0 722 262" class="dg" role="img" aria-label="Thread states: NEW goes to RUNNABLE on start. RUNNABLE goes to BLOCKED when a lock is busy, to WAITING on wait or join, to TIMED_WAITING on sleep or wait with a timeout, and to TERMINATED when run returns.">
+<rect x="20" y="110" width="96" height="40" rx="8" class="k-src"/><text x="68" y="135" class="small b mono" text-anchor="middle">NEW</text>
+<path d="M116 130 L198 130" class="wire" marker-end="url(#ah)"/><text x="157" y="122" class="sm mono" text-anchor="middle">start()</text>
+<rect x="200" y="100" width="140" height="60" rx="10" class="k-ingest"/><text x="270" y="126" class="small b mono" text-anchor="middle">RUNNABLE</text><text x="270" y="144" class="sm" text-anchor="middle">running or ready</text>
+<rect x="380" y="20" width="170" height="44" rx="8" class="k-dlq"/><text x="465" y="40" class="small b mono" text-anchor="middle">BLOCKED</text><text x="465" y="56" class="sm" text-anchor="middle">wants a lock</text>
+<rect x="380" y="150" width="170" height="44" rx="8" class="k-kb"/><text x="465" y="170" class="small b mono" text-anchor="middle">WAITING</text><text x="465" y="186" class="sm" text-anchor="middle">until someone wakes it</text>
+<rect x="380" y="206" width="170" height="44" rx="8" class="k-kb"/><text x="465" y="226" class="small b mono" text-anchor="middle">TIMED_WAITING</text><text x="465" y="242" class="sm" text-anchor="middle">until woken or time is up</text>
+<rect x="604" y="110" width="108" height="40" rx="8" class="k-cross"/><text x="658" y="135" class="small b mono" text-anchor="middle">TERMINATED</text>
+<path d="M340 130 L602 130" class="wire" marker-end="url(#ah)"/><text x="470" y="122" class="sm" text-anchor="middle">run() returns</text>
+<path d="M300 100 C300 60 330 42 378 42" class="wire" marker-start="url(#ah)" marker-end="url(#ah)"/>
+<path d="M300 160 C300 172 330 172 378 172" class="wire" marker-start="url(#ah)" marker-end="url(#ah)"/>
+<path d="M240 160 C240 228 330 228 378 228" class="wire" marker-start="url(#ah)" marker-end="url(#ah)"/>
+<text x="560" y="36" class="sm">in: lock is held by another</text><text x="560" y="51" class="sm">out: gets the lock</text>
+<text x="560" y="168" class="sm">in: wait(), join()</text><text x="560" y="183" class="sm">out: notify(), notifyAll()</text>
+<text x="560" y="224" class="sm">in: sleep(ms), wait(ms)</text><text x="560" y="239" class="sm">out: time up, or notify()</text>
+</svg><figcaption>These are the real names from <code>Thread.State</code>. Only RUNNABLE threads use the CPU; the other states cost nothing but memory.</figcaption></figure>
+<div class="table"><table><thead><tr><th>Call</th><th>State</th><th>Holds its locks?</th><th>Ends when</th></tr></thead><tbody>
+<tr><td><code>Thread.sleep(ms)</code></td><td>TIMED_WAITING</td><td><strong>Yes</strong>, keeps every lock</td><td>time is up</td></tr>
+<tr><td><code>wait()</code></td><td>WAITING</td><td><strong>No</strong>, releases that object's lock</td><td><code>notify()</code> / <code>notifyAll()</code>, or a spurious wakeup</td></tr>
+<tr><td><code>wait(ms)</code></td><td>TIMED_WAITING</td><td><strong>No</strong>, releases that object's lock</td><td>notify, time up, or a spurious wakeup</td></tr>
+<tr><td>enter <code>synchronized</code> while busy</td><td>BLOCKED</td><td>n/a</td><td>the holder leaves <code>synchronized</code> or calls <code>wait()</code></td></tr>
+<tr><td><code>t.join()</code></td><td>WAITING</td><td>Yes</td><td>thread <code>t</code> finishes</td></tr>
+</tbody></table></div></section>
+
+<section id="locks"><h2>Shared data and locks</h2>
+<h3>The problem: a race condition</h3>
+<p>Even <code>count++</code> is three steps: read the value, add one, write it back. If two threads interleave those steps, one update is lost. A heap is far worse: two threads adding at once can leave it corrupted.</p>
+<figure class="fig"><svg viewBox="0 0 722 214" class="dg" role="img" aria-label="Lost update: thread A and thread B both read 5, both write 6, so two increments only add one.">
+<text x="150" y="22" class="cap" text-anchor="middle">THREAD A</text><text x="361" y="22" class="cap" text-anchor="middle">COUNT IN MEMORY</text><text x="572" y="22" class="cap" text-anchor="middle">THREAD B</text>
+<line x1="361" y1="32" x2="361" y2="176" class="rule"/>
+<rect x="70" y="36" width="160" height="30" rx="6" class="k-kb"/><text x="150" y="56" class="small" text-anchor="middle">read count → 5</text>
+<text x="361" y="56" class="small mono" text-anchor="middle">5</text>
+<rect x="492" y="72" width="160" height="30" rx="6" class="k-serve"/><text x="572" y="92" class="small" text-anchor="middle">read count → 5</text>
+<text x="361" y="92" class="small mono" text-anchor="middle">5</text>
+<rect x="70" y="108" width="160" height="30" rx="6" class="k-kb"/><text x="150" y="128" class="small" text-anchor="middle">write 5 + 1 = 6</text>
+<text x="361" y="128" class="small mono" text-anchor="middle">6</text>
+<rect x="492" y="144" width="160" height="30" rx="6" class="k-serve"/><text x="572" y="164" class="small" text-anchor="middle">write 5 + 1 = 6</text>
+<text x="361" y="164" class="small mono bad" text-anchor="middle">6</text>
+<path d="M20 34 L20 176" class="axis" marker-end="url(#ah)"/><text x="30" y="194" class="sm">time</text>
+<text x="361" y="204" class="small bad" text-anchor="middle">two increments, but count only went up by one</text>
+</svg><figcaption>A race condition: the result depends on the timing of the threads. It passes in testing and fails under load.</figcaption></figure>
+<h3>The fix: <code>synchronized</code></h3>
+<p>Every Java object has one built-in lock, called its <strong>monitor</strong>. A <code>synchronized</code> method takes the lock of <code>this</code> on the way in and gives it back on the way out, even if it throws. Only one thread can hold a lock at a time, so only one thread is ever inside <code>schedule()</code> or <code>loop()</code>, and the heap is never touched by two threads at once.</p>
+<figure class="fig"><svg viewBox="0 0 722 286" class="dg" role="img" aria-label="An object's monitor: threads blocked in the entry set wait for the lock; one owner runs inside; wait moves the owner to the wait set and releases the lock; notify moves one waiting thread back to the entry set.">
+<text x="110" y="50" class="cap" text-anchor="middle">ENTRY SET</text>
+<rect x="20" y="60" width="180" height="120" rx="10" class="ghost"/>
+<circle cx="80" cy="110" r="20" class="k-dlq"/><text x="80" y="115" class="small b" text-anchor="middle">T3</text>
+<circle cx="140" cy="110" r="20" class="k-dlq"/><text x="140" y="115" class="small b" text-anchor="middle">T4</text>
+<text x="110" y="152" class="sm" text-anchor="middle">BLOCKED:</text><text x="110" y="166" class="sm" text-anchor="middle">want the lock</text>
+<rect x="270" y="50" width="180" height="140" rx="12" class="k-kb"/>
+<text x="360" y="72" class="small b" text-anchor="middle">Inside synchronized</text>
+<circle cx="360" cy="116" r="22" class="k-ingest"/><text x="360" y="121" class="small b" text-anchor="middle">T1</text>
+<text x="360" y="158" class="sm" text-anchor="middle">the owner: holds the lock,</text><text x="360" y="172" class="sm" text-anchor="middle">only one at a time</text>
+<text x="610" y="50" class="cap" text-anchor="middle">WAIT SET</text>
+<rect x="520" y="60" width="180" height="120" rx="10" class="ghost"/>
+<circle cx="610" cy="110" r="20" class="k-serve"/><text x="610" y="115" class="small b" text-anchor="middle">T2</text>
+<text x="610" y="152" class="sm" text-anchor="middle">WAITING: gave the lock</text><text x="610" y="166" class="sm" text-anchor="middle">back, sleeping</text>
+<path d="M200 120 L268 120" class="wire" marker-end="url(#ah)"/><text x="234" y="112" class="sm" text-anchor="middle">gets lock</text>
+<path d="M450 100 L518 100" class="wire hot" marker-end="url(#ahb)"/><text x="484" y="92" class="sm" text-anchor="middle">wait()</text>
+<path d="M360 50 L360 18" class="wire" marker-end="url(#ah)"/><text x="370" y="24" class="sm">returns: lock released</text>
+<path d="M610 180 C610 240 110 240 110 182" class="wire hot" marker-end="url(#ahb)"/>
+<text x="361" y="258" class="small" text-anchor="middle">notify(): moves one waiting thread back to the entry set.</text>
+<text x="361" y="276" class="sm" text-anchor="middle">It still has to win the lock before it continues.</text>
+</svg><figcaption>Picture the object as a room with one key. The entry set is the queue at the door, and the wait set is a side room for threads that chose to step out and nap.</figcaption></figure>
+<div class="note"><p><strong>Lock what you share, and nothing more.</strong> Every read and every write of the shared heap happens inside <code>synchronized</code> on the same object. A lock only protects data if every thread that touches the data takes that same lock.</p></div></section>
+
+<section id="wait"><h2>wait() and notify()</h2>
+<p>The worker needs to sleep until the next task is due, but wake up early if someone adds a task that is due sooner. Neither a lock nor <code>sleep()</code> can do that; <code>wait()</code> and <code>notify()</code> can.</p>
+<ul class="plain">
+<li><strong><code>wait()</code></strong> releases the lock and sleeps. When it wakes, it takes the lock back before returning. Releasing the lock is the whole point: it lets <code>schedule()</code> get in while the worker sleeps.</li>
+<li><strong><code>wait(ms)</code></strong> does the same, but also wakes by itself when the time is up.</li>
+<li><strong><code>notify()</code></strong> wakes one thread waiting on this object. <strong><code>notifyAll()</code></strong> wakes all of them. Use <code>notifyAll()</code> when several threads wait for different reasons.</li>
+<li>All three must be called <strong>while holding that object's lock</strong>, inside <code>synchronized</code>. Otherwise Java throws <code>IllegalMonitorStateException</code>.</li>
+</ul>
+<figure class="fig"><svg viewBox="0 0 722 248" class="dg" role="img" aria-label="Timeline: main schedules tasks due at 5, 2 and 5 seconds and sleeps. Each schedule notifies the worker, which re-checks and waits 2 seconds, runs a task at 2 s, waits until 5 s, runs two tasks, then waits with an empty queue until main ends.">
+<text x="20" y="62" class="small b">main</text>
+<text x="20" y="142" class="small b">worker</text>
+<rect x="120" y="50" width="6" height="18" class="f-kb"/>
+<rect x="126" y="50" width="570" height="18" rx="3" fill="url(#hatch)" stroke="#4d5fd8" stroke-width="1"/>
+<text x="140" y="40" class="sm">schedule(5000), schedule(2000), schedule(5000), then sleep(6000)</text>
+<path d="M123 70 L123 126" class="wire hot" marker-end="url(#ahb)"/><text x="130" y="100" class="sm">notify() ×3: worker wakes, re-checks the top</text>
+<rect x="126" y="130" width="188" height="18" rx="3" fill="url(#hatch)" stroke="#4d5fd8" stroke-width="1"/><text x="220" y="143" class="sm mono" text-anchor="middle">wait(2000)</text>
+<rect x="314" y="130" width="6" height="18" class="f-serve"/>
+<rect x="320" y="130" width="279" height="18" rx="3" fill="url(#hatch)" stroke="#4d5fd8" stroke-width="1"/><text x="460" y="143" class="sm mono" text-anchor="middle">wait(3000)</text>
+<rect x="599" y="130" width="6" height="18" class="f-serve"/>
+<rect x="605" y="130" width="91" height="18" rx="3" fill="url(#hatch)" stroke="#4d5fd8" stroke-width="1"/><text x="650" y="143" class="sm mono" text-anchor="middle">wait()</text>
+<path d="M310 162 l5 6 l10 -12" class="tick"/><text x="317" y="182" class="sm okt" text-anchor="middle">task ran</text>
+<path d="M595 162 l5 6 l10 -12" class="tick"/><text x="602" y="182" class="sm okt" text-anchor="middle">2 tasks ran</text>
+<line x1="120" y1="206" x2="696" y2="206" class="axis"/>
+<g class="sm"><text x="120" y="224" text-anchor="middle">0 s</text><text x="215" y="224" text-anchor="middle">1</text><text x="310" y="224" text-anchor="middle">2</text><text x="405" y="224" text-anchor="middle">3</text><text x="500" y="224" text-anchor="middle">4</text><text x="595" y="224" text-anchor="middle">5</text><text x="690" y="224" text-anchor="middle">6 s</text></g>
+<rect x="120" y="234" width="14" height="10" rx="2" fill="url(#hatch)" stroke="#4d5fd8" stroke-width="1"/><text x="140" y="243" class="sm">waiting or sleeping: no CPU used</text>
+<rect x="360" y="234" width="14" height="10" rx="2" class="f-serve"/><text x="380" y="243" class="sm">running</text>
+</svg><figcaption>The 2-second task was added <em>after</em> the 5-second one, yet runs first. That only works because <code>notify()</code> woke the worker so it could re-check the top of the heap.</figcaption></figure>
+<h3>Always re-check in a loop</h3>
+<p>Waking up tells you <em>something</em> happened, not <em>what</em>. It could be a notify for a task due in an hour, a timeout, or a <strong>spurious wakeup</strong> (the JVM may wake a waiting thread for no reason). So every <code>wait()</code> sits inside a <code>while</code> loop that re-checks the condition, which is why <code>loop()</code> says <code>continue</code> after each wait.</p>
+<pre><code>// wrong: assumes waking up means "the task is due"
+if (left &gt; 0) wait(left);
+due.poll();                         // may run a task early
+
+// right: wake, then check again
+while (true) {
+    long left = due.peek() - now();
+    if (left &gt; 0) { wait(left); continue; }
+    due.poll();
+}</code></pre></section>
+
+<section id="lab"><h2>Try it: step through two threads</h2>
+<p>Walk through the program one step at a time: <code>init()</code>, then <code>schedule(5000)</code>, <code>schedule(2000)</code>, <code>schedule(5000)</code>, then <code>sleep(6000)</code>. Then pick a broken version and watch what changes.</p>
+<div class="lab" id="thlab">
+  <div class="lab-row"><span class="lab-k">Version</span><span class="seg" role="group" aria-label="Code version" id="th-var"><button type="button" data-v="ok" aria-pressed="true">Correct</button><button type="button" data-v="nonotify" aria-pressed="false">Forget notify()</button><button type="button" data-v="sleep" aria-pressed="false">sleep() not wait()</button><button type="button" data-v="run" aria-pressed="false">run() not start()</button><button type="button" data-v="nodaemon" aria-pressed="false">Not a daemon</button></span></div>
+  <div class="lab-row ctl"><button type="button" id="th-reset">⏮ Reset</button><button type="button" id="th-prev">◀ Back</button><button type="button" id="th-next">Next ▶</button><button type="button" id="th-play">Play</button><span class="step" id="th-step" aria-live="off"></span></div>
+  <p class="lab-out" id="th-note" aria-live="polite" style="margin:0 0 10px"></p>
+  <div class="sim">
+    <div class="sim-box lane"><h4><span>main thread</span><span class="st" id="th-ms"></span></h4><p id="th-mt"></p></div>
+    <div class="sim-box lane w"><h4><span>worker thread</span><span class="st" id="th-ws"></span></h4><p id="th-wt"></p></div>
+    <div class="sim-box"><h4><span>Clock</span></h4><div class="clock" id="th-clock"></div></div>
+    <div class="sim-box"><h4><span>The lock</span></h4><div class="lockv"><span class="key" id="th-key" aria-hidden="true">🔒</span><span id="th-lock"></span></div></div>
+    <div class="sim-box"><h4><span>Heap of due times (ms)</span></h4><div class="heap" id="th-heap"></div></div>
+    <div class="sim-box"><h4><span>Output</span></h4><ul class="outlog" id="th-out"></ul></div>
+  </div>
+  <div class="code2"><pre class="src" id="th-src-main" aria-label="main method"></pre><pre class="src" id="th-src" aria-label="DelayedRunner class"></pre></div>
+  <div class="legend"><span><i style="background:var(--t-kb);border:1px solid var(--c-kb)"></i>line main is running</span><span><i style="background:var(--t-serve);border:1px solid var(--c-serve)"></i>line the worker is running</span><span style="color:var(--c-dlq)">red line: the bug in this version</span></div>
+</div>
+<p class="muted" style="font-size:13.5px">Times are idealised: schedule calls 10 ms apart, everything else instant. Steps that happen in a few microseconds are split up so you can see them. On a real machine either thread could reach the lock first; the correct version works in every order.</p></section>
+
+<section id="failure"><h2>How it goes wrong</h2>
+<div class="table"><table><thead><tr><th>Bug</th><th>What you see</th><th>Fix</th></tr></thead><tbody>
+<tr><td>Race condition: shared data touched without the lock</td><td>Lost updates, a corrupted heap, rare and impossible to reproduce</td><td>Every access to shared state inside <code>synchronized</code> on the same object, or use a thread-safe class</td></tr>
+<tr><td>Missed notify</td><td>The worker sleeps through new work; tasks run late or never</td><td>Call <code>notify()</code> after every change the waiter cares about, under the lock</td></tr>
+<tr><td><code>if</code> instead of <code>while</code> around <code>wait()</code></td><td>Work runs early or on an empty queue after a spurious or unrelated wakeup</td><td>Re-check the condition in a loop after every wake</td></tr>
+<tr><td><code>sleep()</code> while holding a lock</td><td>Every other thread blocks for the whole sleep</td><td>Use <code>wait(ms)</code>, which releases the lock</td></tr>
+<tr><td>Calling <code>run()</code> instead of <code>start()</code></td><td>No new thread; the caller is stuck running the loop</td><td><code>start()</code></td></tr>
+<tr><td><code>wait()</code> / <code>notify()</code> outside <code>synchronized</code></td><td><code>IllegalMonitorStateException</code></td><td>Call them while holding that object's lock</td></tr>
+<tr><td>Deadlock</td><td>Two threads each hold one lock and wait forever for the other's</td><td>Always take locks in the same global order; keep one lock where you can</td></tr>
+<tr><td>Non-daemon background thread</td><td>The program never exits</td><td><code>setDaemon(true)</code>, or a shutdown method that interrupts the thread</td></tr>
+<tr><td>Slow work inside the lock</td><td>Callers block while one task runs</td><td>Take the item out under the lock, run it after releasing the lock</td></tr>
+</tbody></table></div>
+<figure class="fig"><svg viewBox="0 0 722 150" class="dg" role="img" aria-label="Deadlock: thread A holds lock 1 and wants lock 2, thread B holds lock 2 and wants lock 1.">
+<rect x="70" y="50" width="140" height="44" rx="8" class="k-kb"/><text x="140" y="77" class="small b" text-anchor="middle">Thread A</text>
+<rect x="512" y="50" width="140" height="44" rx="8" class="k-serve"/><text x="582" y="77" class="small b" text-anchor="middle">Thread B</text>
+<rect x="301" y="10" width="120" height="36" rx="8" class="box"/><text x="361" y="33" class="small mono" text-anchor="middle">lock 1</text>
+<rect x="301" y="98" width="120" height="36" rx="8" class="box"/><text x="361" y="121" class="small mono" text-anchor="middle">lock 2</text>
+<path d="M210 62 L299 30" class="wire" stroke-width="2.4"/><text x="236" y="34" class="sm">holds</text>
+<path d="M512 86 L423 114" class="wire" stroke-width="2.4"/><text x="470" y="120" class="sm">holds</text>
+<path d="M210 84 L299 112" class="wire red dash" marker-end="url(#ah)"/><text x="220" y="118" class="sm bad">wants</text>
+<path d="M512 62 L423 30" class="wire red dash" marker-end="url(#ah)"/><text x="470" y="34" class="sm bad">wants</text>
+</svg><figcaption>Neither thread can move. Our example uses a single lock, so it cannot deadlock this way.</figcaption></figure>
+<h3>The fix for slow work, in code</h3>
+<pre><code>Runnable task;
+synchronized (this) {
+    // ... wait until due ...
+    task = queue.poll();     // take it out under the lock
+}
+task.run();                  // run it with the lock released</code></pre></section>
+
+<section id="interview"><h2>Saying it in an interview</h2>
+<div class="say"><p>"I'd start one daemon worker thread in <code>init()</code> with <code>start()</code>. Scheduled items go into a min-heap of absolute due times, so the next one is an O(1) peek and inserts are O(log n). <code>schedule()</code> and the worker loop are both <code>synchronized</code> on the same object, so the heap is never touched by two threads at once. The worker waits with <code>wait(timeLeft)</code>, which releases the lock, and <code>schedule()</code> calls <code>notify()</code> so a new, earlier item wakes it. After every wake it loops and re-checks the top, which handles notifies, timeouts and spurious wakeups. In production I'd use <code>ScheduledExecutorService</code>, which is built the same way."</p></div>
+<dl class="qa">
+<dt>Why not just <code>Thread.sleep(delay)</code> in <code>schedule()</code>?</dt><dd>It blocks the caller. The point is that the caller returns at once and a background thread does the waiting.</dd>
+<dt>Why not one new thread per task?</dt><dd>Each thread has its own stack (around 0.5 to 1 MB reserved by default). Thousands of tasks waiting at once means thousands of threads. One worker with a heap waits on all of them for the cost of one.</dd>
+<dt><code>sleep()</code> vs <code>wait()</code>?</dt><dd><code>sleep()</code> keeps every lock and can only be ended by time or an interrupt. <code>wait()</code> releases the object's lock and can be ended by <code>notify()</code>.</dd>
+<dt><code>notify()</code> vs <code>notifyAll()</code>?</dt><dd><code>notify()</code> wakes one waiter, which is enough when exactly one thread waits. With several waiters, or waiters for different conditions, <code>notifyAll()</code> is the safe choice.</dd>
+<dt>Why store <code>now + delay</code> and not the delay?</dt><dd>A delay is relative to when the request arrived. The worker compares due times with the clock, so it needs absolute times. Prefer <code>System.nanoTime()</code> over <code>currentTimeMillis()</code> for this, as it never jumps when the wall clock is adjusted.</dd>
+<dt>What does <code>volatile</code> do, and do we need it here?</dt><dd>It makes writes to a field visible to other threads at once. We don't need it here, because entering and leaving <code>synchronized</code> already makes changes visible to the next thread that takes the lock.</dd>
+<dt>How would you stop the worker cleanly?</dt><dd>Keep a reference to it and call <code>worker.interrupt()</code>. A thread blocked in <code>wait()</code> or <code>sleep()</code> gets <code>InterruptedException</code> and leaves the loop.</dd>
+</dl></section>
+
+<section id="real-world"><h2>In the real world</h2>
+<p>Hand-written <code>wait()</code> and <code>notify()</code> are for learning and interviews. Production code uses <code>java.util.concurrent</code>, which wraps the same ideas in safer tools.</p>
+<div class="table"><table><thead><tr><th>Need</th><th>Use</th><th>Notes</th></tr></thead><tbody>
+<tr><td>Run a task later or on a schedule</td><td><code>ScheduledExecutorService</code></td><td><code>Executors.newSingleThreadScheduledExecutor().schedule(task, 5, SECONDS)</code>: a delay-ordered heap plus worker threads</td></tr>
+<tr><td>Hand work from one thread to another</td><td><code>BlockingQueue</code>, <code>DelayQueue</code></td><td><code>take()</code> waits for an item; <code>DelayQueue</code> only hands out items whose delay has passed</td></tr>
+<tr><td>A pool of reusable worker threads</td><td><code>ExecutorService</code></td><td>Avoids creating a thread per task</td></tr>
+<tr><td>A lock with more control</td><td><code>ReentrantLock</code> + <code>Condition</code></td><td><code>await()</code> / <code>signal()</code> are wait/notify with timeouts, fairness and several conditions per lock</td></tr>
+<tr><td>A shared counter or map</td><td><code>AtomicLong</code>, <code>ConcurrentHashMap</code></td><td>Thread-safe without writing any locks yourself</td></tr>
+<tr><td>Very many blocking tasks</td><td>Virtual threads (Java 21+)</td><td>Cheap threads managed by the JVM; one per task becomes affordable</td></tr>
+</tbody></table></div>
+<p class="muted" style="font-size:13.5px">APIs as of Java 21. Check the docs for your Java version.</p></section>
+
+<section id="related"><h2>Related</h2><ul class="related"><li><a href="queues.html">Message queues and streams</a></li><li><a href="rate-limiting.html">Rate limiting</a></li><li><a href="caching.html">Caching (stampede locks)</a></li><li><a href="consistency.html">Consistency</a></li><li><a href="numbers.html">Numbers to know</a></li></ul></section>
+  </article>
+</div>
+</main>
+<footer class="site"><div class="wrap">Part of Classic System Design, a companion to the <a href="https://devlcodes.github.io/agentic-ai-notebook/system-design/index.html">agentic system designs</a>. Figures marked illustrative show the shape of a system, not measured numbers. Check vendor docs before relying on a specific product limit.</div></footer>
+<script>
+(function(){
+  var $ = function(id){ return document.getElementById(id); };
+  var MAIN = [
+    ['m1', 'public static void main(String[] args) {'],
+    ['m2', '    DelayedRunner r = new DelayedRunner();'],
+    ['m3', '    r.init();'],
+    ['m4', '    r.schedule(5000);'],
+    ['m5', '    r.schedule(2000);'],
+    ['m6', '    r.schedule(5000);'],
+    ['m7', '    Thread.sleep(6000);'],
+    ['m8', '}']
+  ];
+  var CLS = [
+    ['c1', 'void init() {'],
+    ['c2', '    Thread worker = new Thread(this::loop);'],
+    ['c3', '    worker.setDaemon(true);'],
+    ['c4', '    worker.start();'],
+    ['c5', '}'],
+    ['c6', 'synchronized void schedule(long delayMs) {'],
+    ['c7', '    due.add(now() + delayMs);'],
+    ['c8', '    notify();'],
+    ['c9', '}'],
+    ['c10', 'synchronized void loop() {'],
+    ['c11', '    while (true) {'],
+    ['c12', '        if (due.isEmpty()) { wait(); continue; }'],
+    ['c13', '        long left = due.peek() - now();'],
+    ['c14', '        if (left > 0) { wait(left); continue; }'],
+    ['c15', '        due.poll();'],
+    ['c16', '        System.out.println("Task ran");'],
+    ['c17', '    }'],
+    ['c18', '}']
+  ];
+  var CHANGES = {
+    nonotify: { c8: '    // notify();          <- forgotten' },
+    sleep: { c14: '        if (left > 0) { Thread.sleep(left); continue; }' },
+    run: { c4: '    worker.run();         <- not start()' },
+    nodaemon: { c3: '    // setDaemon(true);   <- not a daemon' }
+  };
+
+  // Frame builder: each call to f() snapshots the state after applying changes.
+  function build(v){
+    var frames = [], s = { t: 0, m: ['run', ''], w: ['new', 'Not started yet. Only a Thread object exists.'], lock: null, heap: [], out: [], hm: 'm2', hw: null, note: '' };
+    function f(ch){ s.note = ''; for (var k in ch) s[k] = ch[k]; frames.push(JSON.parse(JSON.stringify(s))); }
+    function ran(asked){ var late = s.t - asked > 50; s.out = s.out.concat([{ txt: 'Task ran at ' + s.t + ' ms (due ' + asked + ')', late: late }]); }
+    function rm(x){ s.heap = s.heap.filter(function(y, i, a){ return !(y === x && a.indexOf(x) === i); }); }
+
+    f({ m: ['run', 'Creates the DelayedRunner object.'], hm: 'm2', note: 'Only one thread exists so far: main.' });
+    f({ m: ['run', 'init(): new Thread(this::loop) builds a Thread object. No new thread runs yet.'], hm: 'c2', note: 'A Thread object is just an object until you start it. Its state is NEW.' });
+
+    if (v === 'run'){
+      f({ m: ['run', 'worker.run() is an ordinary method call, so main itself enters loop() and takes the lock.'], hm: 'c12', lock: 'm', note: 'No second thread was created. main is now running the worker\'s loop.' });
+      f({ m: ['wait', 'The queue is empty, so main calls wait() and sleeps. Nobody else exists to call notify().'], hm: 'c12', lock: null, note: 'main is stuck inside init(). schedule() is never reached, so nothing is ever added, and the program hangs forever. Fix: worker.start().' });
+      return frames;
+    }
+
+    f({ m: ['run', (v === 'nodaemon' ? 'Skips setDaemon(true). ' : 'setDaemon(true), then ') + 'worker.start() asks the JVM for a real new thread and returns at once.'], hm: 'c4', w: ['run', 'Born. Starts running loop().'], hw: 'c10', note: 'Now there are two threads running side by side.' });
+    f({ m: ['run', 'Back in main(), about to call schedule(5000).'], hm: 'm4', w: ['run', 'Entered synchronized loop(), so it holds the lock. The queue is empty.'], hw: 'c12', lock: 'w', note: 'The worker got the lock first this time. The order could differ on a real machine; the correct code handles both.' });
+    f({ w: ['wait', 'wait(): sleeps AND gives the lock back.'], lock: null, note: 'wait() releases the lock. Without that, main could never get into schedule().' });
+
+    // schedule(5000)
+    f({ t: 0, m: ['run', 'schedule(5000): takes the lock and adds now + 5000 = 5000.'], hm: 'c7', lock: 'm', heap: [5000], note: 'The heap is shared, so it is only touched while holding the lock.' });
+
+    if (v === 'nonotify'){
+      f({ m: ['run', 'notify() is commented out. Nobody tells the worker about the new task.'], hm: 'c8', note: 'The worker is in wait() with no timeout. Only a notify() can wake it.' });
+      f({ t: 10, m: ['run', 'schedule(2000): adds 2010. Still no notify.'], hm: 'c7', heap: [2010, 5000] });
+      f({ t: 20, m: ['run', 'schedule(5000): adds 5020. Still no notify.'], hm: 'c7', heap: [2010, 5000, 5020] });
+      f({ m: ['timed', 'Thread.sleep(6000).'], hm: 'm7', lock: null, note: 'Three tasks are queued, but the worker never looked.' });
+      f({ t: 6020, m: ['done', 'main() returns.'], hm: null, w: ['done', 'Was still in wait() with no timeout. The daemon is stopped as the JVM exits.'], hw: null, note: '0 of 3 tasks ran. Every change the waiting thread cares about needs a notify(). (Had the worker been in wait(5000), the 2 s task would have run 3 s late instead.)' });
+      return frames;
+    }
+
+    f({ m: ['run', 'notify(): wakes the worker, which now needs the lock back.'], hm: 'c8', w: ['blocked', 'Woken from wait(). BLOCKED until main releases the lock.'], note: 'notify() does not hand over the lock. The woken thread waits until the notifier leaves synchronized.' });
+    f({ m: ['run', 'Leaves schedule(): lock released. Back in main().'], hm: 'm5', w: ['run', 'Has the lock again. continue: re-checks the top. 5000 ms left.'], hw: 'c13', lock: 'w' });
+
+    if (v === 'sleep'){
+      f({ w: ['timed', 'Thread.sleep(5000), still holding the lock.'], hw: 'c14', note: 'sleep() keeps the lock. Watch what happens to main.' });
+      f({ t: 10, m: ['blocked', 'schedule(2000) can\'t get the lock: the sleeping worker still has it.'], hm: 'c6', note: 'main is BLOCKED. The caller was supposed to return at once.' });
+      f({ t: 5000, w: ['run', 'Wakes up. The top (5000) is due: poll() and run it.'], hw: 'c16', heap: [], note: 'main has been stuck for almost 5 seconds.' }); ran(5000); frames[frames.length - 1].out = s.out;
+      f({ w: ['wait', 'Queue empty: wait(), lock released at last.'], hw: 'c12', lock: null });
+      f({ m: ['run', 'Finally gets the lock. Adds now + 2000 = 7000.'], hm: 'c7', lock: 'm', heap: [7000], note: 'The delay is counted from now (5000), not from when main first asked (10).' });
+      f({ m: ['blocked', 'notify(), returns, then schedule(5000) is BLOCKED again.'], hm: 'c6', w: ['timed', 'Woken. Thread.sleep(2000) while holding the lock.'], hw: 'c14', lock: 'w' });
+      f({ t: 7000, w: ['run', 'Runs the 2 s task, 5 seconds late.'], hw: 'c16', heap: [] }); ran(2010); frames[frames.length - 1].out = s.out;
+      f({ m: ['timed', 'Gets the lock, adds 7000 + 5000 = 12000, notifies, then sleep(6000).'], hm: 'm7', w: ['timed', 'Thread.sleep(5000), holding the lock.'], hw: 'c14', lock: 'w', heap: [12000] });
+      f({ t: 12000, w: ['wait', 'Runs the last task, then wait() on the empty queue.'], hw: 'c12', lock: null, heap: [] }); ran(5020); frames[frames.length - 1].out = s.out;
+      f({ t: 13000, m: ['done', 'main() returns.'], hm: null, w: ['done', 'Daemon: stopped as the JVM exits.'], hw: null, note: 'Tasks ran at 5 s, 7 s and 12 s instead of 2 s, 5 s and 5 s, and main was blocked for 7 seconds. sleep() holds the lock; wait(ms) releases it.' });
+      return frames;
+    }
+
+    f({ w: ['timed', 'wait(5000): sleeps up to 5 s, lock released.'], hw: 'c14', lock: null });
+    f({ t: 10, m: ['run', 'schedule(2000): takes the lock, adds 10 + 2000 = 2010. It is the new top of the heap.'], hm: 'c7', lock: 'm', heap: [2010, 5000], note: 'The worker is asleep until 5000. Without a wake-up, this task would run 3 s late.' });
+    f({ m: ['run', 'notify().'], hm: 'c8', w: ['blocked', 'Woken early by notify(). Wants the lock.'], note: 'This is why schedule() calls notify(): a new, earlier task must wake the sleeping worker.' });
+    f({ m: ['run', 'Lock released. Back in main().'], hm: 'm6', w: ['run', 'continue: re-checks the top. Only 2000 ms left now.'], hw: 'c13', lock: 'w', note: 'Re-check after every wake: the top of the heap may have changed.' });
+    f({ w: ['timed', 'wait(2000) instead of the old 5000.'], hw: 'c14', lock: null });
+    f({ t: 20, m: ['run', 'schedule(5000): adds 5020, notify().'], hm: 'c8', lock: 'm', heap: [2010, 5000, 5020], w: ['blocked', 'Woken by notify(). Wants the lock.'], note: 'Not every wake means there is work to do.' });
+    f({ m: ['timed', 'Thread.sleep(6000). It holds no lock, because main() is not synchronized.'], hm: 'm7', w: ['timed', 'Re-checks: the top is still 2010, so wait(1990).'], hw: 'c14', lock: null, note: 'Both threads now sleep and use no CPU.' });
+    f({ t: 2010, w: ['run', 'wait timed out. Takes the lock. The top is due: poll() and run it.'], hw: 'c16', lock: 'w', heap: [5000, 5020] }); ran(2010); frames[frames.length - 1].out = s.out;
+    frames[frames.length - 1].note = 'The 2 s task runs first, even though it was added second.';
+    f({ w: ['timed', 'Next top is 5000: wait(2990).'], hw: 'c14', lock: null, note: '' });
+    f({ t: 5000, w: ['run', 'Due: poll() and run it.'], hw: 'c16', lock: 'w', heap: [5020] }); ran(5000); frames[frames.length - 1].out = s.out;
+    f({ w: ['timed', 'wait(20).'], hw: 'c14', lock: null });
+    f({ t: 5020, w: ['run', 'Due: poll() and run it.'], hw: 'c16', lock: 'w', heap: [] }); ran(5020); frames[frames.length - 1].out = s.out;
+    f({ w: ['wait', 'Queue empty: wait() with no timeout, lock released.'], hw: 'c12', lock: null });
+    if (v === 'nodaemon'){
+      f({ t: 6020, m: ['done', 'main() returns.'], hm: null, w: ['wait', 'Not a daemon, so the JVM waits for it. It waits in wait() forever.'], note: 'All 3 tasks ran on time, but the program never exits: a non-daemon thread is still alive. Fix: setDaemon(true) before start(), or a shutdown() that interrupts the worker.' });
+    } else {
+      f({ t: 6020, m: ['done', 'main() returns.'], hm: null, w: ['done', 'Daemon: the JVM stops it and exits.'], hw: null, note: 'All 3 tasks ran on time, in due order, and the program exits cleanly.' });
+    }
+    return frames;
+  }
+
+  var ST = { run: 'RUNNABLE', wait: 'WAITING', timed: 'TIMED_WAITING', blocked: 'BLOCKED', new: 'NEW', done: 'TERMINATED' };
+  var variant = 'ok', frames = build(variant), i = 0, timer = null;
+
+  function code(el, lines, fr){
+    var ch = CHANGES[variant] || {};
+    el.innerHTML = '';
+    lines.forEach(function(l){
+      var d = document.createElement('div');
+      d.textContent = ch[l[0]] || l[1];
+      if (ch[l[0]]) d.classList.add('chg');
+      if (fr.hm === l[0]) d.classList.add('hm');
+      else if (fr.hw === l[0]) d.classList.add('hw');
+      el.appendChild(d);
+    });
+  }
+  function render(){
+    var fr = frames[i];
+    $('th-step').textContent = 'Step ' + (i + 1) + ' / ' + frames.length;
+    $('th-note').textContent = fr.note || ' ';
+    $('th-ms').textContent = ST[fr.m[0]]; $('th-ms').className = 'st ' + fr.m[0]; $('th-mt').textContent = fr.m[1];
+    $('th-ws').textContent = ST[fr.w[0]]; $('th-ws').className = 'st ' + fr.w[0]; $('th-wt').textContent = fr.w[1];
+    $('th-clock').textContent = 't = ' + fr.t.toLocaleString('en-US') + ' ms';
+    $('th-key').className = 'key' + (fr.lock ? ' ' + fr.lock : ''); $('th-key').textContent = fr.lock ? '\uD83D\uDD12' : '\uD83D\uDD13';
+    $('th-lock').textContent = fr.lock === 'm' ? 'Held by main' : fr.lock === 'w' ? 'Held by the worker' : 'Free';
+    var h = fr.heap.slice().sort(function(a, b){ return a - b; });
+    $('th-heap').innerHTML = h.length ? h.map(function(x, k){ return '<span' + (k === 0 ? ' class="top" title="top of the heap"' : '') + '>' + x + '</span>'; }).join('') : '<em>empty</em>';
+    $('th-out').innerHTML = fr.out.length ? fr.out.map(function(o){ return '<li class="' + (o.late ? 'late' : 'ok') + '">' + o.txt + (o.late ? ' · late' : '') + '</li>'; }).join('') : '<li class="muted">nothing yet</li>';
+    code($('th-src-main'), MAIN, fr); code($('th-src'), CLS, fr);
+    $('th-prev').disabled = i === 0; $('th-reset').disabled = i === 0; $('th-next').disabled = i === frames.length - 1;
+    if (i === frames.length - 1) stop();
+  }
+  function stop(){ if (timer){ clearInterval(timer); timer = null; } $('th-play').textContent = 'Play'; }
+  $('th-next').addEventListener('click', function(){ stop(); if (i < frames.length - 1){ i++; render(); } });
+  $('th-prev').addEventListener('click', function(){ stop(); if (i > 0){ i--; render(); } });
+  $('th-reset').addEventListener('click', function(){ stop(); i = 0; render(); });
+  $('th-play').addEventListener('click', function(){
+    if (timer){ stop(); return; }
+    if (i === frames.length - 1) i = 0;
+    this.textContent = 'Pause'; render();
+    timer = setInterval(function(){ if (i < frames.length - 1){ i++; render(); } else stop(); }, 1600);
+  });
+  $('th-var').addEventListener('click', function(e){
+    var b = e.target.closest('button'); if (!b) return;
+    stop(); variant = b.dataset.v; frames = build(variant); i = 0;
+    this.querySelectorAll('button').forEach(function(x){ x.setAttribute('aria-pressed', x === b); });
+    render();
+  });
+  render();
+})();
+</script>
+</body>
+</html>
