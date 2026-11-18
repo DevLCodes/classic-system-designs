@@ -223,6 +223,7 @@
   .srv { display: grid; grid-template-columns: 92px minmax(0,1fr) 70px; gap: 10px; align-items: center; font-size: 14px; }
   .muted { color: var(--muted); }
   .lab select { font: 14px var(--font-body); padding: 6px 8px; border-radius: 8px; border: 1px solid var(--line-strong); background: #fff; color: var(--ink); }
+  @media (max-width: 640px) { #n-chart text { font-size: 19px; } }
   .lab input[type=number] { width: 9ch; font: 14px var(--font-mono); padding: 6px 8px; border-radius: 8px; border: 1px solid var(--line-strong); background: #fff; color: var(--ink); }
 </style>
 </head>
@@ -294,7 +295,7 @@
 <text x="627" y="34" class="cap" text-anchor="middle">DRIVEN SIDE · CALLED OUT</text>
 <path d="M261 140 L311 53 L411 53 L461 140 L411 227 L311 227 Z" class="k-ingest"/>
 <text x="361" y="98" class="small b" text-anchor="middle">Domain core</text>
-<text x="361" y="116" class="sm" text-anchor="middle">order rules · no SQL · no HTTP</text>
+<text x="361" y="116" class="sm" text-anchor="middle">business rules only</text>
 <text x="361" y="146" class="cap" text-anchor="middle">PORTS (INTERFACES)</text>
 <text x="361" y="166" class="mono sm" text-anchor="middle">PlaceOrder</text>
 <text x="361" y="182" class="mono sm" text-anchor="middle">OrderRepository</text>
@@ -385,7 +386,7 @@
 </div>
 <p class="muted" style="font-size:13.5px">Each call's time is drawn from a log-normal curve with a 10 ms median and the p99 you set; 20,000 simulated requests per setting, with a fixed seed so results repeat. Failures assume services fail independently and no retries. Illustrative.</p>
 <p>Two lessons fall out. First, <strong>sequential chains add up</strong>: five calls with a 10 ms median give a median request of about 60 ms and a p99 of about 130 ms. Second, <strong>parallel calls fix the average but not the tail</strong>: the request waits for the slowest call, so the more calls you make, the more likely one is slow. At 10 calls, about 1 request in 10 hits at least one call's p99 (1 − 0.99<sup>10</sup> ≈ 9.6%). At 100 calls it is 63%. This is the "tail at scale" effect Google wrote about in 2013.</p>
-<div class="formula">chance a request fails = 1 − a<sup>N</sup> &nbsp;·&nbsp; chance it meets a slow call = 1 − 0.99<sup>N</sup></div>
+<div class="formula">chance a request fails = 1 − a<sup>N</sup><br>chance it meets a slow call = 1 − 0.99<sup>N</sup></div>
 <p>Fixes: call fewer services on the hot path (combine data in a read model), cache, give each call a tight timeout with a fallback, and for idempotent reads send a <strong>hedged request</strong> to a second replica if the first has not answered by about the p95.</p></section>
 
 <section id="when"><h2>When splitting pays off</h2>
@@ -468,12 +469,12 @@
   }
   function pct(x){ return x < 0.001 ? (x * 100).toFixed(3) + '%' : x < 0.1 ? (x * 100).toFixed(2) + '%' : (x * 100).toFixed(1) + '%'; }
   function chart(c, n, p99){
-    var W = 640, H = 230, L = 46, R = 14, T = 14, B = 34, top = c.seq[MAXN - 1].p99, ymax = Math.ceil(top / 100) * 100;
+    var W = 640, H = 230, L = 46, R = 14, T = 26, B = 34, top = c.seq[MAXN - 1].p99, ymax = Math.ceil(top / 100) * 100;
     function X(i){ return L + (i - 1) / (MAXN - 1) * (W - L - R); } function Y(v){ return T + (1 - v / ymax) * (H - T - B); }
     var g = '';
     for (var t = 0; t <= 4; t++){ var v = ymax * t / 4, y = Y(v); g += '<line x1="' + L + '" x2="' + (W - R) + '" y1="' + y + '" y2="' + y + '" stroke="#cdd4dc"/><text x="' + (L - 6) + '" y="' + (y + 4) + '" text-anchor="end">' + Math.round(v) + '</text>'; }
     [1, 5, 10, 15, 20].forEach(function(i){ g += '<text x="' + X(i) + '" y="' + (H - 14) + '" text-anchor="middle">' + i + '</text>'; });
-    g += '<text x="' + (W - R) + '" y="' + (H - 1) + '" text-anchor="end">services called</text><text x="' + L + '" y="' + (T - 2) + '">request p99, ms</text>';
+    g += '<text x="' + (W - R) + '" y="' + (H - 1) + '" text-anchor="end">services called</text><text x="' + (L - 40) + '" y="' + (T - 14) + '">request p99, ms</text>';
     g += '<line x1="' + L + '" x2="' + (W - R) + '" y1="' + Y(p99) + '" y2="' + Y(p99) + '" stroke="#9aa5b1" stroke-dasharray="4 4"/><text x="' + (W - R) + '" y="' + (Y(p99) - 5) + '" text-anchor="end">one call\'s p99</text>';
     [['seq', '#d7932a', 'one after another'], ['par', '#4255d4', 'parallel']].forEach(function(s){
       var d = c[s[0]].map(function(o, i){ return (i ? 'L' : 'M') + X(i + 1).toFixed(1) + ' ' + Y(o.p99).toFixed(1); }).join(' ');
