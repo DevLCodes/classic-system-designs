@@ -1,0 +1,25 @@
+{
+  "title": "Java threads",
+  "page": "threads.html",
+  "cards": [
+    {"front": "What is a thread?", "back": "A worker that runs code. Every program starts with one, main, and threads you start run at the same time and share the same objects.", "link": "threads.html#what"},
+    {"front": "start() vs run()", "back": "start() creates a new thread that runs run(). Calling run() directly runs the code on the current thread, so there is still only one thread.", "link": "threads.html#start"},
+    {"front": "What does new Thread(...) do on its own?", "back": "It only creates an object. Nothing runs until start(), and start() can be called once per thread.", "link": "threads.html#start"},
+    {"front": "synchronized", "back": "To enter a synchronized block a thread must hold the object's lock; others wait at the door. The lock is released automatically on leaving, so only one thread is inside at a time.", "link": "threads.html#sync"},
+    {"front": "wait()", "back": "Releases the lock and sleeps until notified; wait(ms) also wakes when the time is up. It must be called inside synchronized.", "link": "threads.html#wait"},
+    {"front": "notify()", "back": "Wakes one waiting thread, which must pick the lock back up before it continues. It must be called inside synchronized.", "link": "threads.html#wait"},
+    {"front": "Calling wait() or notify() without the lock", "back": "Java throws IllegalMonitorStateException. Both must be called while holding the object's lock.", "link": "threads.html#wait"},
+    {"front": "Why re-check after waking from wait()?", "back": "Waking means 'something happened', not 'your condition is true'. Loop back and check the condition again, for example whether the earliest alarm is actually due.", "link": "threads.html#wait"},
+    {"front": "Thread.sleep() vs wait()", "back": "sleep() keeps the lock, cannot be woken by notify() and needs no synchronized. wait() releases the lock and can be woken early.", "link": "threads.html#wait"},
+    {"front": "Daemon thread", "back": "A background thread that the JVM does not wait for before exiting. setDaemon(true) must be called before start().", "link": "threads.html#daemon"},
+    {"front": "What to use in real code for an alarm scheduler", "back": "ScheduledExecutorService. Interviewers often ask for the hand-built version, so mention it at the end.", "link": "threads.html#cheat"}
+  ],
+  "quiz": [
+    {"q": "The alarm worker calls Thread.sleep(5000) inside synchronized. What happens when schedule(2000) is called?", "choices": ["It blocks until the sleep ends, so the 2 s alarm rings late", "It wakes the worker immediately", "It throws IllegalMonitorStateException", "It runs in parallel and the alarm rings on time"], "answer": 0, "why": "sleep() keeps the lock, so schedule() cannot get in.", "link": "threads.html#wait"},
+    {"q": "Code calls t.run() instead of t.start() on a thread that loops forever. What happens?", "choices": ["The caller runs the loop itself and gets stuck", "A new thread runs the loop", "Java throws an exception", "The loop runs once and returns"], "answer": 0, "why": "run() does not create a new thread.", "link": "threads.html#start"},
+    {"q": "The alarm worker loops forever and is not a daemon. What happens when main finishes?", "choices": ["The program never exits", "The JVM exits anyway", "The worker throws InterruptedException", "main restarts"], "answer": 0, "why": "Java waits for all normal threads before exiting.", "link": "threads.html#daemon"},
+    {"q": "schedule() adds an alarm but forgets to call notify(). What goes wrong?", "choices": ["The waiting worker may never wake to see the new alarm", "The alarm rings twice", "The lock is never released", "Java throws IllegalMonitorStateException"], "answer": 0, "why": "A thread in wait() without a timeout sleeps until notified.", "link": "threads.html#wait"},
+    {"q": "When must setDaemon(true) be called?", "choices": ["Before start()", "After start()", "Inside run()", "Any time while the thread is alive"], "answer": 0, "why": "Calling it after the thread has started is a classic mistake.", "link": "threads.html#cheat"},
+    {"q": "Why does a synchronized block protect a shared PriorityQueue?", "choices": ["Only one thread can be inside at a time, so changes take turns", "It copies the queue for each thread", "It makes the queue immutable", "It runs the block on the main thread"], "answer": 0, "why": "Two threads changing the queue at the same moment can break it.", "link": "threads.html#sync"}
+  ]
+}
