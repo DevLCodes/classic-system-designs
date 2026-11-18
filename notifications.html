@@ -1,0 +1,766 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Notification System · Classic System Design</title>
+<meta name="description" content="Design a notification platform for push, SMS, email and in-app messages: user preferences and quiet hours, templates, priority lanes, dedupe and rate limits, provider failover and retries, and delivery tracking.">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700&family=Instrument+Sans:ital,wght@0,400;0,500;0,600;1,400&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+  /* Layout: a slim site bar, then either a card grid (home), a sticky contents rail + reading column (articles), or a filterable term list (glossary). Light, single look. */
+  :root {
+    color-scheme: light;
+    --bg: #e9ecef; --paper: #f7f8f9; --ink: #1c2530; --muted: #586473; --line: #cdd4dc; --line-strong: #9aa5b1;
+    --accent: #4255d4; --accent-ink: #ffffff; --track: #d3d9e0; --code-bg: #eef1f4; --wire: #7d8996;
+    --c-ingest: #2a9d8f; --c-kb: #4d5fd8; --c-serve: #d7932a; --c-model: #e2674f; --c-gov: #b2456e; --c-cross: #4a5562; --c-dlq: #b23a3a; --c-ok: #2f8f5b;
+    --t-src: #e4e8ec; --t-ingest: #d8eeea; --t-kb: #dfe3fa; --t-serve: #f8ead2; --t-model: #fbe1da; --t-gov: #f3dde6; --t-cross: #dfe2e6; --t-dlq: #f6dddb;
+    --font-display: "Bricolage Grotesque", "Avenir Next", "Segoe UI", system-ui, sans-serif;
+    --font-body: "Instrument Sans", "Helvetica Neue", "Segoe UI", system-ui, sans-serif;
+    --font-mono: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  @media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
+  body { margin: 0; background: var(--bg); color: var(--ink); font-family: var(--font-body); font-size: 16px; line-height: 1.6; }
+  a { color: var(--accent); }
+  .wrap { max-width: 1240px; margin: 0 auto; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
+
+  .sitebar { border-bottom: 1px solid var(--line); background: var(--paper); }
+  .sitebar .wrap { display: flex; align-items: center; gap: 18px; flex-wrap: wrap; padding-block: 12px; }
+  .brand { font-family: var(--font-display); font-weight: 700; font-size: 17px; color: var(--ink); text-decoration: none; margin-right: auto; }
+  .sitebar nav { display: flex; gap: 16px; flex-wrap: wrap; font-size: 14px; }
+  .sitebar nav a { color: var(--muted); text-decoration: none; }
+  .sitebar nav a:hover, .sitebar nav a[aria-current="page"] { color: var(--ink); }
+  .sitebar nav a[aria-current="page"] { font-weight: 600; }
+
+  .intro { padding-block: 40px 8px; display: grid; gap: 10px; max-width: 820px; }
+  .eyebrow { margin: 0; font-family: var(--font-mono); font-size: 12px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+  h1 { margin: 0; font-family: var(--font-display); font-weight: 700; font-size: clamp(30px, 5vw, 46px); line-height: 1.05; text-wrap: balance; }
+  .intro .lead { font-size: 18px; margin: 0; }
+
+  .doc { display: grid; grid-template-columns: 220px minmax(0, 1fr); gap: 48px; padding-block: 36px 72px; }
+  .toc { position: sticky; top: calc(env(safe-area-inset-top, 0px) + 20px); align-self: start; }
+  .toc p { margin: 0 0 8px; font-family: var(--font-mono); font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+  .toc ol { margin: 0; padding: 0; list-style: none; display: grid; gap: 2px; counter-reset: toc; }
+  .toc li { counter-increment: toc; }
+  .toc a { display: flex; gap: 8px; padding: 3px 0; font-size: 14px; color: var(--muted); text-decoration: none; }
+  .toc a::before { content: counter(toc, decimal-leading-zero); font-family: var(--font-mono); font-size: 11.5px; padding-top: 2px; color: var(--line-strong); }
+  .toc a:hover { color: var(--ink); }
+  article { min-width: 0; max-width: 760px; }
+  section { padding-bottom: 36px; margin-bottom: 36px; border-bottom: 1px solid var(--line); scroll-margin-top: 20px; }
+  section:last-child { border-bottom: 0; }
+  h2 { margin: 0 0 10px; font-family: var(--font-display); font-weight: 700; font-size: 28px; line-height: 1.15; text-wrap: balance; }
+  h3 { margin: 26px 0 6px; font-family: var(--font-display); font-weight: 600; font-size: 19px; line-height: 1.25; }
+  p { margin: 0 0 14px; }
+  .lead { font-size: 18px; }
+  ul.plain, ol.plain { margin: 0 0 16px; padding-left: 22px; display: grid; gap: 6px; }
+  code { font-family: var(--font-mono); font-size: 0.88em; background: var(--code-bg); padding: 1px 5px; border-radius: 4px; }
+  pre { margin: 0 0 16px; padding: 14px 16px; background: var(--code-bg); border-radius: 10px; overflow-x: auto; font-size: 13px; line-height: 1.55; }
+  pre code { background: none; padding: 0; font-size: inherit; }
+  .table { overflow-x: auto; margin: 0 0 18px; }
+  table { width: 100%; border-collapse: collapse; font-size: 14.5px; line-height: 1.45; }
+  th, td { text-align: left; vertical-align: top; padding: 8px 10px; border-bottom: 1px solid var(--line); }
+  th { font-family: var(--font-mono); font-size: 11.5px; font-weight: 500; letter-spacing: .05em; text-transform: uppercase; color: var(--muted); }
+  td.num { font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .note { border-left: 3px solid var(--accent); background: var(--paper); padding: 12px 16px; border-radius: 0 10px 10px 0; margin: 0 0 18px; }
+  .note p:last-child { margin: 0; }
+  .formula { font-family: var(--font-mono); font-size: 14px; background: var(--paper); border: 1px solid var(--line); border-radius: 10px; padding: 12px 16px; margin: 0 0 16px; overflow-x: auto; white-space: nowrap; }
+  .related { display: flex; flex-wrap: wrap; gap: 8px; margin: 0; padding: 0; list-style: none; }
+  .related a { display: inline-block; padding: 4px 12px; border: 1px solid var(--line); border-radius: 999px; font-size: 14px; color: var(--ink); text-decoration: none; background: var(--paper); }
+  .related a:hover { border-color: var(--ink); }
+  .pager { display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; font-size: 14px; }
+  footer.site { border-top: 1px solid var(--line); padding-block: 20px 40px; font-size: 13px; color: var(--muted); }
+  a:focus-visible, input:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+  /* home */
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 16px; margin: 0 0 40px; padding: 0; list-style: none; }
+  .card { display: grid; gap: 8px; height: 100%; padding: 18px; background: var(--paper); border: 1px solid var(--line); border-radius: 14px; color: var(--ink); text-decoration: none; }
+  .card:hover { border-color: var(--ink); }
+  .card .k { font-family: var(--font-mono); font-size: 11px; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
+  .card h3 { margin: 0; font-size: 20px; }
+  .card p { margin: 0; font-size: 14.5px; color: var(--muted); }
+  .card svg { width: 100%; height: auto; display: block; }
+  .card.feature svg { max-width: 420px; justify-self: center; }
+  .card.feature { grid-column: 1 / -1; grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr); align-items: center; gap: 24px; }
+  .home-h { margin: 28px 0 12px; font-family: var(--font-display); font-size: 24px; }
+
+  /* glossary */
+  .gl-tools { position: sticky; top: 0; z-index: 2; background: var(--bg); padding-block: 12px; display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+  .gl-tools input { flex: 1 1 260px; min-width: 0; font: 15px var(--font-body); padding: 9px 12px; border-radius: 10px; border: 1px solid var(--line-strong); background: #fff; color: var(--ink); }
+  .gl-letters { display: flex; flex-wrap: wrap; gap: 4px; font-family: var(--font-mono); font-size: 13px; }
+  .gl-letters a { padding: 2px 6px; border-radius: 6px; text-decoration: none; color: var(--muted); }
+  .gl-letters a:hover { background: var(--paper); color: var(--ink); }
+  .gl { max-width: 860px; }
+  .gl-item { margin: 0; }
+  .gl-item { display: grid; grid-template-columns: 220px minmax(0, 1fr); gap: 16px; padding: 12px 0; border-bottom: 1px solid var(--line); scroll-margin-top: 70px; }
+  .gl-item dt { font-weight: 600; }
+  .gl-item dt small { display: block; font-weight: 400; font-family: var(--font-mono); font-size: 11px; color: var(--muted); letter-spacing: .04em; text-transform: uppercase; margin-top: 2px; }
+  .gl-item dd { margin: 0; }
+  .gl-item dd .see { font-size: 13.5px; }
+  .gl-letter { margin: 26px 0 4px; font-family: var(--font-display); font-size: 22px; scroll-margin-top: 70px; }
+
+  @media (max-width: 900px) {
+    .doc { grid-template-columns: minmax(0, 1fr); gap: 24px; padding-block: 28px 56px; }
+    .toc { position: static; }
+    .toc ol { grid-template-columns: repeat(2, minmax(0, 1fr)); column-gap: 12px; }
+    .card.feature { grid-template-columns: minmax(0, 1fr); }
+  }
+  @media (max-width: 640px) {
+    .gl-item { grid-template-columns: minmax(0, 1fr); gap: 4px; }
+    h2 { font-size: 24px; }
+    .intro .lead, .lead { font-size: 16.5px; }
+  }
+
+  /* diagrams */
+  .fig { margin: 6px 0 24px; overflow-x: auto; }
+  .fig svg { display: block; width: 100%; height: auto; min-width: 600px; }
+  .fig figcaption { margin-top: 8px; font-size: 13px; line-height: 1.45; color: var(--muted); }
+  .dg text { font-family: var(--font-body); font-size: 13px; fill: var(--ink); }
+  .dg .sm { font-size: 11.5px; fill: var(--muted); }
+  .dg .small { font-size: 12px; }
+  .dg .b { font-weight: 600; }
+  .dg .mono { font-family: var(--font-mono); }
+  .dg .it { font-style: italic; }
+  .dg .mute { fill: var(--muted); }
+  .dg .gov { fill: var(--c-gov); font-weight: 600; }
+  .dg .okt { fill: var(--c-ok); font-weight: 600; }
+  .dg .bad { fill: var(--c-dlq); font-weight: 600; }
+  .dg .cap { font-family: var(--font-mono); font-size: 11px; letter-spacing: .06em; fill: var(--muted); }
+  .dg .big { font-family: var(--font-display); font-size: 30px; font-weight: 700; fill: var(--ink); }
+  .dg .box { fill: var(--paper); stroke: var(--line-strong); stroke-width: 1.25; }
+  .dg .ghost { fill: none; stroke: var(--line-strong); stroke-width: 1.25; stroke-dasharray: 5 5; }
+  .dg .track { fill: var(--track); }
+  .dg .rule { stroke: var(--line); stroke-width: 1; }
+  .dg .axis { stroke: var(--line-strong); stroke-width: 1.25; }
+  .dg .wire { fill: none; stroke: var(--wire); stroke-width: 1.4; }
+  .dg .wire.dash { stroke-dasharray: 4 4; }
+  .dg .wire.hot { stroke: var(--accent); stroke-width: 2; }
+  .dg .wire.red { stroke: var(--c-dlq); }
+  .dg .ah { fill: var(--wire); }
+  .dg .xmark { stroke: var(--c-dlq); stroke-width: 1.8; fill: none; }
+  .dg .tick { stroke: var(--c-ok); stroke-width: 2; fill: none; }
+  .dg .k-src { fill: var(--t-src); stroke: #8795a3; stroke-width: 1.5; }
+  .dg .k-ingest { fill: var(--t-ingest); stroke: var(--c-ingest); stroke-width: 1.5; }
+  .dg .k-kb { fill: var(--t-kb); stroke: var(--c-kb); stroke-width: 1.5; }
+  .dg .k-serve { fill: var(--t-serve); stroke: var(--c-serve); stroke-width: 1.5; }
+  .dg .k-model { fill: var(--t-model); stroke: var(--c-model); stroke-width: 1.5; }
+  .dg .k-gov { fill: var(--t-gov); stroke: var(--c-gov); stroke-width: 1.5; }
+  .dg .k-cross { fill: var(--t-cross); stroke: var(--c-cross); stroke-width: 1.5; }
+  .dg .k-dlq { fill: var(--t-dlq); stroke: var(--c-dlq); stroke-width: 1.5; }
+  .dg .k-user { fill: #ffffff; stroke: var(--line-strong); stroke-width: 1.5; }
+  .dg .f-serve { fill: var(--c-serve); } .dg .f-kb { fill: var(--c-kb); } .dg .f-model { fill: var(--c-model); } .dg .f-gov { fill: var(--c-gov); } .dg .f-ingest { fill: var(--c-ingest); } .dg .f-cross { fill: #b8c0c9; } .dg .f-dlq { fill: var(--c-dlq); } .dg .f-ok { fill: var(--c-ok); }
+  .dg .cell { fill: var(--paper); stroke: var(--line-strong); stroke-width: 1; }
+  .dg .cell.hot { fill: var(--t-ingest); stroke: var(--c-ingest); stroke-width: 1.5; }
+  .dg .cell.old { fill: var(--t-kb); stroke: var(--c-kb); }
+  .dg .cell.new { fill: var(--t-ingest); stroke: var(--c-ingest); stroke-width: 1.5; }
+  .dg .cell.gone { fill: var(--paper); stroke: var(--line); }
+  .dg .dot-hr { fill: var(--c-gov); } .dg .dot-it { fill: var(--c-kb); } .dg .dot-eng { fill: var(--c-ingest); } .dg .dot-q { fill: var(--c-serve); stroke: var(--ink); stroke-width: 1.5; }
+  .dg .halo { fill: none; stroke: var(--c-serve); stroke-width: 1.5; stroke-dasharray: 4 4; }
+  .dg .zone { fill: var(--paper); stroke: var(--line); stroke-width: 1; }
+</style>
+
+<style>
+  .lab { margin: 6px 0 26px; padding: 14px 16px 16px; background: var(--paper); border: 1px solid var(--line); border-radius: 14px; }
+  .lab-row { display: flex; flex-wrap: wrap; gap: 10px 18px; align-items: center; margin: 0 0 12px; }
+  .lab-k { font-family: var(--font-mono); font-size: 11px; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
+  .lab label { display: inline-flex; gap: 8px; align-items: center; font-size: 14px; }
+  .lab input[type=range] { width: 150px; accent-color: var(--accent); }
+  .lab input[type=checkbox] { width: 16px; height: 16px; accent-color: var(--accent); }
+  .lab input[type=text] { flex: 1 1 260px; min-width: 0; font: 15px var(--font-body); padding: 8px 11px; border-radius: 9px; border: 1px solid var(--line-strong); background: #fff; color: var(--ink); }
+  .lab output { font-family: var(--font-mono); font-size: 12.5px; min-width: 6ch; font-variant-numeric: tabular-nums; }
+  .seg { display: inline-flex; flex-wrap: wrap; gap: 6px; }
+  .seg button, .chips button { font: 600 13px var(--font-body); color: var(--ink); background: #fff; border: 1px solid var(--line); border-radius: 8px; padding: 6px 12px; cursor: pointer; }
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; }
+  .chips button { font-weight: 500; border-radius: 999px; padding: 4px 11px; font-size: 13px; }
+  .seg button:hover, .chips button:hover { border-color: var(--ink); }
+  .seg button[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+  .seg button:focus-visible, .chips button:focus-visible, .lab input:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .lab-out { margin: 12px 0 0; padding: 10px 12px; background: #fff; border: 1px solid var(--line); border-radius: 10px; font-size: 14.5px; line-height: 1.5; font-variant-numeric: tabular-nums; }
+  .chunks { display: grid; gap: 8px; max-height: 470px; overflow: auto; padding-right: 4px; }
+  .chunk { min-width: 0; padding: 8px 11px; background: #fff; border: 1px solid var(--line); border-left: 4px solid var(--c-kb); border-radius: 8px; font-size: 14px; line-height: 1.5; overflow-wrap: anywhere; }
+  .chunk:nth-child(even) { border-left-color: var(--c-ingest); }
+  .chunk.ans { box-shadow: 0 0 0 2px var(--c-serve); }
+  .chunk .ch { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-bottom: 4px; font-family: var(--font-mono); font-size: 11px; color: var(--muted); }
+  .chunk .pfx { display: block; font-family: var(--font-mono); font-size: 11.5px; color: var(--c-kb); }
+  .chunk .ov { background: var(--track); border-radius: 3px; }
+  .chunk mark { background: #ffe9b3; border-radius: 3px; padding: 0 2px; }
+  .chunk table { width: auto; font-size: 13px; margin: 4px 0; }
+  .chunk td { padding: 2px 10px 2px 0; border-bottom: 1px solid var(--line); }
+  .badge { display: inline-block; padding: 0 7px; border-radius: 999px; border: 1px solid; font-family: var(--font-mono); font-size: 10.5px; line-height: 1.6; }
+  .badge.bad { color: var(--c-dlq); border-color: var(--c-dlq); background: var(--t-dlq); }
+  .badge.ok { color: var(--c-ok); border-color: var(--c-ok); background: #e3f3ea; }
+  .badge.info { color: var(--c-kb); border-color: var(--c-kb); background: var(--t-kb); }
+  .bars { display: grid; gap: 8px; margin: 4px 0 0; }
+  .bar-row { display: grid; grid-template-columns: minmax(0, 150px) minmax(0, 1fr) 46px; gap: 10px; align-items: center; font-size: 14px; }
+  .bar { position: relative; height: 14px; border-radius: 7px; background: var(--track); }
+  .bar i { position: absolute; inset: 0 auto 0 0; border-radius: 7px; background: var(--c-kb); transition: width .3s; }
+  .bar b { position: absolute; top: -4px; bottom: -4px; width: 2px; background: var(--c-dlq); }
+  .bar-row .v { font-family: var(--font-mono); font-size: 12.5px; text-align: right; }
+  .stages { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 10px; padding: 0; list-style: none; font-size: 13px; }
+  .stages li { padding: 2px 10px; border-radius: 999px; border: 1px solid var(--line); color: var(--muted); background: #fff; }
+  .stages li.hit { border-color: var(--accent); color: var(--accent-ink); background: var(--accent); }
+  .stages li.skip { text-decoration: line-through; }
+  .rlist { display: grid; gap: 6px; margin: 0; padding: 0; list-style: none; counter-reset: r; }
+  .rlist li { counter-increment: r; display: grid; grid-template-columns: 28px minmax(0, 1fr) auto; gap: 10px; align-items: center; padding: 6px 10px; background: #fff; border: 1px solid var(--line); border-radius: 8px; font-size: 14px; }
+  .rlist li::before { content: counter(r); font-family: var(--font-mono); font-size: 12px; color: var(--muted); }
+  .rlist li.rel { border-color: var(--c-ok); background: #f0f8f3; }
+  .rlist button { font: 600 12px var(--font-body); padding: 3px 10px; border-radius: 999px; border: 1px solid var(--line-strong); background: #fff; color: var(--ink); cursor: pointer; white-space: nowrap; }
+  .rlist li.rel button { background: var(--c-ok); border-color: var(--c-ok); color: #fff; }
+  .metrics { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 8px; margin: 12px 0 0; }
+  .metric { padding: 8px 10px; background: #fff; border: 1px solid var(--line); border-radius: 10px; }
+  .metric .n { display: block; font-family: var(--font-display); font-size: 24px; font-weight: 700; font-variant-numeric: tabular-nums; }
+  .metric .l { font-family: var(--font-mono); font-size: 11px; letter-spacing: .04em; text-transform: uppercase; color: var(--muted); }
+  .metric small { display: block; font-size: 12px; color: var(--muted); line-height: 1.35; margin-top: 2px; }
+  td.pass { color: var(--c-ok); font-weight: 600; } td.fail { color: var(--c-dlq); font-weight: 600; }
+  .say { border-left: 3px solid var(--c-serve); background: var(--paper); padding: 12px 16px; border-radius: 0 10px 10px 0; margin: 0 0 16px; font-size: 15.5px; }
+  .say p:last-child { margin: 0; }
+</style>
+
+<style>
+  .lab-chart { display: block; width: 100%; height: auto; margin: 4px 0 0; }
+  .lab-chart text { font-family: var(--font-body); font-size: 12px; fill: var(--muted); }
+  .grid-cells { display: grid; gap: 4px; }
+  .srv { display: grid; grid-template-columns: 92px minmax(0,1fr) 70px; gap: 10px; align-items: center; font-size: 14px; }
+  .muted { color: var(--muted); }
+  .lab select { font: 14px var(--font-body); padding: 6px 8px; border-radius: 8px; border: 1px solid var(--line-strong); background: #fff; color: var(--ink); }
+  .lab input[type=number] { width: 9ch; font: 14px var(--font-mono); padding: 6px 8px; border-radius: 8px; border: 1px solid var(--line-strong); background: #fff; color: var(--ink); }
+</style><style>
+  .prompt { margin: 0; font-size: 18px; line-height: 1.5; color: var(--ink); }
+  .prompt q { font-style: italic; }
+  .legend { display: flex; flex-wrap: wrap; gap: 6px 14px; margin: 4px 0 0; padding: 0; list-style: none; font-size: 13px; color: var(--muted); }
+  .legend li { display: flex; align-items: center; gap: 6px; }
+  .legend i { width: 11px; height: 11px; border-radius: 3px; display: inline-block; }
+  .tags { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 16px; padding: 0; list-style: none; }
+  .tags li { font-family: var(--font-mono); font-size: 11px; letter-spacing: .04em; padding: 2px 8px; border-radius: 6px; border: 1px solid var(--line); color: var(--muted); }
+  @media (max-width: 640px) { .prompt { font-size: 16.5px; } }
+</style>
+<link rel="stylesheet" href="assets/scene3d.css">
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs><marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" class="ah" style="fill:#7d8996"/></marker></defs></svg>
+<header class="sitebar"><div class="wrap"><a class="brand" href="index.html">Classic System Design</a><nav aria-label="Site"><a href="index.html">Home</a><a href="index.html#blocks">Building blocks</a><a href="index.html#designs" aria-current="page">Designs</a><a href="https://devlcodes.github.io/agentic-ai-notebook/system-design/index.html">Agentic designs ↗</a></nav></div></header>
+<main>
+<header class="wrap"><div class="intro"><p class="eyebrow">Classic system design walkthrough</p><h1>Notification System</h1><p class="prompt"><q>Design the notification platform for a large consumer app. Every team sends push, SMS, email and in-app messages through one service. Users choose what they get and when. A login code must arrive in seconds, even while a marketing campaign to 50 million people is going out. Plan for 300 million users and about 2 billion notifications a day.</q></p><ul class="legend" aria-label="Colour key"><li><i style="background:var(--c-ingest)"></i>Send path and workers</li><li><i style="background:var(--c-serve)"></i>Providers</li><li><i style="background:var(--c-kb)"></i>Storage</li><li><i style="background:var(--c-cross)"></i>Queues and events</li><li><i style="background:var(--c-gov)"></i>Rules, limits and routing</li></ul></div></header>
+<div class="wrap"><figure class="fig3d hero" id="hero">
+  <div class="stage3d" role="img" aria-label="Animated 3D view: the order service asks the notification API to tell Priya her order was delivered. The API checks her preferences and quiet hours, picks push, and renders the template in her language. The message goes onto the high-priority Kafka topic while campaign messages wait on the bulk topic. A push worker hands it to APNs or FCM, which delivers it to Priya's phone. The app reports that it was received and opened, and the result lands in the delivery log."><p class="hint3">3D · drag to turn</p><button class="reset3 ghost" type="button" hidden>Reset view</button><p class="nogl">The 3D view needs WebGL and a connection, because Three.js loads from a CDN. The sections below cover the same ground.</p></div>
+  <div class="ctl3"><button class="pp" type="button">Pause</button><span class="k">Step</span><div class="steps3"></div><span class="meta3"></span></div>
+  <div class="track3"><div class="fill3"></div></div>
+  <p class="out3" aria-live="polite"></p>
+  <figcaption>Illustrative. Callers say what happened. The platform decides whether, when and how to tell the user.</figcaption>
+</figure></div>
+<div class="wrap doc">
+  <nav class="toc" aria-label="Sections"><p>The solution</p><ol><li><a href="#requirements">Requirements</a></li><li><a href="#success">Success metrics</a></li><li><a href="#estimates">Estimates</a></li><li><a href="#api">API</a></li><li><a href="#architecture">Architecture</a></li><li><a href="#channels">Channels and providers</a></li><li><a href="#preferences">Preferences, quiet hours and templates</a></li><li><a href="#priority">Priority queues</a></li><li><a href="#dedupe">Dedupe and rate limits</a></li><li><a href="#lab">Try it: send a campaign</a></li><li><a href="#failover">Retries and provider failover</a></li><li><a href="#tracking">Delivery tracking</a></li><li><a href="#storage">Storage</a></li><li><a href="#observability">Observability</a></li><li><a href="#risks">Risks and v2</a></li><li><a href="#presenting">Presenting it in 45 minutes</a></li><li><a href="#numbers">Numbers to remember</a></li><li><a href="#related">Related</a></li></ol></nav>
+  <article>
+
+<section id="requirements">
+  <h2>Requirements</h2>
+  <ul class="tags"><li>Clarify</li><li><a href="requirements.html">Non-functional requirements</a></li></ul>
+  <p class="lead">A notification system is a router with opinions. Other services say "the order was delivered". This service decides whether the user wants to hear it, on which channel, at what time, and makes sure it gets there exactly once as far as the user can tell.</p>
+  <div class="table"><table>
+    <thead><tr><th>Question</th><th>Assumption</th><th>Why it matters</th></tr></thead>
+    <tbody>
+      <tr><td>Channels</td><td>Push (iOS, Android, web), SMS, email, in-app inbox</td><td>Each channel has its own provider, limits, cost and failure modes</td></tr>
+      <tr><td>Users</td><td class="num">300M, ~1.5 devices each</td><td>Device tokens and preferences to store and look up</td></tr>
+      <tr><td>Volume</td><td class="num">~2B a day</td><td>~23k a second on average</td></tr>
+      <tr><td>Kinds</td><td>Transactional (OTP, order updates, fraud alerts) and marketing campaigns</td><td>Different urgency, different rules, must not share one queue</td></tr>
+      <tr><td>Campaigns</td><td class="num">up to 50M users in ~30 min</td><td>Bursts of ~28k a second on top of normal traffic</td></tr>
+      <tr><td>Latency</td><td class="num">OTP handed to provider in &lt; 2 s; order updates &lt; 10 s</td><td>Critical traffic needs its own lane</td></tr>
+      <tr><td>User control</td><td>Opt out per category and channel; quiet hours in their time zone; frequency caps</td><td>Preferences checked on every send</td></tr>
+      <tr><td>Correctness</td><td>No duplicates the user can see; no marketing to opted-out users</td><td>Dedupe, idempotency keys, a preference check that fails closed</td></tr>
+    </tbody>
+  </table></div>
+  <p>Out of scope: choosing campaign audiences (assume a segment service hands us a list of user ids), and what the messages say. Chat messages have their own delivery path: <a href="chat.html">Chat service</a>.</p>
+</section>
+
+<section id="success">
+  <h2>Success metrics</h2>
+  <ul class="tags"><li>Define success</li></ul>
+  <div class="table"><table>
+    <thead><tr><th>Kind</th><th>Metric</th><th>Target</th></tr></thead>
+    <tbody>
+      <tr><td>Speed</td><td>Time from API call to provider hand-off, per priority</td><td class="num">critical p99 &lt; 2 s</td></tr>
+      <tr><td>Delivery</td><td>Delivered share per channel (provider receipts)</td><td class="num">push &gt; 95%, SMS &gt; 97%</td></tr>
+      <tr><td>Correctness</td><td>Duplicates per million; sends to opted-out users</td><td class="num">near 0; 0</td></tr>
+      <tr><td>User health</td><td>Opt-out and spam-complaint rates after campaigns</td><td class="num">flat or falling</td></tr>
+      <tr><td>Cost</td><td>SMS spend per active user</td><td class="num">within budget</td></tr>
+    </tbody>
+  </table></div>
+  <p>Watch the guardrails as closely as the speed. A system that sends faster but makes people turn notifications off has failed.</p>
+</section>
+
+<section id="estimates">
+  <h2>Estimates</h2>
+  <ul class="tags"><li>Back of the envelope</li><li><a href="numbers.html">Numbers</a></li></ul>
+  <figure class="fig"><svg viewBox="0 0 722 150" class="dg" role="img" aria-label="Key numbers: 23,000 notifications a second on average and about 100,000 at peak, 28,000 a second during a 50 million user campaign, 1 terabyte of delivery log a day, and 20 million SMS a day">
+    <rect x="10" y="10" width="134" height="92" rx="8" class="k-ingest"/><text x="24" y="52" class="big">23k/s</text><text x="24" y="78" class="sm">notifications</text><text x="24" y="94" class="sm">~100k/s at peak</text>
+    <rect x="154" y="10" width="134" height="92" rx="8" class="k-cross"/><text x="168" y="52" class="big">28k/s</text><text x="168" y="78" class="sm">one campaign</text><text x="168" y="94" class="sm">50M users in 30 min</text>
+    <rect x="298" y="10" width="134" height="92" rx="8" class="k-serve"/><text x="312" y="52" class="big">75%</text><text x="312" y="78" class="sm">of sends are push</text><text x="312" y="94" class="sm">1.5B a day, ~free</text>
+    <rect x="442" y="10" width="134" height="92" rx="8" class="k-gov"/><text x="456" y="52" class="big">20M</text><text x="456" y="78" class="sm">SMS a day</text><text x="456" y="94" class="sm">each one costs money</text>
+    <rect x="586" y="10" width="126" height="92" rx="8" class="k-kb"/><text x="600" y="52" class="big">1 TB</text><text x="600" y="78" class="sm">delivery log a day</text><text x="600" y="94" class="sm">2B × ~500 B</text>
+    <text x="10" y="132" class="small">The hard numbers are not the averages. They are provider limits, the campaign burst, and the SMS bill.</text>
+  </svg></figure>
+  <ul class="plain">
+    <li><strong>Average:</strong> 2B a day ÷ 86,400 s ≈ 23k a second. Evenings and campaigns push it to 4–5×, so plan for about 100k a second at the send stage.</li>
+    <li><strong>Channel mix:</strong> push 1.5B, in-app 300M, email 180M, SMS 20M a day. SMS is about 1% of messages but most of the bill, because providers charge per message (from a fraction of a cent to several cents, depending on the country).</li>
+    <li><strong>Campaign:</strong> 50M users in 30 minutes = 50M ÷ 1,800 s ≈ 28k a second for half an hour, on top of everything else.</li>
+    <li><strong>Storage:</strong> device tokens 300M × 1.5 × ~250 B ≈ 110 GB; preferences 300M × ~200 B ≈ 60 GB. Both fit in a cached key-value store. The delivery log is 2B × ~500 B ≈ 1 TB a day; 30 days hot is ~30 TB before replication.</li>
+  </ul>
+</section>
+
+<section id="api">
+  <h2>API</h2>
+  <ul class="tags"><li>Interface</li></ul>
+<pre><code>POST /v1/notifications            Idempotency-Key: order-981-delivered
+  { user_id, type: "order_delivered", priority: "critical|high|normal|bulk",
+    data: { order_id: 981, eta: "now" }, channels?: ["push","inapp"],
+    expires_at: "+30m" }
+→ 202 { notification_id }
+
+POST /v1/campaigns
+  { segment_id, template_id, send_at, max_rate_per_s: 20000,
+    respect_quiet_hours: true }
+→ 202 { campaign_id }
+
+PUT  /v1/users/{id}/preferences
+  { categories: { marketing: { push: false, email: true } },
+    quiet_hours: { start: "22:00", end: "08:00", tz: "Asia/Kolkata" } }
+
+POST /v1/devices    { user_id, platform: "ios|android|web", token }
+GET  /v1/notifications/{id}   → { status, attempts: [...] }
+
+POST /hooks/{provider}/receipts   (delivery reports from providers)</code></pre>
+  <p>Callers send an event type and data, not finished text. That way the platform owns templates, language, channel choice and user rules, and a team can't bypass someone's opt-out by accident. The call returns 202 straight away: sending is always asynchronous.</p>
+</section>
+
+<section id="architecture">
+  <h2>Architecture</h2>
+  <ul class="tags"><li>Whole system</li></ul>
+  <figure class="fig"><svg viewBox="0 0 722 330" class="dg" role="img" aria-label="Architecture: callers such as the order service, auth service and campaign tool call the notification API. A planner checks preferences, quiet hours, dedupe and rate limits, and renders templates. Messages go to Kafka topics by priority: critical, normal and bulk. Push, SMS, email and in-app workers read them and send through a provider router with circuit breakers to APNs and FCM, two SMS providers and two email providers. Provider receipts come back by webhook into the delivery log.">
+    <text x="10" y="22" class="cap">CALLERS</text>
+    <rect x="10" y="34" width="112" height="40" rx="8" class="k-user"/><text x="66" y="52" class="small b" text-anchor="middle">Order · auth</text><text x="66" y="67" class="sm" text-anchor="middle">fraud · campaigns</text>
+    <path d="M122 54 L150 54" class="wire" marker-end="url(#ah)"/>
+    <rect x="152" y="34" width="128" height="40" rx="8" class="k-gov"/><text x="216" y="52" class="small b" text-anchor="middle">Notification API</text><text x="216" y="67" class="sm" text-anchor="middle">auth · idempotency</text>
+    <path d="M280 54 L308 54" class="wire" marker-end="url(#ah)"/>
+    <rect x="310" y="34" width="150" height="40" rx="8" class="k-ingest"/><text x="385" y="52" class="small b" text-anchor="middle">Planner</text><text x="385" y="67" class="sm" text-anchor="middle">prefs · quiet hours · render</text>
+    <path d="M460 54 L488 54" class="wire" marker-end="url(#ah)"/>
+    <rect x="490" y="34" width="110" height="40" rx="18" class="k-kb"/><text x="545" y="52" class="small b" text-anchor="middle">Prefs · tokens</text><text x="545" y="67" class="sm" text-anchor="middle">KV + cache</text>
+    <rect x="612" y="34" width="100" height="40" rx="18" class="k-kb"/><text x="662" y="52" class="small b" text-anchor="middle">Dedupe</text><text x="662" y="67" class="sm" text-anchor="middle">Redis NX</text>
+    <path d="M600 54 L610 54" class="wire dash"/>
+    <path d="M385 74 L385 112" class="wire hot" marker-end="url(#ah)"/>
+    <text x="10" y="108" class="cap">PRIORITY QUEUES</text>
+    <rect x="152" y="114" width="128" height="34" rx="8" class="k-cross"/><text x="216" y="136" class="small b" text-anchor="middle">critical</text>
+    <rect x="290" y="114" width="190" height="34" rx="8" class="k-cross"/><text x="385" y="136" class="small b" text-anchor="middle">high · normal</text>
+    <rect x="490" y="114" width="110" height="34" rx="8" class="k-cross"/><text x="545" y="136" class="small b" text-anchor="middle">bulk (paced)</text>
+    <rect x="612" y="114" width="100" height="34" rx="8" class="k-cross"/><text x="662" y="130" class="small b" text-anchor="middle">Scheduled</text><text x="662" y="143" class="sm" text-anchor="middle">quiet hours</text>
+    <path d="M385 148 L385 186" class="wire" marker-end="url(#ah)"/>
+    <text x="10" y="182" class="cap">CHANNEL WORKERS</text>
+    <rect x="152" y="188" width="128" height="34" rx="8" class="k-ingest"/><text x="216" y="210" class="small b" text-anchor="middle">Push</text>
+    <rect x="290" y="188" width="90" height="34" rx="8" class="k-ingest"/><text x="335" y="210" class="small b" text-anchor="middle">SMS</text>
+    <rect x="390" y="188" width="90" height="34" rx="8" class="k-ingest"/><text x="435" y="210" class="small b" text-anchor="middle">Email</text>
+    <rect x="490" y="188" width="110" height="34" rx="8" class="k-ingest"/><text x="545" y="210" class="small b" text-anchor="middle">In-app inbox</text>
+    <rect x="612" y="188" width="100" height="34" rx="8" class="k-gov"/><text x="662" y="204" class="small b" text-anchor="middle">Router</text><text x="662" y="217" class="sm" text-anchor="middle">breakers · limits</text>
+    <path d="M600 205 L610 205" class="wire dash"/>
+    <path d="M385 222 L385 254" class="wire" marker-end="url(#ah)"/>
+    <text x="10" y="250" class="cap">PROVIDERS</text>
+    <rect x="152" y="256" width="128" height="34" rx="8" class="k-serve"/><text x="216" y="278" class="small b" text-anchor="middle">APNs · FCM</text>
+    <rect x="290" y="256" width="90" height="34" rx="8" class="k-serve"/><text x="335" y="278" class="small b" text-anchor="middle">SMS A · B</text>
+    <rect x="390" y="256" width="90" height="34" rx="8" class="k-serve"/><text x="435" y="278" class="small b" text-anchor="middle">Email A · B</text>
+    <rect x="490" y="256" width="110" height="34" rx="18" class="k-kb"/><text x="545" y="272" class="small b" text-anchor="middle">Delivery log</text><text x="545" y="285" class="sm" text-anchor="middle">Cassandra</text>
+    <path d="M480 273 L488 273" class="wire dash" marker-end="url(#ah)"/><text x="10" y="278" class="sm">receipts by</text><text x="10" y="292" class="sm">webhook → log</text>
+    <text x="10" y="320" class="sm">Every arrow after the planner is a queue or a retry loop, so a slow provider backs up one lane and nothing else.</text>
+  </svg><figcaption>The planner turns one event into zero or more channel messages. Each priority has its own topic and worker pool, and the router applies provider limits and circuit breakers.</figcaption></figure>
+  <ol class="plain">
+    <li><strong>API:</strong> checks the caller is allowed to send this type, stores the idempotency key, writes the request to Kafka and returns 202.</li>
+    <li><strong>Planner:</strong> loads the user's preferences and devices (cached), drops channels they opted out of, moves non-urgent messages out of quiet hours, checks frequency caps and dedupe, renders the template, and emits one message per channel.</li>
+    <li><strong>Queues:</strong> one Kafka topic per priority, plus a scheduled store for messages that wait until morning.</li>
+    <li><strong>Workers:</strong> one pool per channel. They batch where the provider allows it, apply per-provider rate limits and retry with backoff.</li>
+    <li><strong>Receipts:</strong> providers call back with "delivered", "bounced" or "invalid token". A receipts service maps the provider's message id to ours and updates the log.</li>
+  </ol>
+</section>
+
+<section id="channels">
+  <h2>Channels and providers</h2>
+  <ul class="tags"><li>Deep dive 1</li><li><a href="protocols.html#push">Polling vs push</a></li></ul>
+  <p class="lead">You don't deliver to phones yourself. You hand each message to the one company that can reach that device or inbox, and each has its own rules.</p>
+  <div class="table"><table>
+    <thead><tr><th>Channel</th><th>Who delivers it</th><th>What you must handle</th></tr></thead>
+    <tbody>
+      <tr><td>Push</td><td>APNs for Apple devices, FCM for Android and web</td><td>Device tokens that change and expire; small payloads (about 4 KB); remove a token when the provider says it is no longer registered; collapse keys so ten updates show as one</td></tr>
+      <tr><td>SMS</td><td>Aggregators that connect to mobile carriers</td><td>Cost per message; sender ids and registered templates (India's DLT rules, US 10DLC); 160-character segments; delivery reports that arrive minutes later</td></tr>
+      <tr><td>Email</td><td>An email service (SES, SendGrid and others) or your own mail servers</td><td>SPF, DKIM and DMARC so mail isn't marked spam; warming up new IPs slowly; bounces and complaints; one-click unsubscribe headers</td></tr>
+      <tr><td>In-app</td><td>You: an inbox table plus a live push if the app is open</td><td>Read and unread state; it is the only channel you fully control, so it is also the fallback record of everything sent</td></tr>
+    </tbody>
+  </table></div>
+  <p>Push is free and fast, so it is the default. SMS is reserved for codes and critical alerts, where it is the most reliable way to reach someone without the app. Email suits receipts and long content.</p>
+  <div class="note"><p>Push has no second provider. APNs is the only way to reach an iPhone. If APNs is slow, the only options are to wait or to fall back to a different channel for messages that really matter.</p></div>
+</section>
+
+<section id="preferences">
+  <h2>Preferences, quiet hours and templates</h2>
+  <ul class="tags"><li>Deep dive 2</li><li><a href="caching.html">Caching</a></li></ul>
+  <p class="lead">Every send passes the same checks, in the same order. Getting this wrong is how companies end up texting people at 3 am.</p>
+  <ol class="plain">
+    <li><strong>Must-send types skip the opt-outs.</strong> Login codes, security alerts and legal notices go out whatever the user chose for marketing. Mark these types in the type registry, not in the caller's request.</li>
+    <li><strong>Category and channel opt-outs.</strong> Preferences are a small document per user: <code>{marketing: {push: off, email: on}, order_updates: {push: on}}</code>. They are read on every send, so they sit in a key-value store with a cache in front. If the preference lookup fails, marketing is dropped, not sent.</li>
+    <li><strong>Quiet hours in the user's time zone.</strong> A non-urgent message that lands at 23:10 for a user with 22:00–08:00 quiet hours goes into a scheduled store, keyed by send time, and a scheduler moves it back into the queue at 08:00 their time. Campaigns respect time zones the same way: "9 am local" is really 24 separate sends.</li>
+    <li><strong>Frequency caps.</strong> At most, say, 3 marketing pushes a day per user. A counter per user per day in Redis, incremented when a message is sent.</li>
+    <li><strong>Expiry.</strong> "Your driver is 2 minutes away" is useless after 10 minutes, and a login code after 5. Each message carries <code>expires_at</code>, and workers drop it instead of sending late.</li>
+  </ol>
+  <h3>Templates</h3>
+  <p>Templates live in a versioned store: one template per type, per channel, per language. <code>order_delivered.push.hi-IN v4</code> might be "आपका ऑर्डर पहुँच गया". The planner renders it with the event's data at send time, so fixing a typo needs no change in any calling service. SMS templates often must be registered with carriers first, so a new SMS template is a release, not a quick edit.</p>
+</section>
+
+<section id="priority">
+  <h2>Priority queues</h2>
+  <ul class="tags"><li>Deep dive 3</li><li><a href="queues.html">Message queues</a></li></ul>
+  <p class="lead">If a 50-million-user campaign and a login code share one queue, the login code waits behind 50 million messages. Separate lanes fix that.</p>
+  <div class="table"><table>
+    <thead><tr><th>Lane</th><th>Examples</th><th>Rules</th></tr></thead>
+    <tbody>
+      <tr><td>Critical</td><td>Login codes, fraud alerts, password resets</td><td>Own topic and workers; a share of every provider's limit reserved for it; expire in minutes</td></tr>
+      <tr><td>High / normal</td><td>Order and delivery updates, replies, reminders</td><td>Normal workers; seconds of delay is fine</td></tr>
+      <tr><td>Bulk</td><td>Campaigns, digests, newsletters</td><td>Paced by a campaign rate limit; uses whatever capacity is left; paused first when providers struggle</td></tr>
+    </tbody>
+  </table></div>
+  <p>Strict priority (always drain critical first) can starve bulk forever on a busy day. Use separate consumer pools with fixed shares instead, and let bulk borrow idle critical capacity but never the other way round.</p>
+  <p>A campaign doesn't put 50M messages on Kafka at once. A campaign runner pages through the segment and writes, say, 20k messages a second, so a cancel button can stop it within seconds and nothing goes out to users who opted out in the meantime.</p>
+</section>
+
+<section id="dedupe">
+  <h2>Dedupe and rate limits</h2>
+  <ul class="tags"><li>Deep dive 4</li><li><a href="rate-limiting.html">Rate limiting</a></li><li><a href="rate-limiter.html">Distributed rate limiter</a></li></ul>
+  <p class="lead">Queues and retries deliver at least once. The user should still see each notification once.</p>
+  <ul class="plain">
+    <li><strong>Idempotency at the API:</strong> the caller's <code>Idempotency-Key</code> is stored for 24 hours. A retried call returns the same <code>notification_id</code> and sends nothing new.</li>
+    <li><strong>Dedupe before sending:</strong> a worker runs <code>SET sent:{notification_id}:{channel} 1 NX EX 86400</code> in Redis before calling the provider. If the key already exists, another worker (or an earlier attempt) already sent it.</li>
+    <li><strong>Collapse similar messages:</strong> five "new comment" events in a minute become one "5 new comments" push. Push providers also support a collapse key, so a newer message replaces an older one still waiting on the device.</li>
+  </ul>
+  <p>Rate limits work at three levels:</p>
+  <div class="table"><table>
+    <thead><tr><th>Limit</th><th>Protects</th><th>How</th></tr></thead>
+    <tbody>
+      <tr><td>Per caller</td><td>Everyone else, from one buggy service sending in a loop</td><td>Token bucket per calling service and type at the API</td></tr>
+      <tr><td>Per user</td><td>The user's patience</td><td>Frequency caps per category per day</td></tr>
+      <tr><td>Per provider</td><td>The provider contract; going over gets you throttled or blocked</td><td>Shared token bucket in Redis per provider account, split across workers</td></tr>
+    </tbody>
+  </table></div>
+</section>
+
+<section id="lab">
+  <h2>Try it: send a campaign</h2>
+  <ul class="tags"><li>Lab</li></ul>
+  <p>Send one campaign through a channel's providers. Each provider has a send limit. Part of that limit is held back for login codes and alerts. Five minutes in, the primary provider can go down. See how long the campaign takes, and what failing over to the backup changes.</p>
+  <div class="lab" id="nflab">
+    <div class="lab-row"><span class="lab-k">Channel</span><span class="seg" role="group" aria-label="Channel" id="nf-ch"><button type="button" data-v="push" aria-pressed="false">Push</button><button type="button" data-v="sms" aria-pressed="true">SMS</button><button type="button" data-v="email" aria-pressed="false">Email</button></span></div>
+    <div class="lab-row"><label for="nf-n">Audience <input type="range" id="nf-n" min="0" max="4" step="1" value="1"><output id="nf-n-o"></output></label><label for="nf-r">Held back for codes <input type="range" id="nf-r" min="0" max="50" step="10" value="20"><output id="nf-r-o"></output></label></div>
+    <div class="lab-row"><span class="lab-k">Primary outage</span><span class="seg" role="group" aria-label="Primary outage" id="nf-o"><button type="button" data-v="0" aria-pressed="false">None</button><button type="button" data-v="15" aria-pressed="true">15 min</button><button type="button" data-v="60" aria-pressed="false">60 min</button></span><label for="nf-f"><input type="checkbox" id="nf-f" checked> Fail over to backup</label></div>
+    <div class="metrics" id="nf-m"></div>
+    <svg class="lab-chart" id="nf-chart" viewBox="0 0 600 170" role="img" aria-label="Share of the campaign sent over time"></svg>
+    <p class="lab-out" id="nf-out" aria-live="polite"></p>
+  </div>
+  <p class="muted" style="font-size:13.5px">Illustrative limits: SMS primary 2,000/s and backup 800/s; email primary 5,000/s and backup 2,000/s; push 40,000/s through APNs and FCM with no backup. The outage starts at minute 5. Real limits are set in each provider contract.</p>
+</section>
+
+<section id="failover">
+  <h2>Retries and provider failover</h2>
+  <ul class="tags"><li>Deep dive 5</li><li><a href="observability.html">Observability</a></li><li><a href="payments.html">Payments: the unknown state</a></li></ul>
+  <p class="lead">Providers fail all the time, in small ways and big ones. The worker's job is to tell a temporary failure from a permanent one, and to stop hammering a provider that is down.</p>
+  <figure class="fig3d" id="failover3d">
+    <div class="stage3d" role="img" aria-label="The auth service sends a login code to Priya on the critical lane. The SMS worker checks the dedupe key and sends it to provider A through the router. Provider A times out. The message goes to a retry queue with backoff, keeping the same key. More timeouts trip the circuit breaker, and A is marked down. The retry goes to provider B, which delivers the code to Priya's phone. Later the breaker sends one trial request to A; it succeeds, and traffic moves back slowly. A late receipt from A shows the first attempt was delivered too, so Priya got the code twice."><p class="hint3">3D · drag to turn</p><button class="reset3 ghost" type="button" hidden>Reset view</button><p class="nogl">The 3D view needs WebGL and a connection.</p></div>
+    <div class="ctl3"><button class="pp" type="button">Pause</button><span class="k">Step</span><div class="steps3"></div><span class="meta3"></span></div>
+    <div class="track3"><div class="fill3"></div></div>
+    <p class="out3" aria-live="polite"></p>
+    <figcaption>Illustrative. A timeout doesn't mean the message wasn't sent, so failover can cause a duplicate. For a login code that is fine; for a payment alert, say so in the text ("ignore if already received").</figcaption>
+  </figure>
+  <div class="table"><table>
+    <thead><tr><th>Response</th><th>Meaning</th><th>Action</th></tr></thead>
+    <tbody>
+      <tr><td>Timeout, 5xx</td><td>Temporary, and the message may or may not have gone out</td><td>Retry with exponential backoff and jitter (1 s, 2 s, 4 s…), keep the same idempotency key</td></tr>
+      <tr><td>429, throttled</td><td>You went over the limit</td><td>Slow the shared token bucket for that provider, then retry</td></tr>
+      <tr><td>Invalid number, unregistered token, hard bounce</td><td>Permanent</td><td>Don't retry. Delete the token or mark the address bad so you stop paying for it</td></tr>
+      <tr><td>Too many failures in a row</td><td>The provider is down</td><td>Circuit breaker opens: stop sending to it, fail over, and test it with one request every 30 s (half-open)</td></tr>
+    </tbody>
+  </table></div>
+  <ul class="plain">
+    <li><strong>Retry budget:</strong> at most, say, 5 attempts or until <code>expires_at</code>. Then the message goes to a dead-letter queue with its last error, so someone can look at it and nothing disappears silently.</li>
+    <li><strong>Failover by channel:</strong> SMS and email have backup providers (usually pricier or slower, so they are not used all the time). Push can't fail over to another provider. For critical messages the fallback is another channel: if the app hasn't confirmed a security alert within a minute, send an SMS.</li>
+    <li><strong>Move back slowly:</strong> when the primary recovers, shift traffic back in steps (10%, 50%, 100%) so you don't knock it over again.</li>
+  </ul>
+</section>
+
+<section id="tracking">
+  <h2>Delivery tracking</h2>
+  <ul class="tags"><li>Deep dive 6</li><li><a href="queues.html">Event streams</a></li></ul>
+  <p class="lead">"Did the user get it?" is the first question support will ask. Each message has a status, and every attempt is logged.</p>
+  <pre><code>ACCEPTED → SUPPRESSED (opted out, capped, duplicate)
+         → SCHEDULED (quiet hours) → QUEUED → SENT (provider accepted)
+         → DELIVERED (receipt) → OPENED / CLICKED
+         ↘ FAILED (permanent) · EXPIRED (too late) · DEAD_LETTERED</code></pre>
+  <ul class="plain">
+    <li><strong>Provider receipts are asynchronous.</strong> SMS delivery reports and email bounces arrive by webhook seconds to hours later. Store the provider's message id with each attempt so a receipt can find its notification.</li>
+    <li><strong>Push confirms less than you'd hope.</strong> APNs and FCM confirm they accepted the message, not that the phone showed it. For a true "received", the app reports it back when the notification arrives, and again when it is opened.</li>
+    <li><strong>Email opens are fuzzy.</strong> Open tracking uses a tiny image, and some mail apps load every image in advance. Trust clicks and bounces more than opens.</li>
+    <li><strong>Events, not just rows:</strong> every status change is also an event on Kafka, feeding campaign dashboards, A/B results and the feedback loop that removes bad tokens and addresses.</li>
+  </ul>
+</section>
+
+<section id="storage">
+  <h2>Storage</h2>
+  <ul class="tags"><li><a href="databases.html">Databases</a></li><li><a href="sharding.html">Sharding</a></li></ul>
+  <div class="table"><table>
+    <thead><tr><th>Data</th><th>Store</th><th>Why</th></tr></thead>
+    <tbody>
+      <tr><td>Preferences, quiet hours</td><td>Key-value store (DynamoDB, Cassandra) by <code>user_id</code>, with a cache</td><td>Read on every send, ~60 GB, simple lookups</td></tr>
+      <tr><td>Device tokens</td><td>Same, by <code>user_id</code>, with a reverse index by token</td><td>~110 GB; receipts that say "unregistered" need to find the row</td></tr>
+      <tr><td>Templates, types, caller permissions</td><td>Postgres, cached in every planner</td><td>Small, relational, changed by people</td></tr>
+      <tr><td>Messages waiting for quiet hours</td><td>Scheduled store: rows by (send minute, shard)</td><td>A scheduler reads each minute's bucket and puts them back on the queue</td></tr>
+      <tr><td>Dedupe keys, caps, provider token buckets</td><td>Redis with TTLs</td><td>Atomic, short-lived, fast</td></tr>
+      <tr><td>Delivery log</td><td>Cassandra by <code>notification_id</code>, plus a table by (<code>user_id</code>, day); 30-day TTL</td><td>~1 TB a day of writes; "what did we send this user?"</td></tr>
+      <tr><td>In-app inbox</td><td>Wide-column table by <code>user_id</code>, newest first</td><td>Paging and unread counts per user</td></tr>
+    </tbody>
+  </table></div>
+</section>
+
+<section id="observability">
+  <h2>Observability</h2>
+  <ul class="tags"><li>Production</li><li><a href="observability.html">Monitoring and tracing</a></li></ul>
+  <div class="table"><table>
+    <thead><tr><th>Signal</th><th>Why</th><th>Alert when</th></tr></thead>
+    <tbody>
+      <tr><td>Queue lag per lane</td><td>Critical must never wait</td><td>Critical lag over 2 s</td></tr>
+      <tr><td>Provider error rate, latency and breaker state</td><td>First sign of an outage</td><td>A breaker opens, or errors over 5% for a minute</td></tr>
+      <tr><td>Delivered share per channel and provider</td><td>Silent failures (accepted but never delivered)</td><td>Drops below its usual level</td></tr>
+      <tr><td>Suppressed share by reason</td><td>A preference bug can silence everyone, or spam everyone</td><td>Sudden change in either direction</td></tr>
+      <tr><td>Dead-letter count; invalid token rate</td><td>Bad data or a broken template</td><td>Any spike after a deploy</td></tr>
+      <tr><td>SMS spend per hour</td><td>A loop sending SMS costs real money fast</td><td>Over 2× the usual hour</td></tr>
+    </tbody>
+  </table></div>
+</section>
+
+<section id="risks">
+  <h2>Risks and v2</h2>
+  <ul class="tags"><li>Wrap-up</li></ul>
+  <div class="table"><table>
+    <thead><tr><th>Risk</th><th>How you detect it</th><th>Mitigation</th></tr></thead>
+    <tbody>
+      <tr><td>A campaign delays login codes</td><td>Critical queue lag</td><td>Separate lanes and reserved provider quota</td></tr>
+      <tr><td>Duplicate notifications</td><td>Duplicate rate from app reports</td><td>Idempotency keys, Redis dedupe, collapse keys</td></tr>
+      <tr><td>Marketing sent to someone who opted out</td><td>Complaints, audit of suppressed share</td><td>Preference check fails closed; recheck right before a campaign message is sent</td></tr>
+      <tr><td>A bug sends in a loop</td><td>Per-caller rate, SMS spend alert</td><td>Per-caller token buckets, kill switch per type</td></tr>
+      <tr><td>Provider outage</td><td>Breaker opens, delivered share drops</td><td>Backup providers, channel fallback for critical types</td></tr>
+      <tr><td>Email marked as spam</td><td>Complaint and bounce rates</td><td>Authentication, warm IPs, easy unsubscribe, list cleaning</td></tr>
+    </tbody>
+  </table></div>
+  <p><strong>v2 ideas:</strong> pick the best time to send for each user from when they usually open, pick the channel each user responds to, a digest that batches low-priority updates into one daily message, and least-cost routing across SMS providers by country.</p>
+</section>
+
+<section id="presenting">
+  <h2>Presenting it in 45 minutes</h2>
+  <ul class="tags"><li>Interview script</li></ul>
+  <div class="table"><table>
+    <thead><tr><th>Step</th><th>Time</th><th>What to cover</th></tr></thead>
+    <tbody>
+      <tr><td>1. Clarify</td><td class="num">5 min</td><td>Channels, transactional vs marketing, scale, user controls</td></tr>
+      <tr><td>2. Estimate</td><td class="num">3 min</td><td>23k/s average, ~100k/s peak, 28k/s per big campaign, 1 TB of logs a day</td></tr>
+      <tr><td>3. API</td><td class="num">3 min</td><td>Send event (async, idempotent), campaigns, preferences, devices</td></tr>
+      <tr><td>4. Draw the whole system</td><td class="num">8 min</td><td>API, planner, priority topics, channel workers, router, providers, receipts</td></tr>
+      <tr><td>5. Deep dive: lanes and limits</td><td class="num">10 min</td><td>Why priorities need separate pools, reserved quota, campaign pacing, provider token buckets</td></tr>
+      <tr><td>6. Deep dive: reliability</td><td class="num">11 min</td><td>Retry vs permanent errors, circuit breakers, failover, dedupe, the timeout duplicate</td></tr>
+      <tr><td>7. Tracking and risks</td><td class="num">5 min</td><td>Status machine, receipts, opt-out mistakes, spend alerts</td></tr>
+    </tbody>
+  </table></div>
+  <div class="say"><p>"Services send an event type and data to one API, which returns 202 and records the idempotency key. A planner checks the user's preferences, quiet hours and caps, renders the template, and writes one message per channel onto a Kafka topic for its priority. Critical messages like login codes have their own topic, workers and a reserved share of each provider's limit, so a 50-million-user campaign can't delay them. Channel workers send through a router with per-provider token buckets and circuit breakers; temporary errors retry with backoff, permanent ones clean up the token or address, and SMS and email fail over to a backup provider. Receipts come back by webhook into a Cassandra log, so we can answer 'did they get it?' for every message."</p></div>
+</section>
+
+<section id="numbers">
+  <h2>Numbers to remember</h2>
+  <ul class="tags"><li>Cheat sheet</li></ul>
+  <div class="table"><table><tbody>
+    <tr><td>2B notifications a day</td><td class="num">≈ 23k a second</td></tr>
+    <tr><td>50M-user campaign in 30 minutes</td><td class="num">≈ 28k a second</td></tr>
+    <tr><td>Push payload limit (APNs, FCM)</td><td class="num">about 4 KB</td></tr>
+    <tr><td>One SMS segment</td><td class="num">160 characters (70 with non-Latin text)</td></tr>
+    <tr><td>Login code delivery target</td><td class="num">seconds; expire after ~5 minutes</td></tr>
+    <tr><td>Dedupe key lifetime</td><td class="num">~24 hours</td></tr>
+    <tr><td>Retry backoff</td><td class="num">1, 2, 4, 8 s… with jitter, ~5 attempts</td></tr>
+  </tbody></table></div>
+</section>
+
+<section id="related">
+  <h2>Related</h2>
+  <ul class="related"><li><a href="queues.html">Message queues and streams</a></li><li><a href="rate-limiting.html">Rate limiting</a></li><li><a href="rate-limiter.html">Distributed rate limiter</a></li><li><a href="chat.html">Chat service</a></li><li><a href="caching.html">Caching</a></li><li><a href="observability.html">Monitoring, logging and tracing</a></li><li><a href="payments.html">Payments</a></li></ul>
+</section>
+  </article>
+</div>
+</main>
+
+<footer class="site"><div class="wrap">Part of Classic System Design, a companion to the <a href="https://devlcodes.github.io/agentic-ai-notebook/system-design/index.html">agentic system designs</a>. The 3D views use Three.js loaded from a CDN, so they need a connection; the text and tables cover the same ground. Figures marked illustrative show the shape of a system, not measured numbers. Check vendor docs before relying on a specific product limit.</div></footer>
+<script>
+(function(){
+  var $ = function(id){ return document.getElementById(id); };
+  var NS = [1e6, 5e6, 10e6, 25e6, 50e6];
+  var CH = {
+    sms: { name: 'SMS', p: 2000, b: 800 },
+    email: { name: 'Email', p: 5000, b: 2000 },
+    push: { name: 'Push', p: 40000, b: 0 }
+  };
+  var ch = 'sms', OUT = 15, START = 5;
+  function fmt(n){ if (n >= 1e6) return +(n/1e6).toFixed(1) + 'M'; if (n >= 1e3) return +(n/1e3).toFixed(n < 1e4 ? 1 : 0) + 'k'; return String(Math.round(n)); }
+  function dur(m){ if (m < 1) return Math.round(m * 60) + ' s'; if (m < 120) return +m.toFixed(m < 10 ? 1 : 0) + ' min'; return +(m/60).toFixed(1) + ' h'; }
+  function sim(N, res, out, fo){
+    var c = CH[ch], rp = c.p * (1 - res) * 60, rb = c.b * (1 - res) * 60;
+    var sent = 0, onB = 0, stalled = 0, t = 0, pts = [[0, 0]], dt = 0.25;
+    while (sent < N && t < 6000) {
+      var down = out > 0 && t >= START && t < START + out;
+      var rate = down ? (fo ? rb : 0) : rp;
+      if (down && rate === 0) stalled += dt;
+      var add = Math.min(rate * dt, N - sent);
+      if (down) onB += add;
+      if (rate > 0 && add < rate * dt) { t += add / rate; sent = N; pts.push([t, 1]); break; }
+      sent += add; t += dt; pts.push([t, sent / N]);
+    }
+    return { t: t, onB: onB, stalled: stalled, pts: pts, base: N / rp };
+  }
+  function chart(r, out){
+    var W = 600, H = 170, L = 40, R = 10, T = 10, B = 26, tmax = Math.max(r.t, 1) * 1.05;
+    var x = function(t){ return L + (W - L - R) * t / tmax; }, y = function(f){ return T + (H - T - B) * (1 - f); };
+    var s = '';
+    if (out > 0 && START < tmax) s += '<rect x="' + x(START).toFixed(1) + '" y="' + T + '" width="' + (x(Math.min(START + out, tmax)) - x(START)).toFixed(1) + '" height="' + (H - T - B) + '" fill="#f6dddb"/><text x="' + (x(START) + 4).toFixed(1) + '" y="' + (T + 14) + '" style="fill:#b23a3a">primary down</text>';
+    [0, 0.5, 1].forEach(function(f){ s += '<line x1="' + L + '" x2="' + (W - R) + '" y1="' + y(f) + '" y2="' + y(f) + '" stroke="#cdd4dc"/><text x="' + (L - 6) + '" y="' + (y(f) + 4) + '" text-anchor="end">' + (f * 100) + '%</text>'; });
+    var step = Math.max(1, Math.ceil(r.pts.length / 300)), d = '';
+    for (var i = 0; i < r.pts.length; i += step) d += (i ? 'L' : 'M') + x(r.pts[i][0]).toFixed(1) + ' ' + y(r.pts[i][1]).toFixed(1);
+    var last = r.pts[r.pts.length - 1]; d += 'L' + x(last[0]).toFixed(1) + ' ' + y(last[1]).toFixed(1);
+    s += '<path d="' + d + '" fill="none" stroke="#4255d4" stroke-width="2"/>';
+    s += '<text x="' + L + '" y="' + (H - 6) + '">0</text><text x="' + (W - R) + '" y="' + (H - 6) + '" text-anchor="end">' + dur(tmax) + '</text><text x="' + ((L + W - R) / 2) + '" y="' + (H - 6) + '" text-anchor="middle">time since the campaign started</text>';
+    $('nf-chart').innerHTML = s;
+  }
+  function run(){
+    var N = NS[+$('nf-n').value], res = +$('nf-r').value / 100, fo = $('nf-f').checked, c = CH[ch];
+    $('nf-n-o').textContent = fmt(N) + ' users'; $('nf-r-o').textContent = Math.round(res * 100) + '%';
+    $('nf-f').disabled = c.b === 0;
+    var r = sim(N, res, OUT, fo && c.b > 0), delay = r.t - r.base;
+    var codes = c.p * res;
+    $('nf-m').innerHTML = '<div class="metric"><span class="n">' + dur(r.t) + '</span><span class="l">to finish</span><small>' + dur(r.base) + ' with no outage</small></div>' +
+      '<div class="metric"><span class="n">' + fmt(c.p * (1 - res)) + '/s</span><span class="l">campaign rate</span><small>primary limit minus what is held back</small></div>' +
+      '<div class="metric"><span class="n">' + fmt(codes) + '/s</span><span class="l">kept for codes</span><small>login codes never wait behind the campaign</small></div>' +
+      '<div class="metric"><span class="n"' + (r.stalled > 0 ? ' style="color:var(--c-dlq)"' : '') + '>' + (r.stalled > 0 ? dur(r.stalled) : fmt(r.onB)) + '</span><span class="l">' + (r.stalled > 0 ? 'fully stalled' : 'sent on backup') + '</span></div>';
+    chart(r, r.t > START ? OUT : 0);
+    var msg;
+    if (OUT === 0 || r.t <= START) msg = 'No outage hits this campaign. ' + fmt(N) + ' ' + c.name + ' messages at ' + fmt(c.p * (1 - res)) + '/s take ' + dur(r.t) + '. The limit you agreed with the provider sets the pace, not your servers.';
+    else if (c.b === 0) msg = 'Push has no backup provider: while APNs or FCM is down, the campaign stalls for ' + dur(r.stalled) + ' and finishes ' + dur(delay) + ' late. That is fine for marketing. For a security alert, fall back to SMS instead of waiting.';
+    else if (!fo) msg = 'With no failover, nothing goes out for ' + dur(r.stalled) + '. Messages pile up in the queue and retries back off, so the campaign finishes ' + dur(delay) + ' late. Worse, login codes on this channel stop too.';
+    else msg = 'The breaker opens and traffic moves to the backup, which is slower: ' + fmt(r.onB) + ' messages go through it during the outage, and the campaign finishes only ' + dur(delay) + ' late. The backup usually costs more per message, so move back once the primary recovers.';
+    if (res === 0) msg += ' Nothing is held back, so a login code sent now waits behind the campaign.';
+    $('nf-out').textContent = msg;
+  }
+  function seg(id, fn){ $(id).addEventListener('click', function(e){ var b = e.target.closest('button'); if (!b) return; fn(b.dataset.v); this.querySelectorAll('button').forEach(function(x){ x.setAttribute('aria-pressed', x === b); }); run(); }); }
+  seg('nf-ch', function(v){ ch = v; });
+  seg('nf-o', function(v){ OUT = +v; });
+  ['nf-n', 'nf-r'].forEach(function(id){ $(id).addEventListener('input', run); });
+  $('nf-f').addEventListener('change', run);
+  run();
+})();
+</script>
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+  }
+}
+</script>
+<script type="module">
+import { boot } from './assets/scene3d.js';
+const D = {};
+D.hero = {
+  hero: true,
+  loop: 16,
+  view: { target: [0, 0, 0], w: 31, d: 18, el: 52 },
+  steps: [
+    { t: 0.0, text: 'The order service calls the notification API: "order 981 delivered" for Priya, with an idempotency key.' },
+    { t: 1.8, text: 'The planner reads her preferences and quiet hours: order updates on, push allowed, it is 7 pm. It renders the template in Hindi.' },
+    { t: 4.0, text: 'The message goes onto the high-priority Kafka topic. A campaign is going out on the bulk topic, but it has its own lane.' },
+    { t: 6.4, text: 'A push worker hands it to APNs or FCM, within that provider\'s rate limit.' },
+    { t: 8.4, text: 'Priya\'s phone shows it. The app reports "received" and later "opened", and both land in the delivery log.' },
+  ],
+  build(c) {
+    const { V, C, P } = c;
+    const ord = c.obj(c.SHAPES.server({ emi: C.cross }), -13, 0, 'Order service');
+    const api = c.obj(c.SHAPES.signpost(C.gov), -8, 0, 'Notification API', 'idempotency');
+    const prefs = c.obj(c.SHAPES.database(C.kb, { r: 0.9 }), -8, -5.5, 'Preferences', 'quiet hours · caps');
+    const tpl = c.obj('sheet', -8, 5, 'Templates', 'per language');
+    const kf = c.obj(c.SHAPES.topic({ parts: 3, len: 3, color: C.cross }), -2.5, 0, 'Kafka', 'critical · high · bulk');
+    const pw = c.obj(c.SHAPES.server({ emi: C.ingest }), 3, -4, 'Push workers');
+    const sw = c.obj(c.SHAPES.server({ emi: C.ingest }), 3, 0, 'SMS workers');
+    const ew = c.obj(c.SHAPES.server({ emi: C.ingest }), 3, 4, 'Email workers');
+    const apns = c.obj(c.SHAPES.signpost(C.serve), 8, -4, 'APNs · FCM');
+    c.obj(c.SHAPES.signpost(C.serve), 8, 0, 'SMS provider');
+    c.obj(c.SHAPES.signpost(C.serve), 8, 4, 'Email provider');
+    const phone = c.obj('person', 12.5, -4, 'Priya');
+    const log = c.obj(c.SHAPES.database(C.kb, { r: 1.0, tiers: 2 }), 3, -8, 'Delivery log');
+    c.lane([V(-13, 0), V(-2.5, 0)]);
+    c.lane([V(-8, -5.5), V(-8, 5)]);
+    c.lane([V(-2.5, 0), V(0, 0), V(0, -4), V(12.5, -4)]);
+    c.lane([V(0, 0), V(8, 0)]);
+    c.lane([V(0, 0), V(0, 4), V(8, 4)]);
+    c.lane([V(12.5, -4), V(12.5, -8), V(3, -8)]);
+    c.packet({ pts: [V(-13, 0), V(-8, 0)], t0: 0.2, t1: 1.2, kind: 'env', from: ord, to: api, label: 'order_delivered' });
+    c.packet({ pts: [V(-8, 0), V(-8, -5.5)], t0: 1.9, t1: 2.6, kind: 'ask', to: prefs, label: 'prefs?' });
+    c.packet({ pts: [V(-8, -5.5), V(-8, 0)], t0: 2.6, t1: 3.2, kind: 'span', color: P.ship, to: api, label: 'push ok' });
+    c.packet({ pts: [V(-8, 5), V(-8, 0)], t0: 3.0, t1: 3.7, kind: 'doc', to: api, label: 'hi-IN v4' });
+    c.packet({ pts: [V(-8, 0), V(-2.5, 0)], t0: 4.0, t1: 4.9, kind: 'env', to: kf, label: 'high' });
+    c.packet({ pts: [V(-2.5, 0), V(0, 0), V(0, 4), V(3, 4)], t0: 4.2, t1: 6.6, n: 6, st: 0.35, kind: 'chunk', color: P.same, to: ew });
+    c.packet({ pts: [V(-2.5, 0), V(0, 0), V(0, -4), V(3, -4)], t0: 5.2, t1: 6.2, kind: 'env', to: pw });
+    c.packet({ pts: [V(3, -4), V(8, -4)], t0: 6.5, t1: 7.4, kind: 'env', to: apns, label: 'token · 4 KB' });
+    c.packet({ pts: [V(8, -4), V(12.5, -4)], t0: 7.6, t1: 8.4, kind: 'env', color: P.ship, to: phone, label: 'Order delivered' });
+    c.packet({ pts: [V(12.5, -4), V(12.5, -8), V(3, -8)], t0: 9.2, t1: 10.8, kind: 'span', color: P.ship, to: log, label: 'received · opened' });
+    c.pulse(sw, 6.0);
+    c.note('campaign · bulk lane', 1.5, 6.2);
+  },
+};
+D.failover3d = {
+  loop: 17,
+  view: { target: [-0.5, 0, 0], w: 29, d: 17, el: 50 },
+  steps: [
+    { t: 0.0, text: 'The auth service asks for a login code to be sent to Priya on the critical lane, with key otp-55.' },
+    { t: 1.5, text: 'The SMS worker runs SET NX on the dedupe key (new), and the router sends it to provider A.' },
+    { t: 3.0, text: 'Provider A times out. That is retryable, so the message goes to the retry queue with a short backoff, keeping the same key.' },
+    { t: 5.2, text: 'Timeouts keep coming from A, so the circuit breaker opens: A is marked down and nobody waits on it.' },
+    { t: 7.0, text: 'The retry goes to provider B, the backup. Priya gets her code in a few seconds.' },
+    { t: 9.6, text: 'After 30 s the breaker lets one trial request through to A (half-open). It succeeds, and traffic moves back in steps.' },
+    { t: 12.0, text: 'A late receipt from A shows the first attempt was delivered too. Priya saw the same code twice: harmless for a login code, which is why a timeout is never treated as "not sent".' },
+  ],
+  build(c) {
+    const { V, C, P } = c;
+    const auth = c.obj(c.SHAPES.server({ emi: C.cross }), -12, 0, 'Auth service');
+    const wk = c.obj(c.SHAPES.server({ emi: C.ingest, h: 1.3 }), -6, 0, 'SMS worker', 'critical lane');
+    const dd = c.obj(c.SHAPES.database(C.kb, { r: 0.8 }), -6, 5, 'Dedupe', 'SET NX · 24 h');
+    const rq = c.obj('tray', -6, -5, 'Retry queue', 'backoff + jitter');
+    const rt = c.obj(c.SHAPES.signpost(C.gov), -0.5, 0, 'Router', 'circuit breaker');
+    const pa = c.obj(c.SHAPES.server({ emi: C.serve }), 5, -4, 'Provider A', 'primary');
+    const pb = c.obj(c.SHAPES.server({ emi: C.serve }), 5, 4, 'Provider B', 'backup');
+    const ph = c.obj('person', 11, 0, 'Priya');
+    c.lane([V(-12, 0), V(-0.5, 0)]);
+    c.lane([V(-6, 0), V(-6, 5)]);
+    c.lane([V(-6, 0), V(-6, -5)]);
+    c.lane([V(-0.5, 0), V(2, 0), V(2, -4), V(5, -4), V(8, -4), V(8, 0), V(11, 0)]);
+    c.lane([V(2, 0), V(2, 4), V(5, 4), V(8, 4), V(8, 0)]);
+    c.packet({ pts: [V(-12, 0), V(-6, 0)], t0: 0.2, t1: 1.1, kind: 'env', from: auth, to: wk, label: 'OTP · otp-55' });
+    c.packet({ pts: [V(-6, 0), V(-6, 5)], t0: 1.5, t1: 2.0, kind: 'span', to: dd, label: 'NX → new' });
+    c.packet({ pts: [V(-6, 0), V(-0.5, 0), V(2, 0), V(2, -4), V(5, -4)], t0: 2.1, t1: 3.0, kind: 'env', to: pa });
+    c.packet({ pts: [V(5, -4), V(2, -4), V(2, 0), V(-0.5, 0), V(-6, 0), V(-6, -5)], t0: 3.4, t1: 4.6, kind: 'span', color: P.bad, to: rq, label: 'timeout' });
+    c.packet({ pts: [V(-0.5, 0), V(2, 0), V(2, -4), V(5, -4)], t0: 5.0, t1: 5.8, n: 3, st: 0.2, kind: 'chunk', color: P.bad, to: pa });
+    c.pulse(rt, 6.2);
+    c.note('breaker open · A down', 2, -6.6);
+    c.packet({ pts: [V(-6, -5), V(-6, 0), V(-0.5, 0), V(2, 0), V(2, 4), V(5, 4)], t0: 7.1, t1: 8.3, kind: 'env', to: pb, label: 'retry · otp-55' });
+    c.packet({ pts: [V(5, 4), V(8, 4), V(8, 0), V(11, 0)], t0: 8.4, t1: 9.2, kind: 'env', color: P.ship, to: ph, label: 'code 4821' });
+    c.packet({ pts: [V(-0.5, 0), V(2, 0), V(2, -4), V(5, -4)], t0: 9.8, t1: 10.6, kind: 'ask', to: pa, label: 'trial' });
+    c.packet({ pts: [V(5, -4), V(2, -4), V(2, 0), V(-0.5, 0)], t0: 10.7, t1: 11.4, kind: 'span', color: P.ship, to: rt, label: 'ok' });
+    c.packet({ pts: [V(5, -4), V(8, -4), V(8, 0), V(11, 0)], t0: 12.2, t1: 13.2, kind: 'env', color: P.ask, to: ph, label: 'late: code 4821 again' });
+  },
+};
+
+boot(D);
+</script>
+</body>
+</html>
