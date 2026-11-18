@@ -453,7 +453,7 @@ GET  /api/deals/{id}/signals → { risk: 0.31, momentum: "up", recent_calls: [..
 
 <section id="failure">
   <h2>Failure handling</h2>
-  <ul class="tags"><li>Production</li></ul>
+  <ul class="tags"><li>Production</li><li><a href="job-scheduler.html#retries">Retries in a job scheduler</a></li></ul>
   <figure class="fig3d" id="fail3d">
     <div class="stage3d" role="img" aria-label="Three calls move through the pipeline. A GPU worker crashes mid-transcription; the workflow engine notices the missed heartbeat and retries the task on another worker. A vendor download returns 429; the engine waits with backoff and retries successfully. A corrupt file fails extraction three times and is moved to the dead-letter queue, raising an alert; after a fix, it is replayed and completes."><p class="hint3">3D · drag to turn</p><button class="reset3 ghost" type="button" hidden>Reset view</button><p class="nogl">The 3D view needs WebGL and a connection.</p></div>
     <div class="ctl3"><button class="pp" type="button">Pause</button><span class="k">Step</span><div class="steps3"></div><span class="meta3"></span></div>

@@ -366,7 +366,7 @@ GET  /api/bookings/{booking_id}  → { status: PENDING_PAYMENT | CONFIRMED | EXP
 
 <section id="holds">
   <h2>Seat holds</h2>
-  <ul class="tags"><li>Deep dive 2</li><li><a href="consistency.html">Consistency</a></li><li><a href="databases.html">Databases</a></li></ul>
+  <ul class="tags"><li>Deep dive 2</li><li><a href="consistency.html">Consistency</a></li><li><a href="databases.html">Databases</a></li><li><a href="job-scheduler.html#leases">Worker leases</a></li></ul>
   <p class="lead">Paying takes minutes. Without a hold, two people pay for F7 and one of them gets a refund and an angry email. With a hold, the first to click gets F7 for 10 minutes and everyone else sees it as taken.</p>
   <figure class="fig3d" id="race3d">
     <div class="stage3d" role="img" aria-label="Two users click seat F7 at the same moment. Both requests reach the booking service, which tries SET NX on the key for F7 in Redis. The first succeeds and gets a 10-minute hold; the second is told the seat is taken. The first user abandons the payment page; after 10 minutes the key expires and the seat map shows F7 free again. A third user holds it, pays, and the booking is written to the database with the unique key on show and seat. A late payment from the first user arrives after the expiry and is refunded automatically."><p class="hint3">3D · drag to turn</p><button class="reset3 ghost" type="button" hidden>Reset view</button><p class="nogl">The 3D view needs WebGL and a connection.</p></div>
