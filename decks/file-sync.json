@@ -1,0 +1,27 @@
+{
+  "title": "File sync",
+  "page": "file-sync.html",
+  "cards": [
+    {"front": "What makes file sync hard", "back": "Moving as few bytes as possible, keeping many devices in step, and never losing or corrupting anything.", "link": "file-sync.html#requirements"},
+    {"front": "Change rate for 100M daily users making 10 changes each", "back": "About 1B a day, roughly 12k a second, peaking around 3× in working hours.", "link": "file-sync.html#estimates"},
+    {"front": "Block references for 1 EB in 4 MB blocks", "back": "250 billion, each a 32-byte hash plus bookkeeping: tens of TB of metadata that must be sharded.", "link": "file-sync.html#estimates"},
+    {"front": "The upload handshake", "back": "Ask which block hashes are missing, upload only those via presigned URLs, then commit the list of hashes with the parent revision.", "link": "file-sync.html#api"},
+    {"front": "What a block's SHA-256 hash is used for", "back": "Its name, its dedupe key and its integrity check.", "link": "file-sync.html#chunking"},
+    {"front": "Why a 50 GB upload is resumable", "back": "It is 12,500 independent 4 MB block uploads, each retried on its own.", "link": "file-sync.html#chunking"},
+    {"front": "Fixed vs content-defined chunking", "back": "Inserting a byte near the start shifts every fixed block boundary; content-defined chunking places boundaries by a rolling hash, so only the touched block changes.", "link": "file-sync.html#chunking"},
+    {"front": "Why cross-user dedupe leaks information", "back": "An instant upload tells the uploader someone already has that file. Services often limit dedupe to an account or team.", "link": "file-sync.html#chunking"},
+    {"front": "Journal and cursor", "back": "Each namespace has an append-only journal with sequence numbers; a device remembers the last one applied and fetches entries after it.", "link": "file-sync.html#sync"},
+    {"front": "What a change notification carries", "back": "Nothing but 'there are changes'. A lost notification only delays sync; the journal guarantees nothing is missed.", "link": "file-sync.html#sync"},
+    {"front": "How conflicts are detected and resolved", "back": "Commits are compare-and-set on parent_rev. On conflict the losing client saves a conflicted copy next to the winner, so no edit is silently lost.", "link": "file-sync.html#conflicts"},
+    {"front": "Why deleting a file doesn't delete its blocks", "back": "Blocks may be shared. Keep reference counts and delete unreferenced blocks after the version-history window, often 30+ days.", "link": "file-sync.html#storage"}
+  ],
+  "quiz": [
+    {"q": "A user inserts one sentence near the start of a 2 GB file and the client re-uploads almost the whole file. Why?", "choices": ["The server lost the old blocks", "Fixed-size blocks shifted, changing every hash after the insert", "The parent revision conflicted", "The long poll timed out"], "answer": 1, "why": "Content-defined chunking keeps boundaries with the content so only one block changes.", "link": "file-sync.html#chunking"},
+    {"q": "Two laptops edit the same spreadsheet offline and both sync. What should the system do?", "choices": ["Last writer wins", "Merge the files byte by byte", "Accept the first commit and save the second as a conflicted copy", "Reject both"], "answer": 2, "why": "Compare-and-set detects it and both versions are kept so no work is lost.", "link": "file-sync.html#conflicts"},
+    {"q": "A device was offline for two weeks. How does it catch up?", "choices": ["Calls /changes with its stored cursor and downloads missing blocks", "Waits for push notifications to replay", "Re-uploads its whole folder", "Downloads every file again"], "answer": 0, "why": "The cursor works however long it was away; a compacted journal falls back to a full listing.", "link": "file-sync.html#sync"},
+    {"q": "A buggy client release starts deleting files on every device of an account. What limits the damage?", "choices": ["Content-defined chunking", "Cross-user dedupe", "Long polling", "Version history plus server-side rate limits on bulk deletes"], "answer": 3, "why": "Versions let files be restored and delete limits stop the spread.", "link": "file-sync.html#risks"},
+    {"q": "A user copies a 1 GB installer that thousands of others already uploaded. What does the client send?", "choices": ["The full 1 GB", "Only the block hashes; no blocks are missing so nothing is uploaded", "A compressed copy", "One block as a sample"], "answer": 1, "why": "Content-addressed blocks dedupe identical content (subject to dedupe scope).", "link": "file-sync.html#chunking"},
+    {"q": "A downloaded file's block doesn't match its stored SHA-256. What is the right response?", "choices": ["Ignore it if the size matches", "Alert immediately and repair from a replica", "Delete the file", "Re-hash with MD5"], "answer": 1, "why": "Hash mismatches mean corruption; verify at every hop and repair from replicas.", "link": "file-sync.html#deployment"},
+    {"q": "Why do file bytes go to the block store through presigned URLs instead of the API?", "choices": ["To keep large transfers off API servers so metadata and bytes scale separately", "Because the API can't handle HTTPS", "To skip permission checks", "To avoid hashing"], "answer": 0, "why": "Metadata calls, block transfers and notifications are separate flows.", "link": "file-sync.html#architecture"}
+  ]
+}
