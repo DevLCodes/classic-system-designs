@@ -1,0 +1,496 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Object storage · Classic System Design</title>
+<meta name="description" content="Object storage for system design: the S3 object model, presigned URLs, multipart and resumable uploads, replication vs erasure coding, storage classes, lifecycle rules and content types, with a durability lab.">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700&family=Instrument+Sans:ital,wght@0,400;0,500;0,600;1,400&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+  /* Layout: a slim site bar, then either a card grid (home), a sticky contents rail + reading column (articles), or a filterable term list (glossary). Light, single look. */
+  :root {
+    color-scheme: light;
+    --bg: #e9ecef; --paper: #f7f8f9; --ink: #1c2530; --muted: #586473; --line: #cdd4dc; --line-strong: #9aa5b1;
+    --accent: #4255d4; --accent-ink: #ffffff; --track: #d3d9e0; --code-bg: #eef1f4; --wire: #7d8996;
+    --c-ingest: #2a9d8f; --c-kb: #4d5fd8; --c-serve: #d7932a; --c-model: #e2674f; --c-gov: #b2456e; --c-cross: #4a5562; --c-dlq: #b23a3a; --c-ok: #2f8f5b;
+    --t-src: #e4e8ec; --t-ingest: #d8eeea; --t-kb: #dfe3fa; --t-serve: #f8ead2; --t-model: #fbe1da; --t-gov: #f3dde6; --t-cross: #dfe2e6; --t-dlq: #f6dddb;
+    --font-display: "Bricolage Grotesque", "Avenir Next", "Segoe UI", system-ui, sans-serif;
+    --font-body: "Instrument Sans", "Helvetica Neue", "Segoe UI", system-ui, sans-serif;
+    --font-mono: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  @media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
+  body { margin: 0; background: var(--bg); color: var(--ink); font-family: var(--font-body); font-size: 16px; line-height: 1.6; }
+  a { color: var(--accent); }
+  .wrap { max-width: 1240px; margin: 0 auto; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
+
+  .sitebar { border-bottom: 1px solid var(--line); background: var(--paper); }
+  .sitebar .wrap { display: flex; align-items: center; gap: 18px; flex-wrap: wrap; padding-block: 12px; }
+  .brand { font-family: var(--font-display); font-weight: 700; font-size: 17px; color: var(--ink); text-decoration: none; margin-right: auto; }
+  .sitebar nav { display: flex; gap: 16px; flex-wrap: wrap; font-size: 14px; }
+  .sitebar nav a { color: var(--muted); text-decoration: none; }
+  .sitebar nav a:hover, .sitebar nav a[aria-current="page"] { color: var(--ink); }
+  .sitebar nav a[aria-current="page"] { font-weight: 600; }
+
+  .intro { padding-block: 40px 8px; display: grid; gap: 10px; max-width: 820px; }
+  .eyebrow { margin: 0; font-family: var(--font-mono); font-size: 12px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+  h1 { margin: 0; font-family: var(--font-display); font-weight: 700; font-size: clamp(30px, 5vw, 46px); line-height: 1.05; text-wrap: balance; }
+  .intro .lead { font-size: 18px; margin: 0; }
+
+  .doc { display: grid; grid-template-columns: 220px minmax(0, 1fr); gap: 48px; padding-block: 36px 72px; }
+  .toc { position: sticky; top: calc(env(safe-area-inset-top, 0px) + 20px); align-self: start; }
+  .toc p { margin: 0 0 8px; font-family: var(--font-mono); font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+  .toc ol { margin: 0; padding: 0; list-style: none; display: grid; gap: 2px; counter-reset: toc; }
+  .toc li { counter-increment: toc; }
+  .toc a { display: flex; gap: 8px; padding: 3px 0; font-size: 14px; color: var(--muted); text-decoration: none; }
+  .toc a::before { content: counter(toc, decimal-leading-zero); font-family: var(--font-mono); font-size: 11.5px; padding-top: 2px; color: var(--line-strong); }
+  .toc a:hover { color: var(--ink); }
+  article { min-width: 0; max-width: 760px; }
+  section { padding-bottom: 36px; margin-bottom: 36px; border-bottom: 1px solid var(--line); scroll-margin-top: 20px; }
+  section:last-child { border-bottom: 0; }
+  h2 { margin: 0 0 10px; font-family: var(--font-display); font-weight: 700; font-size: 28px; line-height: 1.15; text-wrap: balance; }
+  h3 { margin: 26px 0 6px; font-family: var(--font-display); font-weight: 600; font-size: 19px; line-height: 1.25; }
+  p { margin: 0 0 14px; }
+  .lead { font-size: 18px; }
+  ul.plain, ol.plain { margin: 0 0 16px; padding-left: 22px; display: grid; gap: 6px; }
+  code { font-family: var(--font-mono); font-size: 0.88em; background: var(--code-bg); padding: 1px 5px; border-radius: 4px; }
+  pre { margin: 0 0 16px; padding: 14px 16px; background: var(--code-bg); border-radius: 10px; overflow-x: auto; font-size: 13px; line-height: 1.55; }
+  pre code { background: none; padding: 0; font-size: inherit; }
+  .table { overflow-x: auto; margin: 0 0 18px; }
+  table { width: 100%; border-collapse: collapse; font-size: 14.5px; line-height: 1.45; }
+  th, td { text-align: left; vertical-align: top; padding: 8px 10px; border-bottom: 1px solid var(--line); }
+  th { font-family: var(--font-mono); font-size: 11.5px; font-weight: 500; letter-spacing: .05em; text-transform: uppercase; color: var(--muted); }
+  td.num { font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .note { border-left: 3px solid var(--accent); background: var(--paper); padding: 12px 16px; border-radius: 0 10px 10px 0; margin: 0 0 18px; }
+  .note p:last-child { margin: 0; }
+  .formula { font-family: var(--font-mono); font-size: 14px; background: var(--paper); border: 1px solid var(--line); border-radius: 10px; padding: 12px 16px; margin: 0 0 16px; overflow-x: auto; white-space: nowrap; }
+  .related { display: flex; flex-wrap: wrap; gap: 8px; margin: 0; padding: 0; list-style: none; }
+  .related a { display: inline-block; padding: 4px 12px; border: 1px solid var(--line); border-radius: 999px; font-size: 14px; color: var(--ink); text-decoration: none; background: var(--paper); }
+  .related a:hover { border-color: var(--ink); }
+  .pager { display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; font-size: 14px; }
+  footer.site { border-top: 1px solid var(--line); padding-block: 20px 40px; font-size: 13px; color: var(--muted); }
+  a:focus-visible, input:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+  /* home */
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 16px; margin: 0 0 40px; padding: 0; list-style: none; }
+  .card { display: grid; gap: 8px; height: 100%; padding: 18px; background: var(--paper); border: 1px solid var(--line); border-radius: 14px; color: var(--ink); text-decoration: none; }
+  .card:hover { border-color: var(--ink); }
+  .card .k { font-family: var(--font-mono); font-size: 11px; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
+  .card h3 { margin: 0; font-size: 20px; }
+  .card p { margin: 0; font-size: 14.5px; color: var(--muted); }
+  .card svg { width: 100%; height: auto; display: block; }
+  .card.feature svg { max-width: 420px; justify-self: center; }
+  .card.feature { grid-column: 1 / -1; grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr); align-items: center; gap: 24px; }
+  .home-h { margin: 28px 0 12px; font-family: var(--font-display); font-size: 24px; }
+
+  /* glossary */
+  .gl-tools { position: sticky; top: 0; z-index: 2; background: var(--bg); padding-block: 12px; display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+  .gl-tools input { flex: 1 1 260px; min-width: 0; font: 15px var(--font-body); padding: 9px 12px; border-radius: 10px; border: 1px solid var(--line-strong); background: #fff; color: var(--ink); }
+  .gl-letters { display: flex; flex-wrap: wrap; gap: 4px; font-family: var(--font-mono); font-size: 13px; }
+  .gl-letters a { padding: 2px 6px; border-radius: 6px; text-decoration: none; color: var(--muted); }
+  .gl-letters a:hover { background: var(--paper); color: var(--ink); }
+  .gl { max-width: 860px; }
+  .gl-item { margin: 0; }
+  .gl-item { display: grid; grid-template-columns: 220px minmax(0, 1fr); gap: 16px; padding: 12px 0; border-bottom: 1px solid var(--line); scroll-margin-top: 70px; }
+  .gl-item dt { font-weight: 600; }
+  .gl-item dt small { display: block; font-weight: 400; font-family: var(--font-mono); font-size: 11px; color: var(--muted); letter-spacing: .04em; text-transform: uppercase; margin-top: 2px; }
+  .gl-item dd { margin: 0; }
+  .gl-item dd .see { font-size: 13.5px; }
+  .gl-letter { margin: 26px 0 4px; font-family: var(--font-display); font-size: 22px; scroll-margin-top: 70px; }
+
+  @media (max-width: 900px) {
+    .doc { grid-template-columns: minmax(0, 1fr); gap: 24px; padding-block: 28px 56px; }
+    .toc { position: static; }
+    .toc ol { grid-template-columns: repeat(2, minmax(0, 1fr)); column-gap: 12px; }
+    .card.feature { grid-template-columns: minmax(0, 1fr); }
+  }
+  @media (max-width: 640px) {
+    .gl-item { grid-template-columns: minmax(0, 1fr); gap: 4px; }
+    h2 { font-size: 24px; }
+    .intro .lead, .lead { font-size: 16.5px; }
+  }
+
+  /* diagrams */
+  .fig { margin: 6px 0 24px; overflow-x: auto; }
+  .fig svg { display: block; width: 100%; height: auto; min-width: 600px; }
+  .fig figcaption { margin-top: 8px; font-size: 13px; line-height: 1.45; color: var(--muted); }
+  .dg text { font-family: var(--font-body); font-size: 13px; fill: var(--ink); }
+  .dg .sm { font-size: 11.5px; fill: var(--muted); }
+  .dg .small { font-size: 12px; }
+  .dg .b { font-weight: 600; }
+  .dg .mono { font-family: var(--font-mono); }
+  .dg .it { font-style: italic; }
+  .dg .mute { fill: var(--muted); }
+  .dg .gov { fill: var(--c-gov); font-weight: 600; }
+  .dg .okt { fill: var(--c-ok); font-weight: 600; }
+  .dg .bad { fill: var(--c-dlq); font-weight: 600; }
+  .dg .cap { font-family: var(--font-mono); font-size: 11px; letter-spacing: .06em; fill: var(--muted); }
+  .dg .big { font-family: var(--font-display); font-size: 30px; font-weight: 700; fill: var(--ink); }
+  .dg .box { fill: var(--paper); stroke: var(--line-strong); stroke-width: 1.25; }
+  .dg .ghost { fill: none; stroke: var(--line-strong); stroke-width: 1.25; stroke-dasharray: 5 5; }
+  .dg .track { fill: var(--track); }
+  .dg .rule { stroke: var(--line); stroke-width: 1; }
+  .dg .axis { stroke: var(--line-strong); stroke-width: 1.25; }
+  .dg .wire { fill: none; stroke: var(--wire); stroke-width: 1.4; }
+  .dg .wire.dash { stroke-dasharray: 4 4; }
+  .dg .wire.hot { stroke: var(--accent); stroke-width: 2; }
+  .dg .wire.red { stroke: var(--c-dlq); }
+  .dg .ah { fill: var(--wire); }
+  .dg .xmark { stroke: var(--c-dlq); stroke-width: 1.8; fill: none; }
+  .dg .tick { stroke: var(--c-ok); stroke-width: 2; fill: none; }
+  .dg .k-src { fill: var(--t-src); stroke: #8795a3; stroke-width: 1.5; }
+  .dg .k-ingest { fill: var(--t-ingest); stroke: var(--c-ingest); stroke-width: 1.5; }
+  .dg .k-kb { fill: var(--t-kb); stroke: var(--c-kb); stroke-width: 1.5; }
+  .dg .k-serve { fill: var(--t-serve); stroke: var(--c-serve); stroke-width: 1.5; }
+  .dg .k-model { fill: var(--t-model); stroke: var(--c-model); stroke-width: 1.5; }
+  .dg .k-gov { fill: var(--t-gov); stroke: var(--c-gov); stroke-width: 1.5; }
+  .dg .k-cross { fill: var(--t-cross); stroke: var(--c-cross); stroke-width: 1.5; }
+  .dg .k-dlq { fill: var(--t-dlq); stroke: var(--c-dlq); stroke-width: 1.5; }
+  .dg .k-user { fill: #ffffff; stroke: var(--line-strong); stroke-width: 1.5; }
+  .dg .f-serve { fill: var(--c-serve); } .dg .f-kb { fill: var(--c-kb); } .dg .f-model { fill: var(--c-model); } .dg .f-gov { fill: var(--c-gov); } .dg .f-ingest { fill: var(--c-ingest); } .dg .f-cross { fill: #b8c0c9; } .dg .f-dlq { fill: var(--c-dlq); } .dg .f-ok { fill: var(--c-ok); }
+  .dg .cell { fill: var(--paper); stroke: var(--line-strong); stroke-width: 1; }
+  .dg .cell.hot { fill: var(--t-ingest); stroke: var(--c-ingest); stroke-width: 1.5; }
+  .dg .cell.old { fill: var(--t-kb); stroke: var(--c-kb); }
+  .dg .cell.new { fill: var(--t-ingest); stroke: var(--c-ingest); stroke-width: 1.5; }
+  .dg .cell.gone { fill: var(--paper); stroke: var(--line); }
+  .dg .dot-hr { fill: var(--c-gov); } .dg .dot-it { fill: var(--c-kb); } .dg .dot-eng { fill: var(--c-ingest); } .dg .dot-q { fill: var(--c-serve); stroke: var(--ink); stroke-width: 1.5; }
+  .dg .halo { fill: none; stroke: var(--c-serve); stroke-width: 1.5; stroke-dasharray: 4 4; }
+  .dg .zone { fill: var(--paper); stroke: var(--line); stroke-width: 1; }
+</style>
+
+<style>
+  .lab { margin: 6px 0 26px; padding: 14px 16px 16px; background: var(--paper); border: 1px solid var(--line); border-radius: 14px; }
+  .lab-row { display: flex; flex-wrap: wrap; gap: 10px 18px; align-items: center; margin: 0 0 12px; }
+  .lab-k { font-family: var(--font-mono); font-size: 11px; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
+  .lab label { display: inline-flex; gap: 8px; align-items: center; font-size: 14px; }
+  .lab input[type=range] { width: 150px; accent-color: var(--accent); }
+  .lab input[type=checkbox] { width: 16px; height: 16px; accent-color: var(--accent); }
+  .lab input[type=text] { flex: 1 1 260px; min-width: 0; font: 15px var(--font-body); padding: 8px 11px; border-radius: 9px; border: 1px solid var(--line-strong); background: #fff; color: var(--ink); }
+  .lab output { font-family: var(--font-mono); font-size: 12.5px; min-width: 6ch; font-variant-numeric: tabular-nums; }
+  .seg { display: inline-flex; flex-wrap: wrap; gap: 6px; }
+  .seg button, .chips button { font: 600 13px var(--font-body); color: var(--ink); background: #fff; border: 1px solid var(--line); border-radius: 8px; padding: 6px 12px; cursor: pointer; }
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; }
+  .chips button { font-weight: 500; border-radius: 999px; padding: 4px 11px; font-size: 13px; }
+  .seg button:hover, .chips button:hover { border-color: var(--ink); }
+  .seg button[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+  .seg button:focus-visible, .chips button:focus-visible, .lab input:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .lab-out { margin: 12px 0 0; padding: 10px 12px; background: #fff; border: 1px solid var(--line); border-radius: 10px; font-size: 14.5px; line-height: 1.5; font-variant-numeric: tabular-nums; }
+  .chunks { display: grid; gap: 8px; max-height: 470px; overflow: auto; padding-right: 4px; }
+  .chunk { min-width: 0; padding: 8px 11px; background: #fff; border: 1px solid var(--line); border-left: 4px solid var(--c-kb); border-radius: 8px; font-size: 14px; line-height: 1.5; overflow-wrap: anywhere; }
+  .chunk:nth-child(even) { border-left-color: var(--c-ingest); }
+  .chunk.ans { box-shadow: 0 0 0 2px var(--c-serve); }
+  .chunk .ch { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-bottom: 4px; font-family: var(--font-mono); font-size: 11px; color: var(--muted); }
+  .chunk .pfx { display: block; font-family: var(--font-mono); font-size: 11.5px; color: var(--c-kb); }
+  .chunk .ov { background: var(--track); border-radius: 3px; }
+  .chunk mark { background: #ffe9b3; border-radius: 3px; padding: 0 2px; }
+  .chunk table { width: auto; font-size: 13px; margin: 4px 0; }
+  .chunk td { padding: 2px 10px 2px 0; border-bottom: 1px solid var(--line); }
+  .badge { display: inline-block; padding: 0 7px; border-radius: 999px; border: 1px solid; font-family: var(--font-mono); font-size: 10.5px; line-height: 1.6; }
+  .badge.bad { color: var(--c-dlq); border-color: var(--c-dlq); background: var(--t-dlq); }
+  .badge.ok { color: var(--c-ok); border-color: var(--c-ok); background: #e3f3ea; }
+  .badge.info { color: var(--c-kb); border-color: var(--c-kb); background: var(--t-kb); }
+  .bars { display: grid; gap: 8px; margin: 4px 0 0; }
+  .bar-row { display: grid; grid-template-columns: minmax(0, 150px) minmax(0, 1fr) 46px; gap: 10px; align-items: center; font-size: 14px; }
+  .bar { position: relative; height: 14px; border-radius: 7px; background: var(--track); }
+  .bar i { position: absolute; inset: 0 auto 0 0; border-radius: 7px; background: var(--c-kb); transition: width .3s; }
+  .bar b { position: absolute; top: -4px; bottom: -4px; width: 2px; background: var(--c-dlq); }
+  .bar-row .v { font-family: var(--font-mono); font-size: 12.5px; text-align: right; }
+  .stages { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 10px; padding: 0; list-style: none; font-size: 13px; }
+  .stages li { padding: 2px 10px; border-radius: 999px; border: 1px solid var(--line); color: var(--muted); background: #fff; }
+  .stages li.hit { border-color: var(--accent); color: var(--accent-ink); background: var(--accent); }
+  .stages li.skip { text-decoration: line-through; }
+  .rlist { display: grid; gap: 6px; margin: 0; padding: 0; list-style: none; counter-reset: r; }
+  .rlist li { counter-increment: r; display: grid; grid-template-columns: 28px minmax(0, 1fr) auto; gap: 10px; align-items: center; padding: 6px 10px; background: #fff; border: 1px solid var(--line); border-radius: 8px; font-size: 14px; }
+  .rlist li::before { content: counter(r); font-family: var(--font-mono); font-size: 12px; color: var(--muted); }
+  .rlist li.rel { border-color: var(--c-ok); background: #f0f8f3; }
+  .rlist button { font: 600 12px var(--font-body); padding: 3px 10px; border-radius: 999px; border: 1px solid var(--line-strong); background: #fff; color: var(--ink); cursor: pointer; white-space: nowrap; }
+  .rlist li.rel button { background: var(--c-ok); border-color: var(--c-ok); color: #fff; }
+  .metrics { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 8px; margin: 12px 0 0; }
+  .metric { padding: 8px 10px; background: #fff; border: 1px solid var(--line); border-radius: 10px; }
+  .metric .n { display: block; font-family: var(--font-display); font-size: 24px; font-weight: 700; font-variant-numeric: tabular-nums; }
+  .metric .l { font-family: var(--font-mono); font-size: 11px; letter-spacing: .04em; text-transform: uppercase; color: var(--muted); }
+  .metric small { display: block; font-size: 12px; color: var(--muted); line-height: 1.35; margin-top: 2px; }
+  td.pass { color: var(--c-ok); font-weight: 600; } td.fail { color: var(--c-dlq); font-weight: 600; }
+  .say { border-left: 3px solid var(--c-serve); background: var(--paper); padding: 12px 16px; border-radius: 0 10px 10px 0; margin: 0 0 16px; font-size: 15.5px; }
+  .say p:last-child { margin: 0; }
+</style>
+
+<style>
+  .lab-chart { display: block; width: 100%; height: auto; margin: 4px 0 0; }
+  .lab-chart text { font-family: var(--font-body); font-size: 12px; fill: var(--muted); }
+  .grid-cells { display: grid; gap: 4px; }
+  .srv { display: grid; grid-template-columns: 92px minmax(0,1fr) 70px; gap: 10px; align-items: center; font-size: 14px; }
+  .muted { color: var(--muted); }
+  .lab select { font: 14px var(--font-body); padding: 6px 8px; border-radius: 8px; border: 1px solid var(--line-strong); background: #fff; color: var(--ink); }
+  .lab input[type=number] { width: 9ch; font: 14px var(--font-mono); padding: 6px 8px; border-radius: 8px; border: 1px solid var(--line-strong); background: #fff; color: var(--ink); }
+</style>
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs><marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" class="ah" style="fill:#7d8996"/></marker></defs></svg>
+<header class="sitebar"><div class="wrap"><a class="brand" href="index.html">Classic System Design</a><nav aria-label="Site"><a href="index.html">Home</a><a href="index.html#blocks" aria-current="page">Building blocks</a><a href="index.html#designs">Designs</a><a href="https://devlcodes.github.io/agentic-ai-notebook/system-design/index.html">Agentic designs ↗</a></nav></div></header>
+<main>
+<div class="wrap"><div class="intro"><p class="eyebrow">Building block · data</p><h1>Object storage</h1><p class="lead">A huge, cheap, durable key-value store for files. You put whole objects under a key and get them back by key; the store spreads the bytes over thousands of disks so they survive almost anything.</p></div></div>
+<div class="wrap doc">
+  <nav class="toc" aria-label="On this page"><p>On this page</p><ol><li><a href="#what">The object model</a></li><li><a href="#inside">How it works inside</a></li><li><a href="#presigned">Presigned URLs</a></li><li><a href="#multipart">Multipart and resumable uploads</a></li><li><a href="#lab">Try it: replication vs erasure coding</a></li><li><a href="#durability">Durability: copies or codes</a></li><li><a href="#classes">Storage classes and lifecycle</a></li><li><a href="#mime">Content types</a></li><li><a href="#failure">How it goes wrong</a></li><li><a href="#interview">Saying it in an interview</a></li><li><a href="#real-world">In the real world</a></li><li><a href="#related">Related</a></li></ol></nav>
+  <article>
+<section id="what"><h2>The object model</h2>
+<p class="lead">Every large system keeps its big bytes (photos, videos, backups, logs, build artifacts) in object storage, and keeps only small rows about them in a database.</p>
+<p>The model is deliberately simple:</p>
+<ul class="plain">
+<li><strong>Bucket</strong>: a named container with its own region, access rules and settings.</li>
+<li><strong>Key</strong>: any string up to 1,024 bytes, like <code>users/42/avatar.jpg</code>. The namespace is <strong>flat</strong>: the slashes look like folders, but there are no directories. A "folder" is just a shared key prefix, and listing one is a range scan over sorted keys.</li>
+<li><strong>Object</strong>: the bytes plus metadata (size, content type, a checksum called the ETag, custom headers). Objects are <strong>immutable</strong>: you cannot change byte 500 in place. You write a whole new version.</li>
+<li><strong>Versioning</strong> (optional): every overwrite or delete keeps the old version, so a bad deploy or a mistaken delete can be undone.</li>
+</ul>
+<p>The API is a handful of HTTP verbs: <code>PUT</code> an object, <code>GET</code> it (or a byte range of it), <code>HEAD</code> for metadata, <code>DELETE</code>, and <code>LIST</code> by prefix. There are no joins, no queries and no partial updates. That is why it scales so far and costs so little.</p>
+<div class="table"><table><thead><tr><th>Object storage</th><th>Block storage</th><th>File storage</th></tr></thead><tbody>
+<tr><td>Whole objects over HTTP, flat keys</td><td>A raw disk attached to one machine (EBS, a local SSD)</td><td>A shared POSIX file system with directories (NFS, EFS)</td></tr>
+<tr><td>Effectively unlimited, about $20–25 per TB a month</td><td>Sized up front, several times the price per TB</td><td>Shared by many machines, priced in between or higher</td></tr>
+<tr><td>Media, backups, data lakes, static sites</td><td>Databases and anything that rewrites bytes in place</td><td>Legacy apps that need a real file system</td></tr>
+</tbody></table></div>
+<div class="note"><p>Amazon S3 has had <strong>strong read-after-write consistency</strong> since December 2020: once a PUT returns, every GET and LIST sees the new object. Older articles that warn about eventual consistency on S3 are out of date. Other stores differ, so check before you rely on it.</p></div></section>
+
+<section id="inside"><h2>How it works inside</h2>
+<p>An object store splits into two very different systems: a small, fast <strong>metadata index</strong> that maps a key to where its bytes live, and a huge, slow <strong>data tier</strong> of storage nodes full of hard disks.</p>
+<figure class="fig"><svg viewBox="0 0 722 300" class="dg" role="img" aria-label="Inside an object store: clients call stateless front ends, which look up keys in a sharded metadata index and read or write erasure-coded chunks on storage nodes spread across three zones">
+<text x="361" y="20" class="cap" text-anchor="middle">ONE PUT, FOLLOWED THROUGH THE STORE</text>
+<rect x="10" y="118" width="96" height="48" rx="8" class="k-user"/><text x="58" y="139" class="small b" text-anchor="middle">Client</text><text x="58" y="155" class="sm" text-anchor="middle">PUT key</text>
+<path d="M106 142 L148 142" class="wire hot" marker-end="url(#ah)"/>
+<rect x="150" y="110" width="120" height="64" rx="8" class="k-serve"/><text x="210" y="134" class="small b" text-anchor="middle">Front ends</text><text x="210" y="150" class="sm" text-anchor="middle">auth, signatures,</text><text x="210" y="164" class="sm" text-anchor="middle">split + encode</text>
+<path d="M270 126 C320 110 340 76 378 70" class="wire" marker-end="url(#ah)"/><text x="292" y="92" class="sm">2. record</text>
+<rect x="380" y="40" width="200" height="56" rx="8" class="k-kb"/><text x="480" y="62" class="small b" text-anchor="middle">Metadata index</text><text x="480" y="80" class="sm" text-anchor="middle">key → version, size, chunk map</text>
+<rect x="596" y="40" width="116" height="56" rx="8" class="box"/><text x="654" y="62" class="sm" text-anchor="middle">sharded by key</text><text x="654" y="78" class="sm" text-anchor="middle">range, replicated</text>
+<path d="M270 158 C320 178 330 200 362 206" class="wire hot" marker-end="url(#ah)"/><text x="272" y="226" class="sm">1. write chunks</text>
+<rect x="366" y="126" width="346" height="164" rx="10" class="zone"/>
+<text x="424" y="146" class="cap" text-anchor="middle">ZONE A</text><text x="539" y="146" class="cap" text-anchor="middle">ZONE B</text><text x="654" y="146" class="cap" text-anchor="middle">ZONE C</text>
+<g>
+<rect x="378" y="156" width="92" height="120" rx="8" class="k-ingest"/>
+<rect x="388" y="168" width="34" height="24" rx="4" class="cell"/><text x="405" y="185" class="mono sm" text-anchor="middle">d1</text>
+<rect x="426" y="168" width="34" height="24" rx="4" class="cell"/><text x="443" y="185" class="mono sm" text-anchor="middle">d2</text>
+<rect x="388" y="200" width="34" height="24" rx="4" class="cell"/><text x="405" y="217" class="mono sm" text-anchor="middle">d3</text>
+<rect x="426" y="200" width="34" height="24" rx="4" class="cell old"/><text x="443" y="217" class="mono sm" text-anchor="middle">p1</text>
+<text x="424" y="252" class="sm" text-anchor="middle">storage nodes</text>
+</g>
+<g>
+<rect x="493" y="156" width="92" height="120" rx="8" class="k-ingest"/>
+<rect x="503" y="168" width="34" height="24" rx="4" class="cell"/><text x="520" y="185" class="mono sm" text-anchor="middle">d4</text>
+<rect x="541" y="168" width="34" height="24" rx="4" class="cell"/><text x="558" y="185" class="mono sm" text-anchor="middle">d5</text>
+<rect x="503" y="200" width="34" height="24" rx="4" class="cell old"/><text x="520" y="217" class="mono sm" text-anchor="middle">p2</text>
+<text x="539" y="252" class="sm" text-anchor="middle">storage nodes</text>
+</g>
+<g>
+<rect x="608" y="156" width="92" height="120" rx="8" class="k-ingest"/>
+<rect x="618" y="168" width="34" height="24" rx="4" class="cell"/><text x="635" y="185" class="mono sm" text-anchor="middle">d6</text>
+<rect x="656" y="168" width="34" height="24" rx="4" class="cell old"/><text x="673" y="185" class="mono sm" text-anchor="middle">p3</text>
+<text x="654" y="252" class="sm" text-anchor="middle">storage nodes</text>
+</g>
+<text x="58" y="210" class="sm" text-anchor="middle">3. 200 OK only</text><text x="58" y="225" class="sm" text-anchor="middle">after both are</text><text x="58" y="240" class="sm" text-anchor="middle">durable</text>
+</svg><figcaption>Illustrative. The object is cut into 6 data chunks (d) plus 3 parity chunks (p) and spread so that losing a whole zone still leaves 6 of 9, enough to rebuild it. The metadata index is the part that has to be fast; the data tier is the part that has to be cheap.</figcaption></figure>
+<h3>The write path</h3>
+<ol class="plain">
+<li>A stateless front end checks the caller's signature and permissions.</li>
+<li>It cuts the object into chunks, adds redundancy (copies or parity, see <a href="#durability">durability</a>) and writes the chunks to storage nodes chosen so no two land on the same disk, machine or, for the default class, zone.</li>
+<li>Once enough chunks are safely on disk, it records the key, version and chunk locations in the metadata index, and only then answers <code>200 OK</code>. The metadata write is the commit point: before it, the object does not exist to readers.</li>
+</ol>
+<h3>The read path</h3>
+<p>The front end looks up the key, fetches the chunks it needs in parallel, checks their checksums, reassembles the bytes and streams them out. A <code>Range</code> header lets a client fetch just part of an object, which is how video players seek and how download tools fetch in parallel.</p>
+<h3>Background work never stops</h3>
+<p>With millions of disks, several fail every day. Scrubbers re-read data to catch silent corruption, and repair jobs rebuild lost chunks onto healthy disks. A garbage collector removes chunks whose objects were deleted or overwritten. The <a href="merkle-trees.html">hash checks</a> and repair traffic are a large share of what the cluster does all day.</p>
+<p>Throughput scales with key spread. S3 handles at least 3,500 writes and 5,500 reads per second <em>per prefix</em> and splits busy prefixes automatically, so spreading keys over many prefixes (for example <code>photos/7f/…</code>, <code>photos/a3/…</code>) raises the ceiling. See <a href="hot-partitions.html">hot partitions</a> for why one busy prefix hurts.</p></section>
+
+<section id="presigned"><h2>Presigned URLs</h2>
+<p class="lead">Never stream user uploads through your own servers. Give the client a short-lived URL that lets it talk to the bucket directly.</p>
+<p>A <strong>presigned URL</strong> is a normal object URL with a signature in the query string. Your app server computes the signature with its own credentials, scoped to one operation (PUT this key, or GET that key) and an expiry time. The store checks the signature; it never needs to know who the end user is.</p>
+<pre><code>https://media.s3.amazonaws.com/uploads/42/7d1c.jpg
+  ?X-Amz-Algorithm=AWS4-HMAC-SHA256
+  &amp;X-Amz-Credential=…/20261118/us-east-1/s3/aws4_request
+  &amp;X-Amz-Date=20261118T104000Z
+  &amp;X-Amz-Expires=900          ← valid for 15 minutes
+  &amp;X-Amz-SignedHeaders=content-type;host
+  &amp;X-Amz-Signature=3f9a…</code></pre>
+<p>Why it matters: a 2 GB video passing through your API would tie up a server thread, its memory and its network for minutes. With a presigned URL, your API handles one tiny request to hand out the URL and the bytes go straight to the store, which is built for that load.</p>
+<ul class="plain">
+<li><strong>Keep expiry short</strong>: minutes, not days. Anyone holding the URL can use it until it expires. S3's maximum is 7 days, and a URL signed with temporary credentials dies when they do.</li>
+<li><strong>Pick the key on the server</strong>, never from the client's file name: <code>uploads/{user_id}/{random_id}</code>. This stops overwrites of other people's files and path tricks.</li>
+<li><strong>Limit what can be sent</strong>. A presigned PUT can bind the <code>Content-Type</code> header. A presigned POST with a policy can also cap size (<code>content-length-range</code>) and require a key prefix.</li>
+<li><strong>Confirm after upload</strong>. Have the client call your API when it is done, or listen for the store's "object created" event, then check size and type before marking the file usable.</li>
+<li><strong>Downloads too</strong>: for private files, hand out a presigned GET for a few minutes after checking permissions, or use signed CDN URLs so the edge can cache them.</li>
+</ul></section>
+
+<section id="multipart"><h2>Multipart and resumable uploads</h2>
+<p>One long PUT of a big file is fragile: if the connection drops at 90%, you start again. <strong>Multipart upload</strong> splits the file into parts that upload independently, in parallel, and can be retried one at a time.</p>
+<figure class="fig"><svg viewBox="0 0 722 300" class="dg" role="img" aria-label="Sequence: the client asks the app server to upload; the app server starts a multipart upload and returns presigned part URLs; the client uploads parts in parallel straight to the store; then the app server completes the upload">
+<rect x="40" y="14" width="120" height="34" rx="8" class="k-user"/><text x="100" y="36" class="small b" text-anchor="middle">Client</text>
+<rect x="300" y="14" width="120" height="34" rx="8" class="k-kb"/><text x="360" y="36" class="small b" text-anchor="middle">App server</text>
+<rect x="560" y="14" width="130" height="34" rx="8" class="k-ingest"/><text x="625" y="36" class="small b" text-anchor="middle">Object store</text>
+<path d="M100 48 L100 290" class="rule"/><path d="M360 48 L360 290" class="rule"/><path d="M625 48 L625 290" class="rule"/>
+<path d="M100 72 L356 72" class="wire" marker-end="url(#ah)"/><text x="110" y="66" class="sm">1. upload video.mp4, 2 GB</text>
+<path d="M360 98 L621 98" class="wire" marker-end="url(#ah)"/><text x="370" y="92" class="sm">2. CreateMultipartUpload</text>
+<path d="M625 116 L364 116" class="wire dash" marker-end="url(#ah)"/><text x="615" y="130" class="sm" text-anchor="end">uploadId</text>
+<path d="M360 148 L104 148" class="wire" marker-end="url(#ah)"/><text x="350" y="142" class="sm" text-anchor="end">3. uploadId + 128 presigned part URLs</text>
+<path d="M100 180 L621 180" class="wire hot" marker-end="url(#ah)"/>
+<path d="M100 192 L621 192" class="wire hot" marker-end="url(#ah)"/>
+<path d="M100 204 L621 204" class="wire hot" marker-end="url(#ah)"/>
+<text x="362" y="172" class="sm" text-anchor="middle">4. PUT parts 1…128 in parallel, 16 MB each, retry any that fail</text>
+<path d="M621 218 L104 218" class="wire dash" marker-end="url(#ah)"/><text x="615" y="232" class="sm" text-anchor="end">ETag per part</text>
+<path d="M100 252 L356 252" class="wire" marker-end="url(#ah)"/><text x="110" y="246" class="sm">5. done: part numbers + ETags</text>
+<path d="M360 276 L621 276" class="wire" marker-end="url(#ah)"/><text x="370" y="270" class="sm">6. CompleteMultipartUpload</text>
+</svg><figcaption>Presigned multipart upload. The app server only does steps 1–3 and 5–6, all tiny requests. The gigabytes in step 4 never touch it. The object appears, all at once, only at step 6.</figcaption></figure>
+<h3>The limits (Amazon S3)</h3>
+<div class="table"><table><thead><tr><th>Limit</th><th>Value</th></tr></thead><tbody>
+<tr><td>Largest single PUT</td><td class="num">5 GB</td></tr>
+<tr><td>Parts per upload</td><td class="num">1 to 10,000</td></tr>
+<tr><td>Part size</td><td class="num">5 MiB to 5 GiB (the last part can be smaller)</td></tr>
+<tr><td>Largest object</td><td class="num">50 TB (raised from 5 TB in December 2025)</td></tr>
+</tbody></table></div>
+<p>Because of the 10,000-part cap, pick the part size from the file size:</p>
+<div class="formula">part size ≥ file size ÷ 10,000 &nbsp;·&nbsp; 50 GB → at least 5 MB &nbsp;·&nbsp; 1 TB → at least 100 MB</div>
+<p>In practice 8 to 64 MB parts work well for most files: small enough that a retry is cheap, large enough that per-request overhead stays small. Use multipart for anything over about 100 MB.</p>
+<h3>Resuming</h3>
+<p>If the client crashes, it keeps the <code>uploadId</code>, asks the store which parts it already has (<code>ListParts</code>) and uploads only the rest. For browsers and phones, the open <a href="https://tus.io/">tus protocol</a> wraps the same idea in a standard resumable-upload API. The <a href="file-sync.html">file sync</a> design goes one step further and names each block by its hash, so unchanged blocks are never uploaded at all.</p>
+<div class="note"><p>Parts of an upload that is never completed or aborted are <strong>stored and billed</strong>, but invisible in normal listings. Always add a lifecycle rule that aborts incomplete multipart uploads after a few days.</p></div>
+<p>One surprise: the ETag of a multipart object is <em>not</em> the MD5 of the file. It is a hash of the part hashes with <code>-N</code> on the end (N = number of parts), so do not compare it with a local MD5. Send a per-part checksum (CRC32C or SHA-256) instead and let the store verify it.</p></section>
+
+<section id="lab"><h2>Try it: replication vs erasure coding</h2>
+<p>Store a data set with plain copies or with erasure codes. Compare how much disk you pay for, how many failures you can survive, the modelled durability, and how much data has to move across the network when one 20 TB disk dies.</p>
+<div class="lab" id="eclab">
+  <div class="lab-row"><span class="lab-k">Scheme</span><span class="seg" role="group" aria-label="Redundancy scheme" id="ec-s"><button type="button" data-v="0" aria-pressed="false">2 copies</button><button type="button" data-v="1" aria-pressed="true">3 copies</button><button type="button" data-v="2" aria-pressed="false">RS 4+2</button><button type="button" data-v="3" aria-pressed="false">RS 6+3</button><button type="button" data-v="4" aria-pressed="false">RS 10+4</button></span></div>
+  <div class="lab-row"><label for="ec-pb">Data stored, PB <input type="range" id="ec-pb" min="1" max="50" step="1" value="10"><output id="ec-pb-o"></output></label><label for="ec-afr">Disk failures a year <input type="range" id="ec-afr" min="0.5" max="5" step="0.5" value="2"><output id="ec-afr-o"></output></label><label for="ec-rep">Repair time, hours <input type="range" id="ec-rep" min="6" max="168" step="6" value="24"><output id="ec-rep-o"></output></label></div>
+  <div class="metrics" id="ec-m"></div>
+  <div class="bars" id="ec-bars" style="margin-top:14px" aria-label="Monthly disk cost by scheme"></div>
+  <p class="lab-out" id="ec-out" aria-live="polite"></p>
+</div>
+<p class="muted" style="font-size:13.5px">Illustrative. Assumes $10 per raw TB per month for disks, servers and power, 20 TB disks, and independent failures. Durability uses the usual quick estimate: the chance that, after one chunk is lost, enough others in the same stripe fail before repair finishes. Real systems lose data mostly through correlated failures (a rack, a bad firmware batch, a software bug), so providers quote about 11 nines, not the 15 this model can show.</p></section>
+
+<section id="durability"><h2>Durability: copies or codes</h2>
+<h3>Replication</h3>
+<p>Write each chunk to three disks in three failure domains. Simple, fast to read (any one copy will do) and fast to repair (copy one chunk from a survivor). But you pay for <strong>3×</strong> the disk, and at petabyte scale disk is the bill.</p>
+<h3>Erasure coding</h3>
+<p>Reed-Solomon <strong>RS(k, m)</strong> cuts data into k chunks and computes m parity chunks, so that <em>any</em> k of the k + m chunks can rebuild the original. RS(6, 3) stores 9 chunks for 6 chunks of data: <strong>1.5×</strong> overhead, and it survives any 3 losses, one more than three copies survives.</p>
+<figure class="fig"><svg viewBox="0 0 722 150" class="dg" role="img" aria-label="Three copies use 18 chunk slots for 6 chunks of data; RS 6 plus 3 uses 9 slots and survives more failures">
+<text x="20" y="22" class="cap">3 COPIES · 3.0× · SURVIVES 2 LOSSES</text>
+<g id="rep"></g>
+<text x="20" y="96" class="cap">RS(6, 3) · 1.5× · SURVIVES ANY 3 LOSSES</text>
+<g id="rs"></g>
+</svg><figcaption>Same 6 chunks of data. Each square is one chunk on a different disk; blue squares are parity.</figcaption></figure>
+<div class="table"><table><thead><tr><th></th><th>3 copies</th><th>RS(6, 3)</th><th>RS(10, 4)</th></tr></thead><tbody>
+<tr><td>Raw disk per byte</td><td class="num">3.0×</td><td class="num">1.5×</td><td class="num">1.4×</td></tr>
+<tr><td>Losses survived</td><td class="num">2</td><td class="num">3</td><td class="num">4</td></tr>
+<tr><td>Normal read</td><td>1 disk, whole object</td><td>6 disks in parallel</td><td>10 disks in parallel</td></tr>
+<tr><td>Read during a failure</td><td>Read another copy</td><td>Read 6 survivors and decode</td><td>Read 10 survivors and decode</td></tr>
+<tr><td>Repair one lost chunk</td><td>Copy 1 chunk</td><td>Read 6 chunks</td><td>Read 10 chunks</td></tr>
+<tr><td>Good for</td><td>Hot, small, latency-sensitive data; metadata</td><td>Most stored bytes</td><td>Large, colder data</td></tr>
+</tbody></table></div>
+<p>The trade: erasure coding halves the disk bill but makes every repair read k times more data over the network, and makes small objects awkward (a 4 KB object split six ways is all overhead). Real systems mix both: new or small objects start replicated, then a background job re-encodes them once they are cold. Microsoft Azure uses <strong>local reconstruction codes</strong>, which add small local parity groups so most repairs read a few chunks instead of all k.</p>
+<p>Across regions, the same choice repeats: a full copy in a second region (2× again, simple) or a code spread across three or more regions (cheaper, but every read during an outage crosses regions).</p></section>
+
+<section id="classes"><h2>Storage classes and lifecycle</h2>
+<p>Most data is read a lot in its first weeks, then almost never. Storage classes let you pay less per GB in exchange for slower or pricier reads.</p>
+<div class="table"><table><thead><tr><th>Class (S3 names)</th><th>About $/GB-month</th><th>Read</th><th>Catch</th></tr></thead><tbody>
+<tr><td>Standard</td><td class="num">0.023</td><td>Milliseconds</td><td>Most expensive to store</td></tr>
+<tr><td>Standard-IA (infrequent access)</td><td class="num">0.0125</td><td>Milliseconds</td><td>Per-GB retrieval fee; 30-day minimum; 128 KB minimum billed size</td></tr>
+<tr><td>One Zone-IA</td><td class="num">0.01</td><td>Milliseconds</td><td>One zone only: lost if that zone is lost. For data you can recreate</td></tr>
+<tr><td>Glacier Instant Retrieval</td><td class="num">0.004</td><td>Milliseconds</td><td>Higher retrieval fee; 90-day minimum</td></tr>
+<tr><td>Glacier Flexible Retrieval</td><td class="num">0.0036</td><td>Minutes to hours</td><td>Must restore before reading; 90-day minimum</td></tr>
+<tr><td>Glacier Deep Archive</td><td class="num">0.00099</td><td>Within 12 hours (48 for bulk)</td><td>180-day minimum; for compliance copies</td></tr>
+<tr><td>Intelligent-Tiering</td><td class="num">varies</td><td>Milliseconds</td><td>Moves objects between tiers by access; small monitoring fee per object</td></tr>
+</tbody></table></div>
+<p class="muted" style="font-size:13.5px">Approximate us-east-1 list prices for the first tier. Prices change; check the current pricing page.</p>
+<p><strong>Lifecycle rules</strong> move or delete objects automatically by age and prefix, so nobody has to remember:</p>
+<pre><code>uploads/tmp/      expire after 1 day
+logs/             Standard → Standard-IA at 30 days → Glacier Flexible at 90 → delete at 400
+backups/          Glacier Deep Archive at 7 days
+*                 delete noncurrent versions after 30 days
+*                 abort incomplete multipart uploads after 7 days</code></pre>
+<p>Watch the small print: moving millions of tiny objects costs a fee per object, and deleting before the minimum duration still bills the full minimum. Cold classes save money on data you are sure you will not read.</p></section>
+
+<section id="mime"><h2>Content types</h2>
+<p>The store does not care what the bytes are, but browsers do. Each object carries a <code>Content-Type</code> (a MIME type such as <code>image/jpeg</code>, <code>video/mp4</code> or <code>application/pdf</code>) that is returned as a header on every GET. If nobody sets it, it falls back to a generic binary type, and the browser downloads the file instead of showing it.</p>
+<ul class="plain">
+<li><strong>Set it at upload</strong>, and bind it in the presigned URL so the client cannot swap it.</li>
+<li><strong>Do not trust it.</strong> The client chooses the header and the file name. After upload, check the real type from the file's first bytes (magic numbers: JPEG starts <code>FF D8 FF</code>, PDF starts <code>%PDF</code>) before you process or serve it.</li>
+<li><strong>Serve user uploads from a separate domain</strong> (like <code>usercontent.example.com</code>), with <code>X-Content-Type-Options: nosniff</code>, and <code>Content-Disposition: attachment</code> for anything that is not a known-safe image or video. Otherwise an "image" that is really HTML can run script on your main site.</li>
+<li><strong>Set <code>Cache-Control</code></strong> too, so the <a href="cdn.html">CDN</a> in front of the bucket knows how long to keep each object. Content-hashed keys like <code>app.3f9a1c.js</code> can be cached for a year.</li>
+</ul></section>
+
+<section id="failure"><h2>How it goes wrong</h2>
+<h3>Public buckets</h3>
+<p>The most common real incident is not lost data but leaked data: a bucket left readable by anyone. Block public access at the account level, serve public files through a CDN with origin access control, and hand out presigned URLs for everything else.</p>
+<h3>Accidental deletes and ransomware</h3>
+<p>Durability protects against disks failing, not against your own delete calls. Turn on versioning for important buckets, use object lock (write once, read many) for backups, and copy critical data to a second account.</p>
+<h3>Hot prefixes and request limits</h3>
+<p>A burst of writes under one prefix gets <code>503 Slow Down</code> until the store splits it. Spread keys with a hash prefix, and retry with exponential backoff and jitter.</p>
+<h3>Lots of tiny objects</h3>
+<p>Every object costs a metadata entry and a request fee, and IA classes bill at least 128 KB each. A billion 1 KB log lines as separate objects is slow to list and expensive. Batch small records into larger files (Parquet, or compressed log segments) before storing them.</p>
+<h3>Listing as a database</h3>
+<p><code>LIST</code> returns 1,000 keys per page in key order and is slow over millions of keys. Keep an index of your objects in a real <a href="databases.html">database</a>, or use the store's inventory reports, instead of listing to find things.</p>
+<h3>Egress bills</h3>
+<p>Storing is cheap; sending bytes out to the internet is not (roughly $0.05–0.09 per GB from the big clouds). Put a <a href="cdn.html">CDN</a> in front of anything popular, and keep compute that reads a lot of data in the same region as the bucket.</p></section>
+
+<section id="interview"><h2>Saying it in an interview</h2>
+<div class="say"><p>"Media goes to object storage, and the database only keeps a row with the object key, size, type and owner. Uploads skip our API: the client asks for an upload, we pick the key, start a multipart upload and return presigned part URLs that expire in 15 minutes. The client sends 16 MB parts in parallel, retries failed parts, and resumes with the upload ID if it crashes. When the store fires its object-created event, a worker checks the real file type, scans it and marks the row ready. Reads go through a CDN with signed URLs for private files. The store keeps data with erasure coding across three zones, about 1.5× raw disk for 11 nines. Lifecycle rules move objects to infrequent access after 30 days, to archive after 90, and clean up abandoned uploads."</p></div></section>
+
+<section id="real-world"><h2>In the real world</h2>
+<div class="table"><table><thead><tr><th>Need</th><th>Real options</th><th>Notes</th></tr></thead><tbody>
+<tr><td>Managed object storage</td><td>Amazon S3, Google Cloud Storage, Azure Blob Storage</td><td>The S3 API has become the common language; most tools speak it</td></tr>
+<tr><td>Low or no egress fees</td><td>Cloudflare R2, Backblaze B2, Wasabi</td><td>S3-compatible APIs; check request pricing and feature gaps</td></tr>
+<tr><td>Self-hosted</td><td>MinIO, Ceph (RADOS Gateway), SeaweedFS</td><td>You run the disks, repair and upgrades yourself</td></tr>
+<tr><td>Published erasure-coding designs</td><td>Facebook f4 (RS 10+4 for warm photos), Azure LRC, Backblaze Vaults (17+3), HDFS erasure coding (RS 6+3 policy)</td><td>Good reading for how real systems pick k and m</td></tr>
+<tr><td>Resumable uploads</td><td>S3 multipart, GCS resumable uploads, tus</td><td>Same idea: upload in pieces, keep a session ID, resume</td></tr>
+</tbody></table></div>
+<p class="muted" style="font-size:13.5px;color:var(--muted)">Products change quickly; names here are examples, not endorsements. Check current docs before choosing.</p></section>
+
+<section id="related"><h2>Related</h2><ul class="related"><li><a href="cdn.html">CDNs, PoPs and IXPs</a></li><li><a href="databases.html">Databases and indexes</a></li><li><a href="merkle-trees.html">Merkle trees</a></li><li><a href="hot-partitions.html">Hot partitions</a></li><li><a href="video-streaming.html">Video streaming</a></li><li><a href="file-sync.html">File sync</a></li><li><a href="numbers.html">Numbers to know</a></li></ul></section>
+  </article>
+</div>
+</main>
+<footer class="site"><div class="wrap">Part of Classic System Design, a companion to the <a href="https://devlcodes.github.io/agentic-ai-notebook/system-design/index.html">agentic system designs</a>. Figures marked illustrative show the shape of a system, not measured numbers. Check vendor docs before relying on a specific product limit.</div></footer>
+<script>
+(function(){
+  var NS = 'http://www.w3.org/2000/svg';
+  function sq(g, x, y, cls, label){ var r = document.createElementNS(NS, 'rect'); r.setAttribute('x', x); r.setAttribute('y', y); r.setAttribute('width', 30); r.setAttribute('height', 30); r.setAttribute('rx', 4); r.setAttribute('class', cls); g.appendChild(r); var t = document.createElementNS(NS, 'text'); t.setAttribute('x', x + 15); t.setAttribute('y', y + 19); t.setAttribute('text-anchor', 'middle'); t.setAttribute('class', 'mono sm'); t.textContent = label; g.appendChild(t); }
+  var rep = document.getElementById('rep'), rs = document.getElementById('rs');
+  for (var c = 0; c < 3; c++) for (var i = 0; i < 6; i++) sq(rep, 20 + c * 228 + i * 36, 34, 'cell', 'd' + (i + 1));
+  for (i = 0; i < 6; i++) sq(rs, 20 + i * 36, 108, 'cell', 'd' + (i + 1));
+  for (i = 0; i < 3; i++) sq(rs, 248 + i * 36, 108, 'cell old', 'p' + (i + 1));
+})();
+(function(){
+  var $ = function(id){ return document.getElementById(id); };
+  var S = [ { name: '2 copies', k: 1, n: 2 }, { name: '3 copies', k: 1, n: 3 }, { name: 'RS 4+2', k: 4, n: 6 }, { name: 'RS 6+3', k: 6, n: 9 }, { name: 'RS 10+4', k: 10, n: 14 } ];
+  var sel = 1, PRICE = 10, DISK = 20;
+  function choose(n, r){ var x = 1; for (var i = 1; i <= r; i++) x = x * (n - r + i) / i; return x; }
+  function lossPerYear(s, afr, hours){ var lam = afr / 100, T = hours / 8760, m = s.n - s.k; return s.n * lam * choose(s.n - 1, m) * Math.pow(lam * T, m); }
+  function money(v){ return v >= 1e6 ? '$' + (v / 1e6).toFixed(2) + 'M' : '$' + Math.round(v / 1000) + 'k'; }
+  function run(){
+    var pb = +$('ec-pb').value, afr = +$('ec-afr').value, hrs = +$('ec-rep').value, s = S[sel], m = s.n - s.k, over = s.n / s.k;
+    $('ec-pb-o').textContent = pb + ' PB'; $('ec-afr-o').textContent = afr.toFixed(1) + '%'; $('ec-rep-o').textContent = hrs + ' h';
+    var rawTB = pb * 1000 * over, cost = rawTB * PRICE, p = lossPerYear(s, afr, hrs), nines = -Math.log10(p), repairTB = DISK * s.k;
+    var ninesTxt = nines > 18 ? '18+' : nines.toFixed(1);
+    $('ec-m').innerHTML =
+      '<div class="metric"><span class="n">' + over.toFixed(2).replace(/0$/, '') + '×</span><span class="l">raw disk</span><small>' + (rawTB / 1000).toFixed(rawTB < 10000 ? 1 : 0) + ' PB of disks</small></div>' +
+      '<div class="metric"><span class="n">' + money(cost) + '</span><span class="l">per month</span><small>at $' + PRICE + ' per raw TB</small></div>' +
+      '<div class="metric"><span class="n">' + m + '</span><span class="l">losses survived</span><small>per stripe of ' + s.n + '</small></div>' +
+      '<div class="metric"><span class="n">' + ninesTxt + '</span><span class="l">nines (model)</span><small>stripe loss risk a year</small></div>' +
+      '<div class="metric"><span class="n">' + repairTB + ' TB</span><span class="l">repair reads</span><small>to rebuild one 20 TB disk</small></div>';
+    var max = 0, rows = '';
+    S.forEach(function(x){ var c = pb * 1000 * x.n / x.k * PRICE; if (c > max) max = c; });
+    S.forEach(function(x, i){ var c = pb * 1000 * x.n / x.k * PRICE; rows += '<div class="bar-row"><span' + (i === sel ? ' style="font-weight:600"' : ' class="muted"') + '>' + x.name + '</span><span class="bar"><i style="width:' + (c / max * 100).toFixed(1) + '%;background:' + (i === sel ? 'var(--accent)' : 'var(--line-strong)') + '"></i></span><span class="v">' + money(c) + '</span></div>'; });
+    $('ec-bars').innerHTML = rows;
+    var r3 = lossPerYear(S[1], afr, hrs), msg;
+    if (s.k === 1 && s.n === 2) msg = 'Two copies leave one failure of margin: if the second disk dies before repair finishes, that data is gone. Fine for caches and data you can rebuild, not for the only copy of user files.';
+    else if (s.k === 1) msg = 'Three copies is the simple default: any copy can serve a read and repair just copies one chunk (' + repairTB + ' TB for a dead disk). But you pay for ' + (pb * 3) + ' PB of disk to keep ' + pb + ' PB of data.';
+    else {
+      var save = 1 - over / 3, ratio = r3 / p;
+      msg = s.name + ' needs ' + Math.round(save * 100) + '% less disk than three copies (saving ' + money(pb * 1000 * (3 - over) * PRICE) + ' a month) and is ' + (ratio >= 1 ? 'about ' + (ratio >= 1000 ? '10^' + Math.round(Math.log10(ratio)) : Math.round(ratio)) + '× less likely' : 'about ' + Math.round(1 / ratio) + '× more likely') + ' to lose a stripe in this model. The price: every repair reads ' + s.k + '× more data (' + repairTB + ' TB per dead disk instead of ' + DISK + '), and a normal read touches ' + s.k + ' disks.';
+    }
+    if (hrs >= 96) msg += ' Slow repairs hurt: the longer a stripe waits with a missing chunk, the bigger the window for more failures.';
+    $('ec-out').textContent = msg;
+  }
+  $('ec-s').addEventListener('click', function(e){ var b = e.target.closest('button'); if (!b) return; sel = +b.dataset.v; this.querySelectorAll('button').forEach(function(x){ x.setAttribute('aria-pressed', x === b); }); run(); });
+  ['ec-pb', 'ec-afr', 'ec-rep'].forEach(function(id){ $(id).addEventListener('input', run); });
+  run();
+})();
+</script>
+</body>
+</html>

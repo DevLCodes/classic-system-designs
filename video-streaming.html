@@ -325,7 +325,7 @@ POST /api/events                        (batched playback telemetry)</code></pre
 
 <section id="architecture">
   <h2>Architecture</h2>
-  <ul class="tags"><li>Whole system</li></ul>
+  <ul class="tags"><li>Whole system</li><li><a href="object-storage.html">Object storage</a></li></ul>
   <figure class="fig"><svg viewBox="0 0 722 320" class="dg" role="img" aria-label="Architecture: uploads go to object storage, an event starts the processing pipeline which writes segments to the origin; playback goes through an API gateway to playback and metadata services, while segment bytes come from ISP caches backed by the origin; events flow through Kafka to search, recommendations and analytics">
     <text x="10" y="22" class="cap">UPLOAD AND PROCESSING · 500 H/MIN</text>
     <rect x="10" y="34" width="86" height="40" rx="8" class="k-user"/><text x="53" y="58" class="small b" text-anchor="middle">Creator</text>
