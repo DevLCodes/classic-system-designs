@@ -157,6 +157,17 @@
   .dg .dot-hr { fill: var(--c-gov); } .dg .dot-it { fill: var(--c-kb); } .dg .dot-eng { fill: var(--c-ingest); } .dg .dot-q { fill: var(--c-serve); stroke: var(--ink); stroke-width: 1.5; }
   .dg .halo { fill: none; stroke: var(--c-serve); stroke-width: 1.5; stroke-dasharray: 4 4; }
   .dg .zone { fill: var(--paper); stroke: var(--line); stroke-width: 1; }
+  /* Check yourself: self-test questions, answers in details/summary (see STYLES.md) */
+  .check { counter-reset: chk; }
+  .check details { counter-increment: chk; border: 1px solid var(--line); border-radius: 10px; background: var(--paper); margin: 0 0 10px; }
+  .check summary { position: relative; display: block; cursor: pointer; list-style: none; padding: 12px 44px 12px 48px; font-weight: 600; line-height: 1.45; }
+  .check summary::-webkit-details-marker { display: none; }
+  .check summary::before { content: "Q" counter(chk); position: absolute; left: 16px; top: 14px; font-family: var(--font-mono); font-size: 12px; font-weight: 500; color: var(--accent); }
+  .check summary::after { content: "+"; position: absolute; right: 16px; top: 10px; font-family: var(--font-mono); font-size: 18px; color: var(--muted); }
+  .check details[open] summary::after { content: "\2212"; }
+  .check summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 10px; }
+  .check .ans { margin: 0; padding: 0 16px 14px 48px; color: var(--ink); }
+  .check .ans a { font-family: var(--font-mono); font-size: 12.5px; white-space: nowrap; }
 </style>
 
 <style>
@@ -249,7 +260,7 @@
   <figcaption>Illustrative. Metadata and bytes travel separately: small metadata calls go through our services, file blocks go straight to the block store.</figcaption>
 </figure></div>
 <div class="wrap doc">
-  <nav class="toc" aria-label="Sections"><p>The solution</p><ol><li><a href="#requirements">Requirements</a></li><li><a href="#success">Success metrics</a></li><li><a href="#estimates">Estimates</a></li><li><a href="#api">API</a></li><li><a href="#architecture">Architecture</a></li><li><a href="#chunking">Blocks, hashes and dedupe</a></li><li><a href="#lab">Try it: what does an edit upload?</a></li><li><a href="#sync">Keeping devices in sync</a></li><li><a href="#conflicts">Conflicts</a></li><li><a href="#storage">Storage</a></li><li><a href="#sharing">Sharing and security</a></li><li><a href="#deployment">Deployment and durability</a></li><li><a href="#observability">Observability</a></li><li><a href="#risks">Risks and v2</a></li><li><a href="#presenting">Presenting it in 45 minutes</a></li><li><a href="#numbers">Numbers to remember</a></li></ol></nav>
+  <nav class="toc" aria-label="Sections"><p>The solution</p><ol><li><a href="#requirements">Requirements</a></li><li><a href="#success">Success metrics</a></li><li><a href="#estimates">Estimates</a></li><li><a href="#api">API</a></li><li><a href="#architecture">Architecture</a></li><li><a href="#chunking">Blocks, hashes and dedupe</a></li><li><a href="#lab">Try it: what does an edit upload?</a></li><li><a href="#sync">Keeping devices in sync</a></li><li><a href="#conflicts">Conflicts</a></li><li><a href="#storage">Storage</a></li><li><a href="#sharing">Sharing and security</a></li><li><a href="#deployment">Deployment and durability</a></li><li><a href="#observability">Observability</a></li><li><a href="#risks">Risks and v2</a></li><li><a href="#presenting">Presenting it in 45 minutes</a></li><li><a href="#numbers">Numbers to remember</a></li><li><a href="#check">Check yourself</a></li></ol></nav>
   <article>
 
 <section id="requirements">
@@ -501,6 +512,14 @@ blocks       (hash PK, size, storage_key, ref_count)</code></pre>
     <tr><td>Long poll timeout</td><td class="num">~30–90 s</td></tr>
     <tr><td>Version history</td><td class="num">30+ days</td></tr>
   </tbody></table></div>
+</section>
+
+<section id="check" class="check"><h2>Check yourself</h2>
+  <p>Answer in your head first, then open each question to compare.</p>
+  <details><summary>A user inserts one sentence near the start of a 2 GB file and the client re-uploads almost the whole file. Why?</summary><p class="ans"><strong>Fixed-size blocks shifted, changing every hash after the insert.</strong> Content-defined chunking keeps boundaries with the content so only one block changes. <a href="#chunking">Read the section</a></p></details>
+  <details><summary>Two laptops edit the same spreadsheet offline and both sync. What should the system do?</summary><p class="ans"><strong>Accept the first commit and save the second as a conflicted copy.</strong> Compare-and-set detects it and both versions are kept so no work is lost. <a href="#conflicts">Read the section</a></p></details>
+  <details><summary>A device was offline for two weeks. How does it catch up?</summary><p class="ans"><strong>Calls /changes with its stored cursor and downloads missing blocks.</strong> The cursor works however long it was away; a compacted journal falls back to a full listing. <a href="#sync">Read the section</a></p></details>
+  <details><summary>A buggy client release starts deleting files on every device of an account. What limits the damage?</summary><p class="ans"><strong>Version history plus server-side rate limits on bulk deletes.</strong> Versions let files be restored and delete limits stop the spread. <a href="#risks">Read the section</a></p></details>
 </section>
   </article>
 </div>

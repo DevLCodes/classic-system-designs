@@ -157,6 +157,17 @@
   .dg .dot-hr { fill: var(--c-gov); } .dg .dot-it { fill: var(--c-kb); } .dg .dot-eng { fill: var(--c-ingest); } .dg .dot-q { fill: var(--c-serve); stroke: var(--ink); stroke-width: 1.5; }
   .dg .halo { fill: none; stroke: var(--c-serve); stroke-width: 1.5; stroke-dasharray: 4 4; }
   .dg .zone { fill: var(--paper); stroke: var(--line); stroke-width: 1; }
+  /* Check yourself: self-test questions, answers in details/summary (see STYLES.md) */
+  .check { counter-reset: chk; }
+  .check details { counter-increment: chk; border: 1px solid var(--line); border-radius: 10px; background: var(--paper); margin: 0 0 10px; }
+  .check summary { position: relative; display: block; cursor: pointer; list-style: none; padding: 12px 44px 12px 48px; font-weight: 600; line-height: 1.45; }
+  .check summary::-webkit-details-marker { display: none; }
+  .check summary::before { content: "Q" counter(chk); position: absolute; left: 16px; top: 14px; font-family: var(--font-mono); font-size: 12px; font-weight: 500; color: var(--accent); }
+  .check summary::after { content: "+"; position: absolute; right: 16px; top: 10px; font-family: var(--font-mono); font-size: 18px; color: var(--muted); }
+  .check details[open] summary::after { content: "\2212"; }
+  .check summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 10px; }
+  .check .ans { margin: 0; padding: 0 16px 14px 48px; color: var(--ink); }
+  .check .ans a { font-family: var(--font-mono); font-size: 12.5px; white-space: nowrap; }
 </style>
 
 <style>
@@ -249,7 +260,7 @@
   <figcaption>Illustrative. The switch never holds money; it routes messages, keeps the state of every transaction, and tells banks what to settle.</figcaption>
 </figure></div>
 <div class="wrap doc">
-  <nav class="toc" aria-label="Sections"><p>The solution</p><ol><li><a href="#requirements">Requirements</a></li><li><a href="#success">Success metrics</a></li><li><a href="#estimates">Estimates</a></li><li><a href="#api">API</a></li><li><a href="#architecture">Architecture</a></li><li><a href="#vpa">VPA resolution</a></li><li><a href="#flow">Debit, then credit</a></li><li><a href="#timeouts">Timeouts, deemed success and reversals</a></li><li><a href="#lab">Try it: slow banks</a></li><li><a href="#idempotency">Idempotency</a></li><li><a href="#recon">Settlement and reconciliation</a></li><li><a href="#storage">Storage</a></li><li><a href="#deployment">Deployment and resilience</a></li><li><a href="#observability">Observability</a></li><li><a href="#risks">Risks and v2</a></li><li><a href="#presenting">Presenting it in 45 minutes</a></li><li><a href="#numbers">Numbers to remember</a></li></ol></nav>
+  <nav class="toc" aria-label="Sections"><p>The solution</p><ol><li><a href="#requirements">Requirements</a></li><li><a href="#success">Success metrics</a></li><li><a href="#estimates">Estimates</a></li><li><a href="#api">API</a></li><li><a href="#architecture">Architecture</a></li><li><a href="#vpa">VPA resolution</a></li><li><a href="#flow">Debit, then credit</a></li><li><a href="#timeouts">Timeouts, deemed success and reversals</a></li><li><a href="#lab">Try it: slow banks</a></li><li><a href="#idempotency">Idempotency</a></li><li><a href="#recon">Settlement and reconciliation</a></li><li><a href="#storage">Storage</a></li><li><a href="#deployment">Deployment and resilience</a></li><li><a href="#observability">Observability</a></li><li><a href="#risks">Risks and v2</a></li><li><a href="#presenting">Presenting it in 45 minutes</a></li><li><a href="#numbers">Numbers to remember</a></li><li><a href="#check">Check yourself</a></li></ol></nav>
   <article>
 
 <section id="requirements">
@@ -549,6 +560,14 @@ switch → bank    ReqPay REVERSAL { txnId, rrn, original: DEBIT } → SUCCESS |
     <tr><td>Debited, not credited</td><td class="num">fixed by T+1, or the bank pays compensation</td></tr>
     <tr><td>Ids</td><td class="num">txnId from the payer PSP, 12-digit RRN</td></tr>
   </tbody></table></div>
+</section>
+
+<section id="check" class="check"><h2>Check yourself</h2>
+  <p>Answer in your head first, then open each question to compare.</p>
+  <details><summary>The credit leg to the payee's bank times out after a successful debit. What should the switch do?</summary><p class="ans"><strong>Mark the payment DEEMED, chase it with check status, and settle by T+1.</strong> Reversing could create money if the payee was actually credited. <a href="#timeouts">Read the section</a></p></details>
+  <details><summary>A user's app retries ReqPay after a network drop. How is a double debit avoided?</summary><p class="ans"><strong>The same txnId is reused, and the switch and banks dedupe on it.</strong> One id end to end makes retries idempotent. <a href="#idempotency">Read the section</a></p></details>
+  <details><summary>One large bank's core system slows down during a festival, and open transactions across the switch climb. What should happen?</summary><p class="ans"><strong>Trip a per-bank circuit breaker and fail fast, with per-bank rate limits.</strong> Waiting on a dead bank only builds open transactions. <a href="#deployment">Read the section</a></p></details>
+  <details><summary>A user moved ravi@ybl to a new bank account yesterday, but a payment was credited to the old account. What design mistake causes this?</summary><p class="ans"><strong>Caching VPA to account answers at the switch.</strong> The VPA lookup must run against the payee PSP on every payment. <a href="#vpa">Read the section</a></p></details>
 </section>
   </article>
 </div>

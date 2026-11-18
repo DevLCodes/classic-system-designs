@@ -157,6 +157,17 @@
   .dg .dot-hr { fill: var(--c-gov); } .dg .dot-it { fill: var(--c-kb); } .dg .dot-eng { fill: var(--c-ingest); } .dg .dot-q { fill: var(--c-serve); stroke: var(--ink); stroke-width: 1.5; }
   .dg .halo { fill: none; stroke: var(--c-serve); stroke-width: 1.5; stroke-dasharray: 4 4; }
   .dg .zone { fill: var(--paper); stroke: var(--line); stroke-width: 1; }
+  /* Check yourself: self-test questions, answers in details/summary (see STYLES.md) */
+  .check { counter-reset: chk; }
+  .check details { counter-increment: chk; border: 1px solid var(--line); border-radius: 10px; background: var(--paper); margin: 0 0 10px; }
+  .check summary { position: relative; display: block; cursor: pointer; list-style: none; padding: 12px 44px 12px 48px; font-weight: 600; line-height: 1.45; }
+  .check summary::-webkit-details-marker { display: none; }
+  .check summary::before { content: "Q" counter(chk); position: absolute; left: 16px; top: 14px; font-family: var(--font-mono); font-size: 12px; font-weight: 500; color: var(--accent); }
+  .check summary::after { content: "+"; position: absolute; right: 16px; top: 10px; font-family: var(--font-mono); font-size: 18px; color: var(--muted); }
+  .check details[open] summary::after { content: "\2212"; }
+  .check summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 10px; }
+  .check .ans { margin: 0; padding: 0 16px 14px 48px; color: var(--ink); }
+  .check .ans a { font-family: var(--font-mono); font-size: 12.5px; white-space: nowrap; }
 </style>
 
 <style>
@@ -249,7 +260,7 @@
   <figcaption>Illustrative. Browsing reads cached, slightly stale availability; the hold and the booking are the only strongly consistent steps.</figcaption>
 </figure></div>
 <div class="wrap doc">
-  <nav class="toc" aria-label="Sections"><p>The solution</p><ol><li><a href="#requirements">Requirements</a></li><li><a href="#success">Success metrics</a></li><li><a href="#estimates">Estimates</a></li><li><a href="#api">API</a></li><li><a href="#architecture">Architecture</a></li><li><a href="#seatmap">Shows and seat maps</a></li><li><a href="#holds">Seat holds</a></li><li><a href="#lab">Try it: tune the hold timeout</a></li><li><a href="#booking">Booking and payment</a></li><li><a href="#hot">Blockbuster releases</a></li><li><a href="#restaurant">Variant: restaurant reservations</a></li><li><a href="#storage">Storage</a></li><li><a href="#observability">Observability</a></li><li><a href="#risks">Risks and v2</a></li><li><a href="#presenting">Presenting it in 45 minutes</a></li><li><a href="#numbers">Numbers to remember</a></li></ol></nav>
+  <nav class="toc" aria-label="Sections"><p>The solution</p><ol><li><a href="#requirements">Requirements</a></li><li><a href="#success">Success metrics</a></li><li><a href="#estimates">Estimates</a></li><li><a href="#api">API</a></li><li><a href="#architecture">Architecture</a></li><li><a href="#seatmap">Shows and seat maps</a></li><li><a href="#holds">Seat holds</a></li><li><a href="#lab">Try it: tune the hold timeout</a></li><li><a href="#booking">Booking and payment</a></li><li><a href="#hot">Blockbuster releases</a></li><li><a href="#restaurant">Variant: restaurant reservations</a></li><li><a href="#storage">Storage</a></li><li><a href="#observability">Observability</a></li><li><a href="#risks">Risks and v2</a></li><li><a href="#presenting">Presenting it in 45 minutes</a></li><li><a href="#numbers">Numbers to remember</a></li><li><a href="#check">Check yourself</a></li></ol></nav>
   <article>
 
 <section id="requirements">
@@ -513,6 +524,14 @@ GET  /api/bookings/{booking_id}  → { status: PENDING_PAYMENT | CONFIRMED | EXP
     <tr><td>Hot release</td><td class="num">1M users, 50k seats, sold out in minutes</td></tr>
     <tr><td>Restaurant seating for four</td><td class="num">~90 minutes, 15-minute buckets</td></tr>
   </tbody></table></div>
+</section>
+
+<section id="check" class="check"><h2>Check yourself</h2>
+  <p>Answer in your head first, then open each question to compare.</p>
+  <details><summary>Holds use SELECT ... FOR UPDATE and keep the lock while the user is on the payment page. What goes wrong at a busy show?</summary><p class="ans"><strong>Locks pile up while users dither, blocking other buyers.</strong> Never keep a database lock open across a payment page. <a href="#holds">Read the section</a></p></details>
+  <details><summary>During a release the show looks sold out, but later hundreds of seats come back. What is happening?</summary><p class="ans"><strong>Holds from abandoners lock seats until they expire; shorter holds help.</strong> Little's law: holds per minute × minutes held is the number of seats hidden. <a href="#lab">Read the section</a></p></details>
+  <details><summary>One blockbuster show's bookings are slowing down bookings for all other shows. What design fixes this?</summary><p class="ans"><strong>Shard holds and bookings by show_id and give blockbusters their own capacity.</strong> Partitioning by show isolates hot shows from the other 250k. <a href="#hot">Read the section</a></p></details>
+  <details><summary>The payment provider times out for a booking with an active hold. What should the service do?</summary><p class="ans"><strong>Keep the hold, query the provider, and let reconciliation check stuck bookings.</strong> A timeout is not a failure; resolve before deciding. <a href="#booking">Read the section</a></p></details>
 </section>
   </article>
 </div>

@@ -157,6 +157,17 @@
   .dg .dot-hr { fill: var(--c-gov); } .dg .dot-it { fill: var(--c-kb); } .dg .dot-eng { fill: var(--c-ingest); } .dg .dot-q { fill: var(--c-serve); stroke: var(--ink); stroke-width: 1.5; }
   .dg .halo { fill: none; stroke: var(--c-serve); stroke-width: 1.5; stroke-dasharray: 4 4; }
   .dg .zone { fill: var(--paper); stroke: var(--line); stroke-width: 1; }
+  /* Check yourself: self-test questions, answers in details/summary (see STYLES.md) */
+  .check { counter-reset: chk; }
+  .check details { counter-increment: chk; border: 1px solid var(--line); border-radius: 10px; background: var(--paper); margin: 0 0 10px; }
+  .check summary { position: relative; display: block; cursor: pointer; list-style: none; padding: 12px 44px 12px 48px; font-weight: 600; line-height: 1.45; }
+  .check summary::-webkit-details-marker { display: none; }
+  .check summary::before { content: "Q" counter(chk); position: absolute; left: 16px; top: 14px; font-family: var(--font-mono); font-size: 12px; font-weight: 500; color: var(--accent); }
+  .check summary::after { content: "+"; position: absolute; right: 16px; top: 10px; font-family: var(--font-mono); font-size: 18px; color: var(--muted); }
+  .check details[open] summary::after { content: "\2212"; }
+  .check summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 10px; }
+  .check .ans { margin: 0; padding: 0 16px 14px 48px; color: var(--ink); }
+  .check .ans a { font-family: var(--font-mono); font-size: 12.5px; white-space: nowrap; }
 </style>
 
 <style>
@@ -265,7 +276,7 @@
   <figcaption>Illustrative. Three separate systems share one app: map display (static files), routing (in-memory graph search) and live traffic (a stream). They meet only at the live speed store.</figcaption>
 </figure></div>
 <div class="wrap doc">
-  <nav class="toc" aria-label="Sections"><p>The solution</p><ol><li><a href="#requirements">Requirements</a></li><li><a href="#success">Success metrics</a></li><li><a href="#estimates">Estimates</a></li><li><a href="#api">API</a></li><li><a href="#architecture">Architecture</a></li><li><a href="#tiles">Map tiles and zoom levels</a></li><li><a href="#lab">Try it: tiles per zoom level</a></li><li><a href="#geocoding">Search and geocoding</a></li><li><a href="#routing">Routing on a road graph</a></li><li><a href="#routelab">Try it: Dijkstra vs A*</a></li><li><a href="#traffic">Live traffic from phones</a></li><li><a href="#eta">Predicting arrival times</a></li><li><a href="#rerouting">Rerouting</a></li><li><a href="#mapdata">Building the map</a></li><li><a href="#storage">Storage</a></li><li><a href="#observability">Observability</a></li><li><a href="#risks">Risks and v2</a></li><li><a href="#presenting">Presenting it in 45 minutes</a></li><li><a href="#numbers">Numbers to remember</a></li></ol></nav>
+  <nav class="toc" aria-label="Sections"><p>The solution</p><ol><li><a href="#requirements">Requirements</a></li><li><a href="#success">Success metrics</a></li><li><a href="#estimates">Estimates</a></li><li><a href="#api">API</a></li><li><a href="#architecture">Architecture</a></li><li><a href="#tiles">Map tiles and zoom levels</a></li><li><a href="#lab">Try it: tiles per zoom level</a></li><li><a href="#geocoding">Search and geocoding</a></li><li><a href="#routing">Routing on a road graph</a></li><li><a href="#routelab">Try it: Dijkstra vs A*</a></li><li><a href="#traffic">Live traffic from phones</a></li><li><a href="#eta">Predicting arrival times</a></li><li><a href="#rerouting">Rerouting</a></li><li><a href="#mapdata">Building the map</a></li><li><a href="#storage">Storage</a></li><li><a href="#observability">Observability</a></li><li><a href="#risks">Risks and v2</a></li><li><a href="#presenting">Presenting it in 45 minutes</a></li><li><a href="#numbers">Numbers to remember</a></li><li><a href="#check">Check yourself</a></li></ol></nav>
   <article>
 
 <section id="requirements">
@@ -634,6 +645,14 @@ POST /api/trips/{trip_id}/locations [ {t, lat, lng, speed, heading}, ×5 ]
     <tr><td>Off-route threshold</td><td class="num">~30–50 m for a few seconds</td></tr>
     <tr><td>Offer a new route when it saves</td><td class="num">&gt; 5 min or &gt; 10%</td></tr>
   </tbody></table></div>
+</section>
+
+<section id="check" class="check"><h2>Check yourself</h2>
+  <p>Answer in your head first, then open each question to compare.</p>
+  <details><summary>A jam forms on a motorway. Routing uses plain contraction hierarchies and keeps sending drivers into it. Why?</summary><p class="ans"><strong>Plain CH bakes weights into shortcuts, so traffic needs a rebuild; a customizable variant applies new weights in seconds.</strong> Customizable CH or CRP separates the order from the weights. <a href="#routing">Read the section</a></p></details>
+  <details><summary>Every minute, the server recomputes routes for all 5M active trips to look for faster options. What is a better design?</summary><p class="ans"><strong>Recompute only trips whose remaining route crosses a segment whose speed changed a lot.</strong> A segment → active trips index avoids about 83k pointless searches a second. <a href="#rerouting">Read the section</a></p></details>
+  <details><summary>Traffic speeds on a flyover look wrong because cars on the service road below are being counted. What is missing?</summary><p class="ans"><strong>Map matching over the whole trail with a hidden Markov model.</strong> Matching whole trails stops cars from teleporting between parallel roads. <a href="#traffic">Read the section</a></p></details>
+  <details><summary>Someone walks a cart full of phones slowly down a road to fake a jam. What defends against it?</summary><p class="ans"><strong>Require many independent phones per segment and spot outliers.</strong> Many probes from few accounts or one spot are suspicious. <a href="#risks">Read the section</a></p></details>
 </section>
   </article>
 </div>

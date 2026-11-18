@@ -157,6 +157,17 @@
   .dg .dot-hr { fill: var(--c-gov); } .dg .dot-it { fill: var(--c-kb); } .dg .dot-eng { fill: var(--c-ingest); } .dg .dot-q { fill: var(--c-serve); stroke: var(--ink); stroke-width: 1.5; }
   .dg .halo { fill: none; stroke: var(--c-serve); stroke-width: 1.5; stroke-dasharray: 4 4; }
   .dg .zone { fill: var(--paper); stroke: var(--line); stroke-width: 1; }
+  /* Check yourself: self-test questions, answers in details/summary (see STYLES.md) */
+  .check { counter-reset: chk; }
+  .check details { counter-increment: chk; border: 1px solid var(--line); border-radius: 10px; background: var(--paper); margin: 0 0 10px; }
+  .check summary { position: relative; display: block; cursor: pointer; list-style: none; padding: 12px 44px 12px 48px; font-weight: 600; line-height: 1.45; }
+  .check summary::-webkit-details-marker { display: none; }
+  .check summary::before { content: "Q" counter(chk); position: absolute; left: 16px; top: 14px; font-family: var(--font-mono); font-size: 12px; font-weight: 500; color: var(--accent); }
+  .check summary::after { content: "+"; position: absolute; right: 16px; top: 10px; font-family: var(--font-mono); font-size: 18px; color: var(--muted); }
+  .check details[open] summary::after { content: "\2212"; }
+  .check summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 10px; }
+  .check .ans { margin: 0; padding: 0 16px 14px 48px; color: var(--ink); }
+  .check .ans a { font-family: var(--font-mono); font-size: 12.5px; white-space: nowrap; }
 </style>
 
 <style>
@@ -249,7 +260,7 @@
   <figcaption>Illustrative. The top row is the write path, the middle row the redirect path, and the back row click analytics.</figcaption>
 </figure></div>
 <div class="wrap doc">
-  <nav class="toc" aria-label="Sections"><p>The solution</p><ol><li><a href="#requirements">Requirements</a></li><li><a href="#success">Success metrics</a></li><li><a href="#estimates">Estimates</a></li><li><a href="#api">API</a></li><li><a href="#architecture">Architecture</a></li><li><a href="#codes">Generating short codes</a></li><li><a href="#lab">Try it: how long should codes be?</a></li><li><a href="#storage">Storage</a></li><li><a href="#redirect">The redirect path and caching</a></li><li><a href="#analytics">Click analytics</a></li><li><a href="#abuse">Abuse and safety</a></li><li><a href="#deployment">Deployment and regions</a></li><li><a href="#observability">Observability</a></li><li><a href="#risks">Risks and v2</a></li><li><a href="#presenting">Presenting it in 45 minutes</a></li><li><a href="#numbers">Numbers to remember</a></li></ol></nav>
+  <nav class="toc" aria-label="Sections"><p>The solution</p><ol><li><a href="#requirements">Requirements</a></li><li><a href="#success">Success metrics</a></li><li><a href="#estimates">Estimates</a></li><li><a href="#api">API</a></li><li><a href="#architecture">Architecture</a></li><li><a href="#codes">Generating short codes</a></li><li><a href="#lab">Try it: how long should codes be?</a></li><li><a href="#storage">Storage</a></li><li><a href="#redirect">The redirect path and caching</a></li><li><a href="#analytics">Click analytics</a></li><li><a href="#abuse">Abuse and safety</a></li><li><a href="#deployment">Deployment and regions</a></li><li><a href="#observability">Observability</a></li><li><a href="#risks">Risks and v2</a></li><li><a href="#presenting">Presenting it in 45 minutes</a></li><li><a href="#numbers">Numbers to remember</a></li><li><a href="#check">Check yourself</a></li></ol></nav>
   <article>
 
 <section id="requirements">
@@ -522,6 +533,14 @@ index: (owner_id, created_at)            -- "my links" page</code></pre>
     <tr><td>Redis lookup / key-value read</td><td class="num">~1 ms / a few ms</td></tr>
     <tr><td>CDN max-age on redirects</td><td class="num">~60 s: bursts absorbed, takedowns still fast</td></tr>
   </tbody></table></div>
+</section>
+
+<section id="check" class="check"><h2>Check yourself</h2>
+  <p>Answer in your head first, then open each question to compare.</p>
+  <details><summary>A security team reports a phishing short link. You block it in the database, but users who clicked it yesterday still land on the phishing page. What is the likely cause?</summary><p class="ans"><strong>Redirects were served as 301, so browsers cached the destination permanently.</strong> A 301 is cached by browsers, so repeat clicks never reach the service and takedowns can't reach them. <a href="#api">Read the section</a></p></details>
+  <details><summary>A link goes viral in a large newsletter and a million clicks arrive in a minute. Which layer should absorb most of them?</summary><p class="ans"><strong>The CDN edge, via Cache-Control max-age=60 on the 302.</strong> With a 60 s max-age, a million clicks a minute become about one request per edge location per minute. <a href="#redirect">Read the section</a></p></details>
+  <details><summary>The dashboard compares click totals and finds the service undercounts viral links. What is the most likely gap?</summary><p class="ans"><strong>Clicks answered at the CDN edge never reach the redirect service, so CDN logs must be ingested too.</strong> Edge-served clicks only appear in CDN logs, so they need their own pipeline into the same topic. <a href="#analytics">Read the section</a></p></details>
+  <details><summary>You run creates in two regions with DynamoDB global tables and random codes. Occasionally a user's link points somewhere else. Why?</summary><p class="ans"><strong>Both regions issued the same code within the replication delay and last-writer-wins overwrote one.</strong> Conditional writes only check the local copy; use a single write region or partition the code space. <a href="#deployment">Read the section</a></p></details>
 </section>
   </article>
 </div>

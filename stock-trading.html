@@ -157,6 +157,17 @@
   .dg .dot-hr { fill: var(--c-gov); } .dg .dot-it { fill: var(--c-kb); } .dg .dot-eng { fill: var(--c-ingest); } .dg .dot-q { fill: var(--c-serve); stroke: var(--ink); stroke-width: 1.5; }
   .dg .halo { fill: none; stroke: var(--c-serve); stroke-width: 1.5; stroke-dasharray: 4 4; }
   .dg .zone { fill: var(--paper); stroke: var(--line); stroke-width: 1; }
+  /* Check yourself: self-test questions, answers in details/summary (see STYLES.md) */
+  .check { counter-reset: chk; }
+  .check details { counter-increment: chk; border: 1px solid var(--line); border-radius: 10px; background: var(--paper); margin: 0 0 10px; }
+  .check summary { position: relative; display: block; cursor: pointer; list-style: none; padding: 12px 44px 12px 48px; font-weight: 600; line-height: 1.45; }
+  .check summary::-webkit-details-marker { display: none; }
+  .check summary::before { content: "Q" counter(chk); position: absolute; left: 16px; top: 14px; font-family: var(--font-mono); font-size: 12px; font-weight: 500; color: var(--accent); }
+  .check summary::after { content: "+"; position: absolute; right: 16px; top: 10px; font-family: var(--font-mono); font-size: 18px; color: var(--muted); }
+  .check details[open] summary::after { content: "\2212"; }
+  .check summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 10px; }
+  .check .ans { margin: 0; padding: 0 16px 14px 48px; color: var(--ink); }
+  .check .ans a { font-family: var(--font-mono); font-size: 12.5px; white-space: nowrap; }
 </style>
 
 <style>
@@ -272,7 +283,7 @@
   <figcaption>Illustrative. The broker checks and routes orders; only the exchange matches them. Every step before the exchange must be fast and must never lose or repeat an order.</figcaption>
 </figure></div>
 <div class="wrap doc">
-  <nav class="toc" aria-label="Sections"><p>The solution</p><ol><li><a href="#requirements">Requirements</a></li><li><a href="#success">Success metrics</a></li><li><a href="#estimates">Estimates</a></li><li><a href="#api">API</a></li><li><a href="#architecture">Architecture</a></li><li><a href="#orders">Order flow and risk checks</a></li><li><a href="#matching">The order book and matching</a></li><li><a href="#lab">Try it: match some orders</a></li><li><a href="#marketdata">Market data fan-out</a></li><li><a href="#open">The 9:15 market open</a></li><li><a href="#settlement">Holdings and settlement</a></li><li><a href="#storage">Storage</a></li><li><a href="#observability">Observability</a></li><li><a href="#risks">Risks and v2</a></li><li><a href="#presenting">Presenting it in 45 minutes</a></li><li><a href="#numbers">Numbers to remember</a></li><li><a href="#related">Related</a></li></ol></nav>
+  <nav class="toc" aria-label="Sections"><p>The solution</p><ol><li><a href="#requirements">Requirements</a></li><li><a href="#success">Success metrics</a></li><li><a href="#estimates">Estimates</a></li><li><a href="#api">API</a></li><li><a href="#architecture">Architecture</a></li><li><a href="#orders">Order flow and risk checks</a></li><li><a href="#matching">The order book and matching</a></li><li><a href="#lab">Try it: match some orders</a></li><li><a href="#marketdata">Market data fan-out</a></li><li><a href="#open">The 9:15 market open</a></li><li><a href="#settlement">Holdings and settlement</a></li><li><a href="#storage">Storage</a></li><li><a href="#observability">Observability</a></li><li><a href="#risks">Risks and v2</a></li><li><a href="#presenting">Presenting it in 45 minutes</a></li><li><a href="#numbers">Numbers to remember</a></li><li><a href="#check">Check yourself</a></li><li><a href="#related">Related</a></li></ol></nav>
   <article>
 
 <section id="requirements">
@@ -583,6 +594,14 @@ WebSocket  wss://stream…/?session=…
     <tr><td>Indian equity settlement</td><td class="num">T+1</td></tr>
     <tr><td>Logins at the open</td><td class="num">2M in 10 min ≈ 3,300/s</td></tr>
   </tbody></table></div>
+</section>
+
+<section id="check" class="check"><h2>Check yourself</h2>
+  <p>Answer in your head first, then open each question to compare.</p>
+  <details><summary>The exchange link drops right after an order is sent, and the broker doesn't know if it arrived. What should it do?</summary><p class="ans"><strong>Reconnect, replay the session from the last sequence number and ask for the order's status.</strong> Resending from SENT could buy twice; unknown is not failed. <a href="#orders">Read the section</a></p></details>
+  <details><summary>A buy limit at ₹412.60 for 200 meets asks of 100 and 250 at ₹412.55 (the 100 is older). What fills?</summary><p class="ans"><strong>100 from the older and 100 from the newer, both at ₹412.55.</strong> Price then time, and the resting price wins. <a href="#matching">Read the section</a></p></details>
+  <details><summary>Phones on weak networks cause WebSocket gateways to run out of memory. What is the fix?</summary><p class="ans"><strong>Keep only the latest snapshot per symbol per socket, overwriting stale ones.</strong> Prices are latest-value-wins, so old ticks can be dropped. <a href="#marketdata">Read the section</a></p></details>
+  <details><summary>Autoscaling kicks in at 9:20, five minutes after the open spike. What is the better approach?</summary><p class="ans"><strong>Scale on a schedule before the open, sized from the busiest recent open plus headroom.</strong> The spike arrives at a known second and lasts minutes. <a href="#open">Read the section</a></p></details>
 </section>
 
 <section id="related">

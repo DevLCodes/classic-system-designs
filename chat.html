@@ -157,6 +157,17 @@
   .dg .dot-hr { fill: var(--c-gov); } .dg .dot-it { fill: var(--c-kb); } .dg .dot-eng { fill: var(--c-ingest); } .dg .dot-q { fill: var(--c-serve); stroke: var(--ink); stroke-width: 1.5; }
   .dg .halo { fill: none; stroke: var(--c-serve); stroke-width: 1.5; stroke-dasharray: 4 4; }
   .dg .zone { fill: var(--paper); stroke: var(--line); stroke-width: 1; }
+  /* Check yourself: self-test questions, answers in details/summary (see STYLES.md) */
+  .check { counter-reset: chk; }
+  .check details { counter-increment: chk; border: 1px solid var(--line); border-radius: 10px; background: var(--paper); margin: 0 0 10px; }
+  .check summary { position: relative; display: block; cursor: pointer; list-style: none; padding: 12px 44px 12px 48px; font-weight: 600; line-height: 1.45; }
+  .check summary::-webkit-details-marker { display: none; }
+  .check summary::before { content: "Q" counter(chk); position: absolute; left: 16px; top: 14px; font-family: var(--font-mono); font-size: 12px; font-weight: 500; color: var(--accent); }
+  .check summary::after { content: "+"; position: absolute; right: 16px; top: 10px; font-family: var(--font-mono); font-size: 18px; color: var(--muted); }
+  .check details[open] summary::after { content: "\2212"; }
+  .check summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 10px; }
+  .check .ans { margin: 0; padding: 0 16px 14px 48px; color: var(--ink); }
+  .check .ans a { font-family: var(--font-mono); font-size: 12.5px; white-space: nowrap; }
 </style>
 
 <style>
@@ -249,7 +260,7 @@
   <figcaption>Illustrative. Phones on the left and right hold long-lived connections to gateways; the middle row stores and routes messages.</figcaption>
 </figure></div>
 <div class="wrap doc">
-  <nav class="toc" aria-label="Sections"><p>The solution</p><ol><li><a href="#requirements">Requirements</a></li><li><a href="#success">Success metrics</a></li><li><a href="#estimates">Estimates</a></li><li><a href="#api">API and protocol</a></li><li><a href="#architecture">Architecture</a></li><li><a href="#ordering">Ordering and delivery</a></li><li><a href="#connections">Millions of open connections</a></li><li><a href="#lab">Try it: size the gateway fleet</a></li><li><a href="#groups">Group chats</a></li><li><a href="#storage">Storage</a></li><li><a href="#presence">Presence and receipts</a></li><li><a href="#offline">Offline and push notifications</a></li><li><a href="#security">Security and abuse</a></li><li><a href="#deployment">Deployment and regions</a></li><li><a href="#observability">Observability</a></li><li><a href="#risks">Risks and v2</a></li><li><a href="#presenting">Presenting it in 45 minutes</a></li><li><a href="#numbers">Numbers to remember</a></li></ol></nav>
+  <nav class="toc" aria-label="Sections"><p>The solution</p><ol><li><a href="#requirements">Requirements</a></li><li><a href="#success">Success metrics</a></li><li><a href="#estimates">Estimates</a></li><li><a href="#api">API and protocol</a></li><li><a href="#architecture">Architecture</a></li><li><a href="#ordering">Ordering and delivery</a></li><li><a href="#connections">Millions of open connections</a></li><li><a href="#lab">Try it: size the gateway fleet</a></li><li><a href="#groups">Group chats</a></li><li><a href="#storage">Storage</a></li><li><a href="#presence">Presence and receipts</a></li><li><a href="#offline">Offline and push notifications</a></li><li><a href="#security">Security and abuse</a></li><li><a href="#deployment">Deployment and regions</a></li><li><a href="#observability">Observability</a></li><li><a href="#risks">Risks and v2</a></li><li><a href="#presenting">Presenting it in 45 minutes</a></li><li><a href="#numbers">Numbers to remember</a></li><li><a href="#check">Check yourself</a></li></ol></nav>
   <article>
 
 <section id="requirements">
@@ -553,6 +564,14 @@ user_conversations    -- the chat list on the home screen
     <tr><td>Message row</td><td class="num">~300 B → 1.5 TB a day</td></tr>
     <tr><td>Delivery target</td><td class="num">p99 &lt; 500 ms online; push &lt; 5 s offline</td></tr>
   </tbody></table></div>
+</section>
+
+<section id="check" class="check"><h2>Check yourself</h2>
+  <p>Answer in your head first, then open each question to compare.</p>
+  <details><summary>A gateway holding 200k connections crashes, and the remaining gateways and the registry overload one after another. What should have prevented it?</summary><p class="ans"><strong>Clients reconnecting with exponential backoff and random jitter.</strong> Jitter spreads the reconnect herd over tens of seconds so the overload doesn't spread. <a href="#connections">Read the section</a></p></details>
+  <details><summary>Two group members see messages in a different order. The client sorts by the sender's phone timestamp. What is the fix?</summary><p class="ans"><strong>A per-conversation sequence number assigned by the server.</strong> Clocks drift and tie; a server-assigned integer per conversation gives one order everyone shares. <a href="#ordering">Read the section</a></p></details>
+  <details><summary>During a network split, each region keeps numbering a conversation independently. What goes wrong?</summary><p class="ans"><strong>Two different messages both get seq 4183 and devices disagree for good.</strong> Each conversation needs one home region owning its counter; queue on the client instead of inventing numbers. <a href="#deployment">Read the section</a></p></details>
+  <details><summary>Presence traffic outnumbers messages and is overloading the system. What is the right change?</summary><p class="ans"><strong>Subscribe to presence only for chats on screen, debounce status changes.</strong> Presence is the noisiest and least important signal, so push it only to current subscribers. <a href="#presence">Read the section</a></p></details>
 </section>
   </article>
 </div>
