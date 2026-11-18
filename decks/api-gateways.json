@@ -1,0 +1,147 @@
+{
+  "title": "API gateways and service mesh",
+  "page": "api-gateways.html",
+  "cards": [
+    {
+      "front": "Reverse proxy vs load balancer vs API gateway",
+      "back": "A proxy handles HTTP (TLS, compression, caching), a load balancer spreads load over identical servers, and a gateway applies API policy: auth, per-client limits, routing to many services.",
+      "link": "api-gateways.html#what"
+    },
+    {
+      "front": "Authentication at the gateway",
+      "back": "Verify the JWT or API key once at the edge, then pass a trusted user ID in a header so services don't each re-implement login.",
+      "link": "api-gateways.html#jobs"
+    },
+    {
+      "front": "What stays out of the gateway",
+      "back": "Business logic. The gateway is shared by every team, so a rule specific to one service belongs in that service.",
+      "link": "api-gateways.html#jobs"
+    },
+    {
+      "front": "Backend for frontend (BFF)",
+      "back": "A small service per client type (web, mobile, partners), owned by that client's team, that shapes responses for its screens.",
+      "link": "api-gateways.html#bff"
+    },
+    {
+      "front": "Service mesh",
+      "back": "Moves timeouts, retries, mutual TLS, metrics and tracing out of app code into a proxy beside each instance (a sidecar, often Envoy).",
+      "link": "api-gateways.html#mesh"
+    },
+    {
+      "front": "Price of a service mesh",
+      "back": "An extra proxy hop on every call (about a millisecond), more memory per pod, and a complex control plane to operate.",
+      "link": "api-gateways.html#mesh"
+    },
+    {
+      "front": "How to set a timeout",
+      "back": "From the dependency's p99.9 latency, with the caller's timeout longer than the sum of what it waits on.",
+      "link": "api-gateways.html#resilience"
+    },
+    {
+      "front": "Retries at three layers",
+      "back": "If the app, sidecar and gateway each retry 3 times, one failing call becomes 4 × 4 × 4 = 64 attempts. Retry at one layer only.",
+      "link": "api-gateways.html#resilience"
+    },
+    {
+      "front": "Retry budget",
+      "back": "Allow retries up to about 10% of normal traffic, so retries stop adding load when most calls are failing.",
+      "link": "api-gateways.html#resilience"
+    },
+    {
+      "front": "Circuit breaker",
+      "back": "After too many failures, stop calling the dependency for a few seconds and fail fast or serve a fallback, then let test requests through before closing.",
+      "link": "api-gateways.html#resilience"
+    },
+    {
+      "front": "Bulkhead",
+      "back": "A separate connection pool per dependency, so one slow service can't use up every connection the caller has.",
+      "link": "api-gateways.html#resilience"
+    }
+  ],
+  "quiz": [
+    {
+      "q": "A bad deploy makes 20% of calls fail and callers retry 3 times. The service, sized for 12k/s at 10k/s normal, melts. What stops the spiral?",
+      "choices": [
+        "More retries",
+        "A retry budget and circuit breaker",
+        "Longer timeouts",
+        "Removing the gateway"
+      ],
+      "answer": 1,
+      "why": "Budgets cap retry load and breakers fail fast, so overload doesn't feed more failures.",
+      "link": "api-gateways.html#lab"
+    },
+    {
+      "q": "A mobile home screen makes three slow round trips to three services. What helps?",
+      "choices": [
+        "Add a CDN for the JSON",
+        "Aggregate the calls in a gateway or BFF inside the data center",
+        "Increase the phone's timeout",
+        "Use UDP"
+      ],
+      "answer": 1,
+      "why": "Inside the data center a round trip is about half a millisecond, so one combined response is much faster.",
+      "link": "api-gateways.html#bff"
+    },
+    {
+      "q": "One slow upstream uses up all gateway workers and every route starts timing out. What prevents this?",
+      "choices": [
+        "A bigger gateway instance",
+        "Per-route connection limits and timeouts",
+        "Sticky sessions",
+        "Disabling health checks"
+      ],
+      "answer": 1,
+      "why": "Per-route limits keep one bad service from taking the whole API down.",
+      "link": "api-gateways.html#failure"
+    },
+    {
+      "q": "A gateway config change pushed everywhere at once causes a global outage. What is the lesson?",
+      "choices": [
+        "Never change gateway config",
+        "Keep config in version control and roll it out gradually like code",
+        "Run a single gateway instance",
+        "Put business logic in the gateway"
+      ],
+      "answer": 1,
+      "why": "Many large outages were one bad config pushed everywhere at once.",
+      "link": "api-gateways.html#failure"
+    },
+    {
+      "q": "You run five services. Do you need a service mesh?",
+      "choices": [
+        "Yes, always",
+        "No, a good HTTP client library is usually enough",
+        "Only for REST APIs",
+        "Only if you use gRPC"
+      ],
+      "answer": 1,
+      "why": "The mesh's cost pays off at many services; with a handful, a library is enough.",
+      "link": "api-gateways.html#mesh"
+    },
+    {
+      "q": "A caller with no timeout on a slow dependency eventually fails too. Why?",
+      "choices": [
+        "The dependency retried",
+        "Slow calls hold threads and connections until the caller runs out",
+        "The circuit breaker opened",
+        "mTLS expired"
+      ],
+      "answer": 1,
+      "why": "Without a timeout, waiting calls pile up and exhaust the caller.",
+      "link": "api-gateways.html#resilience"
+    },
+    {
+      "q": "Which request is safe to retry automatically after a timeout?",
+      "choices": [
+        "A POST that charges a card with no idempotency key",
+        "A read, or a write protected by an idempotency key",
+        "Any request, retries are always safe",
+        "Only requests over 1 MB"
+      ],
+      "answer": 1,
+      "why": "Retry reads and idempotent writes only; a blind retry of a non-idempotent write can double it.",
+      "link": "api-gateways.html#resilience"
+    }
+  ]
+}

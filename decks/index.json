@@ -1,0 +1,12 @@
+[
+  "api-gateways",
+  "caching",
+  "cdn",
+  "databases",
+  "dns",
+  "load-balancing",
+  "protocols",
+  "rate-limiting",
+  "requirements",
+  "sharding"
+]
