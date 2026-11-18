@@ -386,11 +386,11 @@ POST /v1/runs/{run_id}/complete  { fence: 7, status: "ok" | "failed", error }</c
   <p class="lead">Asking the database "what is due now?" every second for every partition works, but it is wasteful. Two layers do better: coarse buckets on disk, fine slots in memory.</p>
   <figure class="fig"><svg viewBox="0 0 722 290" class="dg" role="img" aria-label="Timing wheel: on the left, minute buckets in the jobs database for 01:59, 02:00 and 02:01. The scheduler loads the 02:00 bucket a minute early into an in-memory wheel of slots, one per second. Each job goes into the slot for its second. A hand moves one slot per second; when it reaches a slot, every job in it becomes a run on the due queue on the right.">
     <text x="10" y="22" class="cap">ON DISK · MINUTE BUCKETS</text>
-    <rect x="10" y="36" width="150" height="40" rx="8" class="k-src"/><text x="22" y="61" class="small mono">01:59 · done</text>
-    <rect x="10" y="84" width="150" height="40" rx="8" class="k-kb"/><text x="22" y="102" class="small mono b">02:00 · 41,207 jobs</text><text x="22" y="117" class="sm">loading now</text>
-    <rect x="10" y="132" width="150" height="40" rx="8" class="k-src"/><text x="22" y="157" class="small mono">02:01 · 3,880 jobs</text>
-    <rect x="10" y="180" width="150" height="40" rx="8" class="k-src"/><text x="22" y="205" class="small mono">02:02 …</text>
-    <path d="M160 104 L238 140" class="wire hot" marker-end="url(#ah)"/><text x="168" y="138" class="sm">one minute early</text>
+    <rect x="10" y="36" width="172" height="40" rx="8" class="k-src"/><text x="22" y="61" class="small mono">01:59 · done</text>
+    <rect x="10" y="84" width="172" height="40" rx="8" class="k-kb"/><text x="22" y="102" class="small mono b">02:00 · 41,207 jobs</text><text x="22" y="117" class="sm">loaded one minute early</text>
+    <rect x="10" y="132" width="172" height="40" rx="8" class="k-src"/><text x="22" y="157" class="small mono">02:01 · 3,880 jobs</text>
+    <rect x="10" y="180" width="172" height="40" rx="8" class="k-src"/><text x="22" y="205" class="small mono">02:02 …</text>
+    <path d="M182 104 L258 132" class="wire hot" marker-end="url(#ah)"/>
     <text x="250" y="22" class="cap">IN MEMORY · ONE SLOT PER SECOND</text>
     <circle cx="370" cy="150" r="106" class="zone"/>
     <g>
@@ -642,7 +642,7 @@ UPDATE runs SET state = 'SUCCEEDED' WHERE run_id = $1 AND fence = $2;   -- 0 row
       '<div class="metric"><span class="n"' + (L >= 600 ? red : '') + '>' + dur(L) + '</span><span class="l">crashed run waits</span><small>' + fmt(crashed) + ' runs a minute</small></div>' +
       '<div class="metric"><span class="n"' + (rho >= 1 ? red : '') + '>' + Math.min(100, Math.round(rho * 100)) + '%</span><span class="l">worker slots busy</span><small>' + fmt(c) + ' slots, ' + fmt(cap) + ' runs/min max</small></div>';
     var msg;
-    if (rho >= 1) msg = 'Falling behind: ' + fmt(eff) + ' runs a minute arrive' + (dup > 0.05 ? ' (duplicates included)' : '') + ' but ' + fmt(w) + ' workers finish at most ' + fmt(cap) + '. The backlog grows by ' + fmt(behind) + ' a minute, so lag keeps rising until the load drops. Add workers, spread the jobs, or let low priority wait.';
+    if (rho >= 1) msg = 'Falling behind: ' + fmt(eff) + ' runs a minute arrive' + (dup > 0.05 ? ' (duplicates included)' : '') + ' but ' + fmt(w) + ' workers finish at most ' + fmt(cap) + '. The backlog grows by ' + fmt(behind) + ' a minute, so lag keeps rising until the load drops. ' + (r < cap ? 'Without the duplicate runs this fleet would keep up: turn on heartbeats or lengthen the lease.' : 'Add workers, spread the jobs, or let low priority wait.');
     else if (!hb && dup > 0.05) msg = 'Without heartbeats, every run longer than ' + dur(L) + ' is handed to a second worker while the first is still running: ' + Math.round(dup * 100) + '% of runs happen twice. Jobs must be idempotent, and the duplicates also eat ' + Math.round(dup * 100) + '% of your capacity. Turn on heartbeats or lengthen the lease.';
     else if (L >= 600) msg = 'Calm, but slow to heal: a crashed worker\'s runs sit invisible for 10 minutes before anyone retries them (' + fmt(crashed) + ' runs a minute). With heartbeats a 30 s lease gives the same safety with much faster recovery.';
     else if (hb && L <= 10) msg = 'Fast recovery: crashed runs come back in ' + dur(L) + '. The cost is a heartbeat every few seconds per run, and a worker that freezes for more than ~' + Math.round(2 * L / 3) + ' s loses its run, about ' + fmt(dups) + ' duplicates a minute. Fencing and idempotency keys make those harmless.';
@@ -749,7 +749,7 @@ D.lease3d = {
     c.packet({ pts: [V(-1, 0), V(-5, 0), V(-5, -3.5), V(-9, -3.5)], t0: 0.2, t1: 1.2, kind: 'env', color: P.ask, to: a, label: 'r42 · fence 7' });
     c.packet({ pts: [V(-9, -3.5), V(-5, -3.5), V(-5, 0), V(-1, 0)], t0: 2.0, t1: 2.8, kind: 'span', to: db, label: 'heartbeat 7' });
     c.packet({ pts: [V(-9, -3.5), V(-5, -3.5), V(-5, 0), V(-1, 0)], t0: 3.0, t1: 3.8, kind: 'span', to: db, label: 'heartbeat 7' });
-    c.note('frozen · no heartbeats', -9, -6.2);
+    c.note('frozen · no heartbeats', -9, -1.6);
     c.pulse(db, 5.9, 6.3);
     c.packet({ pts: [V(-1, 0), V(-5, 0), V(-5, 3.5), V(-9, 3.5)], t0: 6.2, t1: 7.2, kind: 'env', color: P.ask, to: b, label: 'r42 · fence 8' });
     c.packet({ pts: [V(-9, 3.5), V(4, 3.5), V(4, 0), V(8, 0)], t0: 8.1, t1: 9.2, kind: 'env', to: mail, label: 'send · key r42' });
