@@ -397,7 +397,7 @@ POST /shares               { path, with: "email", role: "editor" }</code></pre>
 
 <section id="conflicts">
   <h2>Conflicts</h2>
-  <ul class="tags"><li>Deep dive 3</li><li><a href="consistency.html">Consistency</a></li></ul>
+  <ul class="tags"><li>Deep dive 3</li><li><a href="consistency.html">Consistency</a></li><li><a href="collab-docs.html#merge">Live co-editing: OT vs CRDTs</a></li></ul>
   <figure class="fig3d" id="conflict3d">
     <div class="stage3d" role="img" aria-label="Two laptops edit the same file at revision 41 while one is offline. The first commits revision 42 with parent 41 and succeeds. The second comes online and commits with parent 41 too; the server rejects it because the latest revision is now 42. The second client saves its version as a conflicted copy next to the original, and both files sync to every device."><p class="hint3">3D · drag to turn</p><button class="reset3 ghost" type="button" hidden>Reset view</button><p class="nogl">The 3D view needs WebGL and a connection.</p></div>
     <div class="ctl3"><button class="pp" type="button">Pause</button><span class="k">Step</span><div class="steps3"></div><span class="meta3"></span></div>
