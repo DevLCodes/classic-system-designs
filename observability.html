@@ -157,6 +157,17 @@
   .dg .dot-hr { fill: var(--c-gov); } .dg .dot-it { fill: var(--c-kb); } .dg .dot-eng { fill: var(--c-ingest); } .dg .dot-q { fill: var(--c-serve); stroke: var(--ink); stroke-width: 1.5; }
   .dg .halo { fill: none; stroke: var(--c-serve); stroke-width: 1.5; stroke-dasharray: 4 4; }
   .dg .zone { fill: var(--paper); stroke: var(--line); stroke-width: 1; }
+  /* Check yourself: self-test questions, answers in details/summary (see STYLES.md) */
+  .check { counter-reset: chk; }
+  .check details { counter-increment: chk; border: 1px solid var(--line); border-radius: 10px; background: var(--paper); margin: 0 0 10px; }
+  .check summary { position: relative; display: block; cursor: pointer; list-style: none; padding: 12px 44px 12px 48px; font-weight: 600; line-height: 1.45; }
+  .check summary::-webkit-details-marker { display: none; }
+  .check summary::before { content: "Q" counter(chk); position: absolute; left: 16px; top: 14px; font-family: var(--font-mono); font-size: 12px; font-weight: 500; color: var(--accent); }
+  .check summary::after { content: "+"; position: absolute; right: 16px; top: 10px; font-family: var(--font-mono); font-size: 18px; color: var(--muted); }
+  .check details[open] summary::after { content: "\2212"; }
+  .check summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 10px; }
+  .check .ans { margin: 0; padding: 0 16px 14px 48px; color: var(--ink); }
+  .check .ans a { font-family: var(--font-mono); font-size: 12.5px; white-space: nowrap; }
 </style>
 
 <style>
@@ -232,7 +243,7 @@
 <main>
 <div class="wrap"><div class="intro"><p class="eyebrow">Building block · operations</p><h1>Monitoring, logging and tracing</h1><p class="lead">How you find out a system is broken before users tell you, and then find out why: metrics, logs, traces, SLOs and alerts that fire on what users feel.</p></div></div>
 <div class="wrap doc">
-  <nav class="toc" aria-label="On this page"><p>On this page</p><ol><li><a href="#what">Three signals</a></li><li><a href="#metrics">Metrics: RED and USE</a></li><li><a href="#slo">SLIs, SLOs and error budgets</a></li><li><a href="#lab">Try it: burn rate alerts</a></li><li><a href="#logs">The log pipeline</a></li><li><a href="#tracing">Distributed tracing</a></li><li><a href="#alerting">Alerting on symptoms</a></li><li><a href="#failure">How observability fails</a></li><li><a href="#interview">Saying it in an interview</a></li><li><a href="#real-world">In the real world</a></li><li><a href="#related">Related</a></li></ol></nav>
+  <nav class="toc" aria-label="On this page"><p>On this page</p><ol><li><a href="#what">Three signals</a></li><li><a href="#metrics">Metrics: RED and USE</a></li><li><a href="#slo">SLIs, SLOs and error budgets</a></li><li><a href="#lab">Try it: burn rate alerts</a></li><li><a href="#logs">The log pipeline</a></li><li><a href="#tracing">Distributed tracing</a></li><li><a href="#alerting">Alerting on symptoms</a></li><li><a href="#failure">How observability fails</a></li><li><a href="#interview">Saying it in an interview</a></li><li><a href="#real-world">In the real world</a></li><li><a href="#check">Check yourself</a></li><li><a href="#related">Related</a></li></ol></nav>
   <article>
 <section id="what"><h2>Three signals</h2>
 <p class="lead">Metrics tell you <em>that</em> something is wrong, traces tell you <em>where</em>, and logs tell you <em>why</em>. Each is cheap in a different way, so real systems collect all three and link them by a shared request ID.</p>
@@ -385,6 +396,15 @@
 <tr><td>Alert routing</td><td>Alertmanager, PagerDuty, Opsgenie</td><td>Grouping, silences, on-call schedules and escalation</td></tr>
 </tbody></table></div>
 <p class="muted" style="font-size:13.5px;color:var(--muted)">Products change quickly; names here are examples, not endorsements. Check current docs before choosing.</p></section>
+
+<section id="check" class="check"><h2>Check yourself</h2>
+  <p>Answer in your head first, then open each question to compare.</p>
+  <details><summary>Why record latency as histograms rather than each server's p99?</summary><p class="ans"><strong>Histograms add up; percentiles don't.</strong> You can merge histograms from 50 servers and then take the p99. Averaging 50 p99 values gives a wrong answer. <a href="#metrics">Read the section</a></p></details>
+  <details><summary>Why not add user_id as a metric label?</summary><p class="ans"><strong>Cardinality: it turns thousands of series into billions.</strong> Metric cost grows with distinct label combinations. Keep unbounded values in logs and traces. <a href="#metrics">Read the section</a></p></details>
+  <details><summary>How much error budget does a 99.9% SLO leave over 30 days?</summary><p class="ans"><strong>0.1%, about 43 minutes.</strong> That is 10,000 bad requests per 10 million. <a href="#slo">Read the section</a></p></details>
+  <details><summary>The SLO is 99.9% and the error rate is 1.44%. What is the burn rate, and what happens?</summary><p class="ans"><strong>14.4: the 30-day budget empties in about 2 days.</strong> Burn rate = error rate ÷ (1 − SLO). A 14.4 burn over 1 hour and 5 minutes pages someone. <a href="#alerting">Read the section</a></p></details>
+  <details><summary>You want to keep every error trace but only 1% of normal ones. Head or tail sampling?</summary><p class="ans"><strong>Tail sampling.</strong> The collector buffers all spans of a trace and decides after it knows the result. Head sampling decides at the start, so it keeps only 1% of errors too. <a href="#tracing">Read the section</a></p></details>
+</section>
 
 <section id="related"><h2>Related</h2><ul class="related"><li><a href="requirements.html">Non-functional requirements</a></li><li><a href="queues.html">Message queues and streams</a></li><li><a href="api-gateways.html">API gateways and service mesh</a></li><li><a href="load-balancing.html">Load balancing</a></li><li><a href="numbers.html">Numbers to know</a></li><li><a href="call-insights.html">Call insights</a></li></ul></section>
   </article>

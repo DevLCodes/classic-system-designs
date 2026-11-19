@@ -21,6 +21,7 @@ Diagram colours are semantic and fixed across every page (`.k-user`, `.k-serve`,
 - `.fig` with an inline `svg.dg` diagram, or a `.fig3d` scene built with `assets/scene3d.js` and the three@0.160.0 import map. Load `assets/scene3d.css` and import `./assets/scene3d.js`.
 - `.note` (accent left border), `.formula` (mono, boxed), `.table` wrappers for wide tables, `.related` pill links, `.pager` prev/next.
 - `.lab` blocks for interactive calculators, in the same quiet styling.
+- `.check` "Check yourself" section (`<section id="check" class="check">`), placed just before `#related` (or last, on walkthroughs that end with `#numbers`), with one TOC entry. 3 to 5 questions, each a `<details>` whose `<summary>` is the question and whose `<p class="ans">` holds a bold short answer, one or two sentences of why, and a link to the section that covers it. No JavaScript: the browser opens and closes them. The `.check` CSS (counter-numbered Q1, Q2… and a +/− marker) is copied into each page's first `<style>` block. Questions follow the deck rules: check every answer against the page, and point every link at a real section id. Pages with a deck reuse questions from its quiz.
 - The footer says figures marked illustrative show the shape of a system, not measured numbers.
 
 ## Study: flashcards and quizzes
@@ -50,5 +51,6 @@ Use handwriting fonts, rotated stickies, highlighter strokes or paper textures. 
 1. Copy the head, tokens and base CSS from an existing page of the same kind (`caching.html` for a block, `url-shortener.html` for a walkthrough).
 2. Add a card for it in `index.html` under `#blocks` or `#designs`, link it from the `#related` list of at least one neighbouring page, and place it in a stage in `learning-path.html`.
 3. Links to the agentic site are absolute (`https://devlcodes.github.io/agentic-ai-notebook/system-design/...`).
-4. Check it at 390px and 1280px wide: no horizontal scroll, 16px side gutter, 3D scene renders, lab works, no console errors.
-5. Optional but welcome: a deck in `decks/<slug>.json` plus its slug in `decks/index.json`, checked with `python3 tools/check_decks.py`.
+4. Add a `#check` section (see Components) with 3 to 5 questions.
+5. Check it at 390px and 1280px wide: no horizontal scroll, 16px side gutter, 3D scene renders, lab works, no console errors.
+6. Optional but welcome: a deck in `decks/<slug>.json` plus its slug in `decks/index.json`, checked with `python3 tools/check_decks.py`.

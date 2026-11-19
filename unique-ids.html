@@ -157,6 +157,17 @@
   .dg .dot-hr { fill: var(--c-gov); } .dg .dot-it { fill: var(--c-kb); } .dg .dot-eng { fill: var(--c-ingest); } .dg .dot-q { fill: var(--c-serve); stroke: var(--ink); stroke-width: 1.5; }
   .dg .halo { fill: none; stroke: var(--c-serve); stroke-width: 1.5; stroke-dasharray: 4 4; }
   .dg .zone { fill: var(--paper); stroke: var(--line); stroke-width: 1; }
+  /* Check yourself: self-test questions, answers in details/summary (see STYLES.md) */
+  .check { counter-reset: chk; }
+  .check details { counter-increment: chk; border: 1px solid var(--line); border-radius: 10px; background: var(--paper); margin: 0 0 10px; }
+  .check summary { position: relative; display: block; cursor: pointer; list-style: none; padding: 12px 44px 12px 48px; font-weight: 600; line-height: 1.45; }
+  .check summary::-webkit-details-marker { display: none; }
+  .check summary::before { content: "Q" counter(chk); position: absolute; left: 16px; top: 14px; font-family: var(--font-mono); font-size: 12px; font-weight: 500; color: var(--accent); }
+  .check summary::after { content: "+"; position: absolute; right: 16px; top: 10px; font-family: var(--font-mono); font-size: 18px; color: var(--muted); }
+  .check details[open] summary::after { content: "\2212"; }
+  .check summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 10px; }
+  .check .ans { margin: 0; padding: 0 16px 14px 48px; color: var(--ink); }
+  .check .ans a { font-family: var(--font-mono); font-size: 12.5px; white-space: nowrap; }
 </style>
 
 <style>
@@ -248,7 +259,7 @@
 <main>
 <div class="wrap"><div class="intro"><p class="eyebrow">Building block · data</p><h1>Unique IDs and sequencers</h1><p class="lead">Handing out IDs that never repeat, across many machines, without one central counter becoming the bottleneck.</p></div></div>
 <div class="wrap doc">
-  <nav class="toc" aria-label="On this page"><p>On this page</p><ol><li><a href="#what">What an ID has to do</a></li><li><a href="#central">Counters and ticket servers</a></li><li><a href="#uuid">UUIDv4 and UUIDv7</a></li><li><a href="#snowflake">Snowflake IDs</a></li><li><a href="#lab">Try it: allocate the bits</a></li><li><a href="#clocks">Clock skew and monotonicity</a></li><li><a href="#storage">Why sortable IDs help storage</a></li><li><a href="#failure">How ID schemes fail</a></li><li><a href="#interview">Saying it in an interview</a></li><li><a href="#real-world">In the real world</a></li><li><a href="#related">Related</a></li></ol></nav>
+  <nav class="toc" aria-label="On this page"><p>On this page</p><ol><li><a href="#what">What an ID has to do</a></li><li><a href="#central">Counters and ticket servers</a></li><li><a href="#uuid">UUIDv4 and UUIDv7</a></li><li><a href="#snowflake">Snowflake IDs</a></li><li><a href="#lab">Try it: allocate the bits</a></li><li><a href="#clocks">Clock skew and monotonicity</a></li><li><a href="#storage">Why sortable IDs help storage</a></li><li><a href="#failure">How ID schemes fail</a></li><li><a href="#interview">Saying it in an interview</a></li><li><a href="#real-world">In the real world</a></li><li><a href="#check">Check yourself</a></li><li><a href="#related">Related</a></li></ol></nav>
   <article>
 <section id="what"><h2>What an ID has to do</h2>
 <p class="lead">On one database, <code>AUTO_INCREMENT</code> solves this for free. Once writes land on many servers or many shards, each one needs IDs that nobody else will ever hand out.</p>
@@ -424,6 +435,15 @@
 <tr><td>Coordinators for leases</td><td>etcd, ZooKeeper, a row in a strongly consistent database</td><td>For machine IDs and ID blocks</td></tr>
 </tbody></table></div>
 <p class="muted" style="font-size:13.5px;color:var(--muted)">Products change quickly; names here are examples, not endorsements. Check current docs before choosing.</p></section>
+
+<section id="check" class="check"><h2>Check yourself</h2>
+  <p>Answer in your head first, then open each question to compare.</p>
+  <details><summary>Why prefer UUIDv7 over UUIDv4 as a B-tree primary key?</summary><p class="ans"><strong>v7 is time-ordered, so inserts land at the right-hand edge.</strong> v4 inserts land all over the index, splitting pages and forcing the whole index to stay in memory. <a href="#uuid">Read the section</a></p></details>
+  <details><summary>How does the original Snowflake split its 64 bits?</summary><p class="ans"><strong>1 sign bit, 41 bits of milliseconds, 10 machine bits, 12 sequence bits.</strong> That gives about 70 years from your chosen epoch and 4,096 IDs per millisecond per machine. <a href="#snowflake">Read the section</a></p></details>
+  <details><summary>Why send Snowflake IDs to browsers as strings?</summary><p class="ans"><strong>JavaScript numbers are exact only up to 2⁵³ − 1.</strong> A 64-bit ID parsed as a number gets its last digits rounded. Twitter's API returned both id and id_str. <a href="#snowflake">Read the section</a></p></details>
+  <details><summary>A generator's clock jumps back after an NTP correction. What should it do?</summary><p class="ans"><strong>Refuse to issue IDs until the clock passes the last millisecond it used.</strong> Otherwise it can hand out a duplicate ID. <a href="#clocks">Read the section</a></p></details>
+  <details><summary>Ever-increasing IDs as keys in a range-sharded store like Bigtable cause what problem?</summary><p class="ans"><strong>Every new write lands on the last range, a write hot spot.</strong> Hash the key, put a shard prefix in front, or use a random ID there. Hash-sharded stores don't have this problem. <a href="#storage">Read the section</a></p></details>
+</section>
 
 <section id="related"><h2>Related</h2><ul class="related"><li><a href="databases.html">Databases and indexes</a></li><li><a href="sharding.html">Sharding and consistent hashing</a></li><li><a href="url-shortener.html">URL shortener</a></li><li><a href="news-feed.html">News feed</a></li></ul></section>
   </article>

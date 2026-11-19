@@ -157,6 +157,17 @@
   .dg .dot-hr { fill: var(--c-gov); } .dg .dot-it { fill: var(--c-kb); } .dg .dot-eng { fill: var(--c-ingest); } .dg .dot-q { fill: var(--c-serve); stroke: var(--ink); stroke-width: 1.5; }
   .dg .halo { fill: none; stroke: var(--c-serve); stroke-width: 1.5; stroke-dasharray: 4 4; }
   .dg .zone { fill: var(--paper); stroke: var(--line); stroke-width: 1; }
+  /* Check yourself: self-test questions, answers in details/summary (see STYLES.md) */
+  .check { counter-reset: chk; }
+  .check details { counter-increment: chk; border: 1px solid var(--line); border-radius: 10px; background: var(--paper); margin: 0 0 10px; }
+  .check summary { position: relative; display: block; cursor: pointer; list-style: none; padding: 12px 44px 12px 48px; font-weight: 600; line-height: 1.45; }
+  .check summary::-webkit-details-marker { display: none; }
+  .check summary::before { content: "Q" counter(chk); position: absolute; left: 16px; top: 14px; font-family: var(--font-mono); font-size: 12px; font-weight: 500; color: var(--accent); }
+  .check summary::after { content: "+"; position: absolute; right: 16px; top: 10px; font-family: var(--font-mono); font-size: 18px; color: var(--muted); }
+  .check details[open] summary::after { content: "\2212"; }
+  .check summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 10px; }
+  .check .ans { margin: 0; padding: 0 16px 14px 48px; color: var(--ink); }
+  .check .ans a { font-family: var(--font-mono); font-size: 12.5px; white-space: nowrap; }
 </style>
 
 <style>
@@ -232,7 +243,7 @@
 <main>
 <div class="wrap"><div class="intro"><p class="eyebrow">Building block · networking</p><h1>DNS</h1><p class="lead">The internet's phone book: it turns a name like api.shop.com into an IP address, through a hierarchy of servers and caches. It is also the first load balancer and the first thing to break in a regional failover.</p></div></div>
 <div class="wrap doc">
-  <nav class="toc" aria-label="On this page"><p>On this page</p><ol><li><a href="#what">What DNS does</a></li><li><a href="#records">Records</a></li><li><a href="#resolve">How a lookup works</a></li><li><a href="#ttl">Caching and TTLs</a></li><li><a href="#lab">Try it: pick a TTL</a></li><li><a href="#routing">DNS as a traffic router</a></li><li><a href="#failure">How DNS fails</a></li><li><a href="#interview">Saying it in an interview</a></li><li><a href="#real-world">In the real world</a></li><li><a href="#related">Related</a></li></ol></nav>
+  <nav class="toc" aria-label="On this page"><p>On this page</p><ol><li><a href="#what">What DNS does</a></li><li><a href="#records">Records</a></li><li><a href="#resolve">How a lookup works</a></li><li><a href="#ttl">Caching and TTLs</a></li><li><a href="#lab">Try it: pick a TTL</a></li><li><a href="#routing">DNS as a traffic router</a></li><li><a href="#failure">How DNS fails</a></li><li><a href="#interview">Saying it in an interview</a></li><li><a href="#real-world">In the real world</a></li><li><a href="#check">Check yourself</a></li><li><a href="#related">Related</a></li></ol></nav>
   <article>
 <section id="what"><h2>What DNS does</h2>
 <p class="lead">Before a browser can open a connection to api.shop.com it needs an IP address. DNS is a distributed, heavily cached database that answers that question in a few milliseconds when cached and tens of milliseconds when not.</p>
@@ -320,6 +331,14 @@
 <tr><td>Local caching</td><td>systemd-resolved, dnsmasq, NodeLocal DNSCache</td><td>Takes lookups off the hot path</td></tr>
 </tbody></table></div>
 <p class="muted" style="font-size:13.5px;color:var(--muted)">Products change quickly; names here are examples, not endorsements. Check current docs before choosing.</p></section>
+
+<section id="check" class="check"><h2>Check yourself</h2>
+  <p>Answer in your head first, then open each question to compare.</p>
+  <details><summary>You move api.shop.com to a new IP. The record had a 1-hour TTL. What happens?</summary><p class="ans"><strong>Some users keep hitting the old address for up to an hour or longer.</strong> Caches hold the old answer for the TTL, longer if a client ignores TTLs. <a href="#ttl">Read the section</a></p></details>
+  <details><summary>You want to send 5% of traffic to a new region to test it. Which DNS routing policy fits?</summary><p class="ans"><strong>Weighted.</strong> Weighted records return answers in proportion to weights, ideal for shifting a small share. <a href="#routing">Read the section</a></p></details>
+  <details><summary>A '60-second' DNS failover took many minutes for some users. Which is the likeliest cause?</summary><p class="ans"><strong>Health-check interval plus TTL plus clients caching longer than the TTL.</strong> These delays add up, and some runtimes cache DNS far beyond the TTL. <a href="#failure">Read the section</a></p></details>
+  <details><summary>You want www.shop.com served by a CDN whose IPs change often. Which record do you add?</summary><p class="ans"><strong>CNAME to the CDN's hostname.</strong> A CNAME aliases your name to the CDN's canonical name, so its IP changes don't affect you. <a href="#records">Read the section</a></p></details>
+</section>
 
 <section id="related"><h2>Related</h2><ul class="related"><li><a href="cdn.html">CDNs, PoPs and IXPs</a></li><li><a href="protocols.html">Network protocols and APIs</a></li><li><a href="load-balancing.html">Load balancing</a></li><li><a href="caching.html">Caching</a></li><li><a href="numbers.html#call">Anatomy of one API call</a></li><li><a href="web-crawler.html#politeness">Web crawler: DNS at scale</a></li></ul></section>
   </article>

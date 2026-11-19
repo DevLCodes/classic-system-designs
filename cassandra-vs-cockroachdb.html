@@ -157,6 +157,17 @@
   .dg .dot-hr { fill: var(--c-gov); } .dg .dot-it { fill: var(--c-kb); } .dg .dot-eng { fill: var(--c-ingest); } .dg .dot-q { fill: var(--c-serve); stroke: var(--ink); stroke-width: 1.5; }
   .dg .halo { fill: none; stroke: var(--c-serve); stroke-width: 1.5; stroke-dasharray: 4 4; }
   .dg .zone { fill: var(--paper); stroke: var(--line); stroke-width: 1; }
+  /* Check yourself: self-test questions, answers in details/summary (see STYLES.md) */
+  .check { counter-reset: chk; }
+  .check details { counter-increment: chk; border: 1px solid var(--line); border-radius: 10px; background: var(--paper); margin: 0 0 10px; }
+  .check summary { position: relative; display: block; cursor: pointer; list-style: none; padding: 12px 44px 12px 48px; font-weight: 600; line-height: 1.45; }
+  .check summary::-webkit-details-marker { display: none; }
+  .check summary::before { content: "Q" counter(chk); position: absolute; left: 16px; top: 14px; font-family: var(--font-mono); font-size: 12px; font-weight: 500; color: var(--accent); }
+  .check summary::after { content: "+"; position: absolute; right: 16px; top: 10px; font-family: var(--font-mono); font-size: 18px; color: var(--muted); }
+  .check details[open] summary::after { content: "\2212"; }
+  .check summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 10px; }
+  .check .ans { margin: 0; padding: 0 16px 14px 48px; color: var(--ink); }
+  .check .ans a { font-family: var(--font-mono); font-size: 12.5px; white-space: nowrap; }
 </style>
 
 <style>
@@ -232,7 +243,7 @@
 <main>
 <div class="wrap"><div class="intro"><p class="eyebrow">Building block · distributed internals</p><h1>Cassandra vs CockroachDB</h1><p class="lead">Two distributed databases that both scale by adding nodes and survive node loss, built on opposite bets. Cassandra is leaderless and favours always-on writes; CockroachDB runs Raft per range and gives you serializable SQL. Knowing why they differ teaches most of distributed storage.</p></div></div>
 <div class="wrap doc">
-  <nav class="toc" aria-label="On this page"><p>On this page</p><ol><li><a href="#glance">At a glance</a></li><li><a href="#cassandra">How Cassandra works</a></li><li><a href="#cockroach">How CockroachDB works</a></li><li><a href="#writes">Inside a write</a></li><li><a href="#lab">Try it: same failure, two databases</a></li><li><a href="#choose">Choosing</a></li><li><a href="#failure">Failure modes</a></li><li><a href="#interview">Saying it in an interview</a></li><li><a href="#real-world">In the real world</a></li><li><a href="#related">Related</a></li></ol></nav>
+  <nav class="toc" aria-label="On this page"><p>On this page</p><ol><li><a href="#glance">At a glance</a></li><li><a href="#cassandra">How Cassandra works</a></li><li><a href="#cockroach">How CockroachDB works</a></li><li><a href="#writes">Inside a write</a></li><li><a href="#lab">Try it: same failure, two databases</a></li><li><a href="#choose">Choosing</a></li><li><a href="#failure">Failure modes</a></li><li><a href="#interview">Saying it in an interview</a></li><li><a href="#real-world">In the real world</a></li><li><a href="#check">Check yourself</a></li><li><a href="#related">Related</a></li></ol></nav>
   <article>
 <section id="glance"><h2>At a glance</h2>
 <div class="table"><table><thead><tr><th></th><th>Cassandra</th><th>CockroachDB</th></tr></thead><tbody>
@@ -359,6 +370,15 @@
 <tr><td>Google</td><td>Spanner, the design CockroachDB follows, behind Ads and many internal systems</td></tr>
 </tbody></table></div>
 <p class="muted" style="font-size:13.5px;color:var(--muted)">Products change quickly; names here are examples, not endorsements. Check current docs before choosing.</p></section>
+
+<section id="check" class="check"><h2>Check yourself</h2>
+  <p>Answer in your head first, then open each question to compare.</p>
+  <details><summary>With a replication factor of 3, which Cassandra consistency levels make a read see the latest acknowledged write?</summary><p class="ans"><strong>QUORUM writes with QUORUM reads.</strong> 2 + 2 is greater than 3, so every read set overlaps every write set in at least one replica. ONE/ONE is faster and more available but can return stale data. <a href="#cassandra">Read the section</a></p></details>
+  <details><summary>A network partition leaves a CockroachDB range without a majority of its replicas. What does that range do?</summary><p class="ans"><strong>It stops serving rather than diverge.</strong> Each range is its own Raft group and needs a majority to commit, which is the CP leaning. Cassandra in the same spot keeps taking writes at weaker consistency. <a href="#glance">Read the section</a></p></details>
+  <details><summary>Two clients write the same Cassandra cell at the same moment. Which value survives?</summary><p class="ans"><strong>The one with the later timestamp (last write wins, per cell).</strong> The other write is silently dropped. CockroachDB prevents the conflict instead: one transaction waits or restarts. <a href="#cassandra">Read the section</a></p></details>
+  <details><summary>An orders, payments and inventory service has outgrown one Postgres and needs transactions across tables. Which database fits?</summary><p class="ans"><strong>CockroachDB.</strong> It gives serializable transactions, joins and secondary indexes, paying a consensus round trip per range written. Cassandra fits huge write volumes with known, simple access patterns. <a href="#choose">Read the section</a></p></details>
+  <details><summary>Why would a healthy CockroachDB node shut itself down?</summary><p class="ans"><strong>Its clock drifted past the maximum offset (500 ms by default).</strong> Reads rely on hybrid logical clock timestamps, so a node would rather stop than risk wrong answers. <a href="#cockroach">Read the section</a></p></details>
+</section>
 
 <section id="related"><h2>Related</h2><ul class="related"><li><a href="databases.html">Databases and replication</a></li><li><a href="consistency.html">Consistency and CAP</a></li><li><a href="raft.html">Consensus with Raft</a></li><li><a href="merkle-trees.html">Merkle trees</a></li><li><a href="sharding.html">Sharding and consistent hashing</a></li></ul></section>
   </article>
