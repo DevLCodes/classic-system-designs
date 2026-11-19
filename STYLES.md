@@ -34,6 +34,13 @@ Diagram colours are semantic and fixed across every page (`.k-user`, `.k-serve`,
 - Run `python3 tools/check_decks.py` before opening a PR: it checks the format, the index list, answer indexes and that every link resolves.
 - Flashcards: Space or click flips, arrow keys move, K marks a card known (saved in `localStorage`, ignored if storage is blocked), Shuffle and "Skip known cards". Quiz: 1 to 4 pick an answer, instant feedback with the why and a section link, a score at the end, and "Retry wrong ones".
 
+## Learning path
+
+`learning-path.html` orders every block and walkthrough into four stages (blocks first, then the walkthroughs that use them). Each page has a checkbox saved in `localStorage` under `csd-learning-path-v1` (every read and write wrapped in try/catch), with an overall progress bar, a bar per stage and a "Next up" link. It is linked from the Building blocks intro on the home page and marks Study as the current section.
+
+- The stages live in the `STAGES` array in the page script: `[slug, "b" or "w", title, one-line reason]`. When you add a page, place it in the stage whose blocks it leans on.
+- Until then it still appears: the page reads the card grids on `index.html` and lists any card not in `STAGES` under "New pages".
+
 ## Don't
 
 Use handwriting fonts, rotated stickies, highlighter strokes or paper textures. Those belong to the beginner notebook at DevLCodes/agentic-ai-beginner, which has its own style.
@@ -41,7 +48,7 @@ Use handwriting fonts, rotated stickies, highlighter strokes or paper textures. 
 ## Checklist for a new page
 
 1. Copy the head, tokens and base CSS from an existing page of the same kind (`caching.html` for a block, `url-shortener.html` for a walkthrough).
-2. Add a card for it in `index.html` under `#blocks` or `#designs`, and link it from the `#related` list of at least one neighbouring page.
+2. Add a card for it in `index.html` under `#blocks` or `#designs`, link it from the `#related` list of at least one neighbouring page, and place it in a stage in `learning-path.html`.
 3. Links to the agentic site are absolute (`https://devlcodes.github.io/agentic-ai-notebook/system-design/...`).
 4. Check it at 390px and 1280px wide: no horizontal scroll, 16px side gutter, 3D scene renders, lab works, no console errors.
 5. Optional but welcome: a deck in `decks/<slug>.json` plus its slug in `decks/index.json`, checked with `python3 tools/check_decks.py`.
