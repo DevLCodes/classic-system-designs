@@ -20,14 +20,17 @@ Not sure where to begin? The [learning path](https://devlcodes.github.io/classic
 10. [Sharding and consistent hashing](https://devlcodes.github.io/classic-system-designs/sharding.html)
 11. [Hot partitions and write buffering](https://devlcodes.github.io/classic-system-designs/hot-partitions.html)
 12. [Unique IDs and sequencers](https://devlcodes.github.io/classic-system-designs/unique-ids.html)
-13. [Message queues and streams](https://devlcodes.github.io/classic-system-designs/queues.html)
-14. [Consistency and CAP](https://devlcodes.github.io/classic-system-designs/consistency.html)
-15. [Consensus with Raft](https://devlcodes.github.io/classic-system-designs/raft.html)
-16. [Merkle trees](https://devlcodes.github.io/classic-system-designs/merkle-trees.html)
-17. [Cassandra vs CockroachDB](https://devlcodes.github.io/classic-system-designs/cassandra-vs-cockroachdb.html)
-18. [Monitoring, logging and tracing](https://devlcodes.github.io/classic-system-designs/observability.html)
-19. [Numbers to know](https://devlcodes.github.io/classic-system-designs/numbers.html)
-20. [Threads, locks and wait/notify](https://devlcodes.github.io/classic-system-designs/threads.html)
+13. [Search and inverted indexes](https://devlcodes.github.io/classic-system-designs/search.html)
+14. [Object storage, presigned and multipart uploads](https://devlcodes.github.io/classic-system-designs/object-storage.html)
+15. [Message queues and streams](https://devlcodes.github.io/classic-system-designs/queues.html)
+16. [Consistency and CAP](https://devlcodes.github.io/classic-system-designs/consistency.html)
+17. [Consensus with Raft](https://devlcodes.github.io/classic-system-designs/raft.html)
+18. [Merkle trees](https://devlcodes.github.io/classic-system-designs/merkle-trees.html)
+19. [Cassandra vs CockroachDB](https://devlcodes.github.io/classic-system-designs/cassandra-vs-cockroachdb.html)
+20. [Monitoring, logging and tracing](https://devlcodes.github.io/classic-system-designs/observability.html)
+21. [Numbers to know](https://devlcodes.github.io/classic-system-designs/numbers.html)
+22. [Threads, locks and wait/notify](https://devlcodes.github.io/classic-system-designs/threads.html)
+23. [Monoliths, microservices and hexagonal architecture](https://devlcodes.github.io/classic-system-designs/architecture-styles.html)
 
 ## Worked designs
 
@@ -49,6 +52,7 @@ Not sure where to begin? The [learning path](https://devlcodes.github.io/classic
 - [UPI payments switch](https://devlcodes.github.io/classic-system-designs/upi.html): 700M bank-to-bank payments a day, 25k/s at peak
 - [Stock trading platform](https://devlcodes.github.io/classic-system-designs/stock-trading.html): 15M orders a day, 2M live price streams at the market open
 - [Collaborative document editor](https://devlcodes.github.io/classic-system-designs/collab-docs.html): 5M open editing sessions, 2M edits/s at peak
+- [Notification system](https://devlcodes.github.io/classic-system-designs/notifications.html): 2B push, SMS and email messages a day, login codes in seconds during 50M-user campaigns
 
 The companion site, [agentic system designs](https://devlcodes.github.io/agentic-ai-notebook/system-design/), builds RAG, agents and evals on top of these same blocks.
 

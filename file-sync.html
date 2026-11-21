@@ -317,7 +317,7 @@
 
 <section id="api">
   <h2>API</h2>
-  <ul class="tags"><li>Interface</li></ul>
+  <ul class="tags"><li>Interface</li><li><a href="object-storage.html">Object storage</a></li></ul>
 <pre><code>POST /files/commit/check  { path, block_hashes[] }
   → { missing: ["9f2c…", "a71e…"], upload_urls: { "9f2c…": "https://blocks…?sig=…" } }
 PUT  {upload_url}          (one 4 MB block, straight to the block store)

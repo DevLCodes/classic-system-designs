@@ -1,0 +1,25 @@
+{
+  "title": "Merkle trees",
+  "page": "merkle-trees.html",
+  "cards": [
+    {"front": "What problem do Merkle trees solve?", "back": "Finding the few keys that differ between two huge replicas without shipping every key. One hash of everything says whether they differ, a hash per key is too much; a tree of range hashes sits in between.", "link": "merkle-trees.html#why"},
+    {"front": "Where Merkle trees show up", "back": "Anti-entropy repair between replicas, Git commits, BitTorrent pieces, certificate transparency logs and blockchains.", "link": "merkle-trees.html#why"},
+    {"front": "How a Merkle tree is built", "back": "Split the key space into ranges in token order, hash each range into a leaf, then hash pairs upward until one root hash summarises everything.", "link": "merkle-trees.html#how"},
+    {"front": "How big is a Merkle tree?", "back": "With 2^15 (32,768) leaves it has about 65,000 hashes, roughly 1 to 2 MB, whatever the size of the data. Building it needs one full read of the dataset, which is the expensive part.", "link": "merkle-trees.html#how"},
+    {"front": "Comparing two Merkle trees", "back": "Exchange roots; if equal, done. If not, compare children and recurse only into those that differ. At a differing leaf, stream that range's keys and reconcile them.", "link": "merkle-trees.html#compare"},
+    {"front": "Cost of a Merkle comparison", "back": "About 1 + 2 × differing leaves × depth hashes, plus streaming the keys in each differing leaf. A handful of differences in a billion keys costs a few hundred hashes.", "link": "merkle-trees.html#compare"},
+    {"front": "Overstreaming", "back": "With a shallow tree each leaf covers many keys, so one changed key forces streaming the whole range. Deeper trees are more precise but use more memory and round trips.", "link": "merkle-trees.html#tuning"},
+    {"front": "Repair schedule and tombstone grace period", "back": "Full repair is heavy, typically weekly per node, and must finish within the tombstone grace period (10 days by default in Cassandra) or deleted data can come back.", "link": "merkle-trees.html#tuning"},
+    {"front": "How deleted data comes back", "back": "If a replica missed a delete and tombstones are purged before repair runs, its old value looks newest and repair copies it everywhere.", "link": "merkle-trees.html#failure"},
+    {"front": "Trees that disagree for no reason", "back": "If replicas cut different range boundaries or data changes while trees are built, every leaf looks different and repair streams far more than needed. Bound the time window and use the same ranges.", "link": "merkle-trees.html#failure"},
+    {"front": "Which hash for a Merkle tree?", "back": "For replica repair a collision only misses one difference, so speed matters more. Where the tree proves integrity to someone who might cheat, like Git or certificate logs, use a cryptographic hash such as SHA-256.", "link": "merkle-trees.html#failure"}
+  ],
+  "quiz": [
+    {"q": "Two replicas' Merkle roots are equal. What happens next?", "choices": ["Nothing: they agree, after one hash crossed the network", "Compare every leaf to be sure", "Stream all keys in the first range", "Rebuild both trees"], "answer": 0, "why": "Equal roots mean every range below matches.", "link": "merkle-trees.html#compare"},
+    {"q": "What is the expensive part of using a Merkle tree for repair?", "choices": ["Building it, which reads the whole dataset", "Storing it, since it is as big as the data", "Sending the root hash", "Choosing the hash function"], "answer": 0, "why": "The tree is small, but every leaf hash needs a scan of its range.", "link": "merkle-trees.html#how"},
+    {"q": "A tree has very few leaves. What is the downside?", "choices": ["One changed key forces streaming a whole large range", "It uses too much memory", "It needs more round trips to walk", "It cannot detect differences"], "answer": 0, "why": "Shallow trees overstream because each leaf covers many keys.", "link": "merkle-trees.html#tuning"},
+    {"q": "Cassandra's tombstone grace period defaults to 10 days. What must repair do?", "choices": ["Run on every node more often than every 10 days", "Run exactly once every 10 days cluster-wide", "Wait until tombstones are purged", "Skip deleted keys"], "answer": 0, "why": "Otherwise a replica that missed a delete can resurrect the data.", "link": "merkle-trees.html#failure"},
+    {"q": "Why do database Merkle leaves follow token order on the hash ring?", "choices": ["So both replicas cut the same range boundaries", "So the tree stays balanced by size", "So hashes are cryptographically secure", "So keys are sorted alphabetically for users"], "answer": 0, "why": "Matching boundaries means matching data produces matching hashes.", "link": "merkle-trees.html#how"},
+    {"q": "Which system uses Merkle trees to verify pieces from untrusted peers?", "choices": ["BitTorrent", "etcd", "Redis", "Kafka"], "answer": 0, "why": "BitTorrent and IPFS verify downloaded pieces against a tree of hashes.", "link": "merkle-trees.html#real-world"}
+  ]
+}
