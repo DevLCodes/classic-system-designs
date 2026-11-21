@@ -380,7 +380,7 @@
   <details><summary>Why would a healthy CockroachDB node shut itself down?</summary><p class="ans"><strong>Its clock drifted past the maximum offset (500 ms by default).</strong> Reads rely on hybrid logical clock timestamps, so a node would rather stop than risk wrong answers. <a href="#cockroach">Read the section</a></p></details>
 </section>
 
-<section id="related"><h2>Related</h2><ul class="related"><li><a href="databases.html">Databases and replication</a></li><li><a href="consistency.html">Consistency and CAP</a></li><li><a href="raft.html">Consensus with Raft</a></li><li><a href="merkle-trees.html">Merkle trees</a></li><li><a href="sharding.html">Sharding and consistent hashing</a></li></ul></section>
+<section id="related"><h2>Related</h2><ul class="related"><li><a href="databases.html">Databases and replication</a></li><li><a href="consistency.html">Consistency and CAP</a></li><li><a href="raft.html">Consensus with Raft</a></li><li><a href="merkle-trees.html">Merkle trees</a></li><li><a href="sharding.html">Sharding and consistent hashing</a></li><li><a href="kv-store.html">Distributed key-value store</a></li></ul></section>
   </article>
 </div>
 </main>
