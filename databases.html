@@ -157,6 +157,17 @@
   .dg .dot-hr { fill: var(--c-gov); } .dg .dot-it { fill: var(--c-kb); } .dg .dot-eng { fill: var(--c-ingest); } .dg .dot-q { fill: var(--c-serve); stroke: var(--ink); stroke-width: 1.5; }
   .dg .halo { fill: none; stroke: var(--c-serve); stroke-width: 1.5; stroke-dasharray: 4 4; }
   .dg .zone { fill: var(--paper); stroke: var(--line); stroke-width: 1; }
+  /* Check yourself: self-test questions, answers in details/summary (see STYLES.md) */
+  .check { counter-reset: chk; }
+  .check details { counter-increment: chk; border: 1px solid var(--line); border-radius: 10px; background: var(--paper); margin: 0 0 10px; }
+  .check summary { position: relative; display: block; cursor: pointer; list-style: none; padding: 12px 44px 12px 48px; font-weight: 600; line-height: 1.45; }
+  .check summary::-webkit-details-marker { display: none; }
+  .check summary::before { content: "Q" counter(chk); position: absolute; left: 16px; top: 14px; font-family: var(--font-mono); font-size: 12px; font-weight: 500; color: var(--accent); }
+  .check summary::after { content: "+"; position: absolute; right: 16px; top: 10px; font-family: var(--font-mono); font-size: 18px; color: var(--muted); }
+  .check details[open] summary::after { content: "\2212"; }
+  .check summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 10px; }
+  .check .ans { margin: 0; padding: 0 16px 14px 48px; color: var(--ink); }
+  .check .ans a { font-family: var(--font-mono); font-size: 12.5px; white-space: nowrap; }
 </style>
 
 <style>
@@ -228,11 +239,11 @@
 </head>
 <body>
 <svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs><marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" class="ah" style="fill:#7d8996"/></marker></defs></svg>
-<header class="sitebar"><div class="wrap"><a class="brand" href="index.html">Classic System Design</a><nav aria-label="Site"><a href="index.html">Home</a><a href="index.html#blocks" aria-current="page">Building blocks</a><a href="index.html#designs">Designs</a><a href="https://devlcodes.github.io/agentic-ai-notebook/system-design/index.html">Agentic designs ↗</a></nav></div></header>
+<header class="sitebar"><div class="wrap"><a class="brand" href="index.html">Classic System Design</a><nav aria-label="Site"><a href="index.html">Home</a><a href="index.html#blocks" aria-current="page">Building blocks</a><a href="index.html#designs">Designs</a><a href="study.html">Study</a><a href="https://devlcodes.github.io/agentic-ai-notebook/system-design/index.html">Agentic designs ↗</a></nav></div></header>
 <main>
 <div class="wrap"><div class="intro"><p class="eyebrow">Building block · storage</p><h1>Databases, indexes and replication</h1><p class="lead">Picking the right kind of database, making reads fast with indexes, and keeping copies so one machine failing loses nothing.</p></div></div>
 <div class="wrap doc">
-  <nav class="toc" aria-label="On this page"><p>On this page</p><ol><li><a href="#families">Kinds of database</a></li><li><a href="#indexes">Indexes</a></li><li><a href="#lab">Try it: with and without an index</a></li><li><a href="#transactions">Transactions</a></li><li><a href="#replication">Replication</a></li><li><a href="#interview">Saying it in an interview</a></li><li><a href="#real-world">In the real world</a></li><li><a href="#related">Related</a></li></ol></nav>
+  <nav class="toc" aria-label="On this page"><p>On this page</p><ol><li><a href="#families">Kinds of database</a></li><li><a href="#indexes">Indexes</a></li><li><a href="#lab">Try it: with and without an index</a></li><li><a href="#transactions">Transactions</a></li><li><a href="#replication">Replication</a></li><li><a href="#interview">Saying it in an interview</a></li><li><a href="#real-world">In the real world</a></li><li><a href="#check">Check yourself</a></li><li><a href="#related">Related</a></li></ol></nav>
   <article>
 <section id="families"><h2>Kinds of database</h2>
 <p class="lead">Start with a relational database unless you have a specific reason not to. Most "why not Postgres?" answers in an interview should name an access pattern or a scale number.</p>
@@ -333,6 +344,14 @@
 <tr><td>Search</td><td>Elasticsearch, OpenSearch, Typesense, Meilisearch</td><td>Usually fed from the main database, not the source of truth</td></tr>
 </tbody></table></div>
 <p class="muted" style="font-size:13.5px;color:var(--muted)">Products change quickly; names here are examples, not endorsements. Check current docs before choosing.</p></section>
+
+<section id="check" class="check"><h2>Check yourself</h2>
+  <p>Answer in your head first, then open each question to compare.</p>
+  <details><summary>A user updates their profile, reloads, and sees the old version. What is the likeliest cause?</summary><p class="ans"><strong>Replication lag on a read follower.</strong> Followers can be seconds behind under load; read your own recent writes from the leader. <a href="#replication">Read the section</a></p></details>
+  <details><summary>'My recent orders' filters by user_id and sorts by created_at. Which index fits?</summary><p class="ans"><strong>A composite index on (user_id, created_at).</strong> A composite index serves the filter and the sort together. <a href="#indexes">Read the section</a></p></details>
+  <details><summary>You must move money between two accounts so both writes happen or neither does. What do you use?</summary><p class="ans"><strong>A transaction.</strong> Transactions give all-or-nothing writes when two writes must agree. <a href="#transactions">Read the section</a></p></details>
+  <details><summary>A workload is a massive stream of writes of time-ordered events per key. Which family suits it best?</summary><p class="ans"><strong>Wide-column store.</strong> Wide-column stores handle huge write volumes and time-ordered data per partition. <a href="#families">Read the section</a></p></details>
+</section>
 
 <section id="related"><h2>Related</h2><ul class="related"><li><a href="sharding.html">Sharding</a></li><li><a href="consistency.html">Consistency</a></li><li><a href="caching.html">Caching</a></li><li><a href="unique-ids.html">Unique IDs</a></li><li><a href="numbers.html">Numbers to know</a></li><li><a href="https://devlcodes.github.io/agentic-ai-notebook/system-design/vector-databases.html">Vector databases</a></li></ul></section>
   </article>

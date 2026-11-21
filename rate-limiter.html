@@ -157,6 +157,17 @@
   .dg .dot-hr { fill: var(--c-gov); } .dg .dot-it { fill: var(--c-kb); } .dg .dot-eng { fill: var(--c-ingest); } .dg .dot-q { fill: var(--c-serve); stroke: var(--ink); stroke-width: 1.5; }
   .dg .halo { fill: none; stroke: var(--c-serve); stroke-width: 1.5; stroke-dasharray: 4 4; }
   .dg .zone { fill: var(--paper); stroke: var(--line); stroke-width: 1; }
+  /* Check yourself: self-test questions, answers in details/summary (see STYLES.md) */
+  .check { counter-reset: chk; }
+  .check details { counter-increment: chk; border: 1px solid var(--line); border-radius: 10px; background: var(--paper); margin: 0 0 10px; }
+  .check summary { position: relative; display: block; cursor: pointer; list-style: none; padding: 12px 44px 12px 48px; font-weight: 600; line-height: 1.45; }
+  .check summary::-webkit-details-marker { display: none; }
+  .check summary::before { content: "Q" counter(chk); position: absolute; left: 16px; top: 14px; font-family: var(--font-mono); font-size: 12px; font-weight: 500; color: var(--accent); }
+  .check summary::after { content: "+"; position: absolute; right: 16px; top: 10px; font-family: var(--font-mono); font-size: 18px; color: var(--muted); }
+  .check details[open] summary::after { content: "\2212"; }
+  .check summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 10px; }
+  .check .ans { margin: 0; padding: 0 16px 14px 48px; color: var(--ink); }
+  .check .ans a { font-family: var(--font-mono); font-size: 12.5px; white-space: nowrap; }
 </style>
 
 <style>
@@ -238,7 +249,7 @@
 </head>
 <body>
 <svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs><marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" class="ah" style="fill:#7d8996"/></marker></defs></svg>
-<header class="sitebar"><div class="wrap"><a class="brand" href="index.html">Classic System Design</a><nav aria-label="Site"><a href="index.html">Home</a><a href="index.html#blocks">Building blocks</a><a href="index.html#designs" aria-current="page">Designs</a><a href="https://devlcodes.github.io/agentic-ai-notebook/system-design/index.html">Agentic designs ↗</a></nav></div></header>
+<header class="sitebar"><div class="wrap"><a class="brand" href="index.html">Classic System Design</a><nav aria-label="Site"><a href="index.html">Home</a><a href="index.html#blocks">Building blocks</a><a href="index.html#designs" aria-current="page">Designs</a><a href="study.html">Study</a><a href="https://devlcodes.github.io/agentic-ai-notebook/system-design/index.html">Agentic designs ↗</a></nav></div></header>
 <main>
 <header class="wrap"><div class="intro"><p class="eyebrow">Classic system design walkthrough</p><h1>Distributed Rate Limiter</h1><p class="prompt"><q>Design the rate limiter for a public API platform. Every request is checked against limits per API key, per user and per IP, with different limits per pricing plan (for example 100 requests a minute on Free and 5,000 on Pro, plus a daily quota). The API serves a million requests a second from hundreds of servers in several regions.</q></p><ul class="legend" aria-label="Colour key"><li><i style="background:var(--c-serve)"></i>Request path</li><li><i style="background:var(--c-ingest)"></i>Counters</li><li><i style="background:var(--c-kb)"></i>Rules and storage</li><li><i style="background:var(--c-cross)"></i>Async and analytics</li><li><i style="background:var(--c-gov)"></i>Rejections</li></ul></div></header>
 <div class="wrap"><figure class="fig3d hero" id="hero">
@@ -249,7 +260,7 @@
   <figcaption>Illustrative. The middle row is the request path; counters sit behind it, rules arrive from the back, decisions flow out to analytics.</figcaption>
 </figure></div>
 <div class="wrap doc">
-  <nav class="toc" aria-label="Sections"><p>The solution</p><ol><li><a href="#requirements">Requirements</a></li><li><a href="#success">Success metrics</a></li><li><a href="#estimates">Estimates</a></li><li><a href="#api">API</a></li><li><a href="#architecture">Architecture</a></li><li><a href="#counters">Atomic counters in Redis</a></li><li><a href="#scale">A million checks a second</a></li><li><a href="#lab">Try it: local leases vs accuracy</a></li><li><a href="#rules">Rules and plans</a></li><li><a href="#failure">When the limiter fails</a></li><li><a href="#regions">Multiple regions</a></li><li><a href="#observability">Observability</a></li><li><a href="#risks">Risks and v2</a></li><li><a href="#presenting">Presenting it in 45 minutes</a></li><li><a href="#numbers">Numbers to remember</a></li></ol></nav>
+  <nav class="toc" aria-label="Sections"><p>The solution</p><ol><li><a href="#requirements">Requirements</a></li><li><a href="#success">Success metrics</a></li><li><a href="#estimates">Estimates</a></li><li><a href="#api">API</a></li><li><a href="#architecture">Architecture</a></li><li><a href="#counters">Atomic counters in Redis</a></li><li><a href="#scale">A million checks a second</a></li><li><a href="#lab">Try it: local leases vs accuracy</a></li><li><a href="#rules">Rules and plans</a></li><li><a href="#failure">When the limiter fails</a></li><li><a href="#regions">Multiple regions</a></li><li><a href="#observability">Observability</a></li><li><a href="#risks">Risks and v2</a></li><li><a href="#presenting">Presenting it in 45 minutes</a></li><li><a href="#numbers">Numbers to remember</a></li><li><a href="#check">Check yourself</a></li></ol></nav>
   <article>
 
 <section id="requirements">
@@ -520,6 +531,14 @@ blocks:
     <tr><td>Cross-region round trip</td><td class="num">70–150 ms: never on the hot path</td></tr>
     <tr><td>Circuit-breaker trip</td><td class="num">Redis p99 &gt; ~5 ms or errors</td></tr>
   </tbody></table></div>
+</section>
+
+<section id="check" class="check"><h2>Check yourself</h2>
+  <p>Answer in your head first, then open each question to compare.</p>
+  <details><summary>Two gateways both see one token left for a key and both allow the request. What is the root cause?</summary><p class="ans"><strong>The read-modify-write isn't atomic; it should be one Lua script in Redis.</strong> A separate GET and SET leaves a race; the script runs as one step. <a href="#counters">Read the section</a></p></details>
+  <details><summary>A customer with a limit of 10 requests a minute regularly gets 40 through. Leases are 20 tokens across 300 gateways. What is the fix?</summary><p class="ans"><strong>Send small limits straight to Redis on every check and scale leases with the limit.</strong> Overshoot is bounded by gateways × lease size, so small limits must skip leasing. <a href="#scale">Read the section</a></p></details>
+  <details><summary>A Redis shard fails over and p99 jumps above 5 ms. What should gateways do for the public API?</summary><p class="ans"><strong>Trip a circuit breaker and enforce limit ÷ gateways from local memory.</strong> Failing open with approximate local limits keeps the API up while still capping abuse. <a href="#failure">Read the section</a></p></details>
+  <details><summary>Right after a config push, 429s spike for every plan. What safeguard should have caught it?</summary><p class="ans"><strong>Staged rule rollouts with a dry-run mode and instant rollback.</strong> A bad rule can block everyone, so rules roll out in stages and can log without enforcing. <a href="#risks">Read the section</a></p></details>
 </section>
   </article>
 </div>

@@ -157,6 +157,17 @@
   .dg .dot-hr { fill: var(--c-gov); } .dg .dot-it { fill: var(--c-kb); } .dg .dot-eng { fill: var(--c-ingest); } .dg .dot-q { fill: var(--c-serve); stroke: var(--ink); stroke-width: 1.5; }
   .dg .halo { fill: none; stroke: var(--c-serve); stroke-width: 1.5; stroke-dasharray: 4 4; }
   .dg .zone { fill: var(--paper); stroke: var(--line); stroke-width: 1; }
+  /* Check yourself: self-test questions, answers in details/summary (see STYLES.md) */
+  .check { counter-reset: chk; }
+  .check details { counter-increment: chk; border: 1px solid var(--line); border-radius: 10px; background: var(--paper); margin: 0 0 10px; }
+  .check summary { position: relative; display: block; cursor: pointer; list-style: none; padding: 12px 44px 12px 48px; font-weight: 600; line-height: 1.45; }
+  .check summary::-webkit-details-marker { display: none; }
+  .check summary::before { content: "Q" counter(chk); position: absolute; left: 16px; top: 14px; font-family: var(--font-mono); font-size: 12px; font-weight: 500; color: var(--accent); }
+  .check summary::after { content: "+"; position: absolute; right: 16px; top: 10px; font-family: var(--font-mono); font-size: 18px; color: var(--muted); }
+  .check details[open] summary::after { content: "\2212"; }
+  .check summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 10px; }
+  .check .ans { margin: 0; padding: 0 16px 14px 48px; color: var(--ink); }
+  .check .ans a { font-family: var(--font-mono); font-size: 12.5px; white-space: nowrap; }
 </style>
 <style>
   .lab { margin: 6px 0 26px; padding: 14px 16px 16px; background: var(--paper); border: 1px solid var(--line); border-radius: 14px; }
@@ -214,11 +225,11 @@
 </head>
 <body>
 <svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs><marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" class="ah" style="fill:#7d8996"/></marker><marker id="ahb" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" style="fill:#4255d4"/></marker><pattern id="hatch" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><rect width="6" height="6" fill="#dfe3fa"/><line x1="0" y1="0" x2="0" y2="6" stroke="#4d5fd8" stroke-width="1.2" opacity=".35"/></pattern></defs></svg>
-<header class="sitebar"><div class="wrap"><a class="brand" href="index.html">Classic System Design</a><nav aria-label="Site"><a href="index.html">Home</a><a href="index.html#blocks" aria-current="page">Building blocks</a><a href="index.html#designs">Designs</a><a href="https://devlcodes.github.io/agentic-ai-notebook/system-design/index.html">Agentic designs ↗</a></nav></div></header>
+<header class="sitebar"><div class="wrap"><a class="brand" href="index.html">Classic System Design</a><nav aria-label="Site"><a href="index.html">Home</a><a href="index.html#blocks" aria-current="page">Building blocks</a><a href="index.html#designs">Designs</a><a href="study.html">Study</a><a href="https://devlcodes.github.io/agentic-ai-notebook/system-design/index.html">Agentic designs ↗</a></nav></div></header>
 <main>
 <div class="wrap"><div class="intro"><p class="eyebrow">Building block · concurrency</p><h1>Threads, locks and wait/notify</h1><p class="lead">start() vs run(), synchronized, wait() and notify(), and daemon threads, explained with one kitchen and one knife.</p></div></div>
 <div class="wrap doc">
-  <nav class="toc" aria-label="On this page"><p>On this page</p><ol><li><a href="#what">The big picture</a></li><li><a href="#start">start() vs run()</a></li><li><a href="#sync">synchronized</a></li><li><a href="#wait">wait() and notify()</a></li><li><a href="#daemon">Daemon threads</a></li><li><a href="#lab">Try it: step through</a></li><li><a href="#cheat">Cheat sheet</a></li><li><a href="#related">Related</a></li></ol></nav>
+  <nav class="toc" aria-label="On this page"><p>On this page</p><ol><li><a href="#what">The big picture</a></li><li><a href="#start">start() vs run()</a></li><li><a href="#sync">synchronized</a></li><li><a href="#wait">wait() and notify()</a></li><li><a href="#daemon">Daemon threads</a></li><li><a href="#lab">Try it: step through</a></li><li><a href="#cheat">Cheat sheet</a></li><li><a href="#check">Check yourself</a></li><li><a href="#related">Related</a></li></ol></nav>
   <article>
 
 <section id="what"><h2>The big picture</h2>
@@ -390,6 +401,15 @@ t.start();</code></pre>
 <tr><td><code>setDaemon(true)</code></td><td>Java won't wait for this thread to exit</td><td>Calling it after <code>start()</code></td></tr>
 </tbody></table></div>
 <p>In real code, use <code>ScheduledExecutorService</code> instead of writing this yourself. Interviewers usually ask you to build it by hand, so mention it at the end.</p></section>
+
+<section id="check" class="check"><h2>Check yourself</h2>
+  <p>Answer in your head first, then open each question to compare.</p>
+  <details><summary>What happens if you call t.run() instead of t.start()?</summary><p class="ans"><strong>No new thread starts.</strong> The calling thread runs loop() itself and gets stuck in it. <a href="#start">Read the section</a></p></details>
+  <details><summary>Why use wait(ms) and not Thread.sleep(ms) inside a synchronized block?</summary><p class="ans"><strong>sleep keeps the lock; wait puts it down.</strong> With sleep, schedule() cannot get in, so a sooner alarm rings late. wait can also be woken early by notify(). <a href="#wait">Read the section</a></p></details>
+  <details><summary>What does Java do if you call wait() outside synchronized?</summary><p class="ans"><strong>It throws IllegalMonitorStateException.</strong> wait() and notify() must be called while holding that object's lock. <a href="#wait">Read the section</a></p></details>
+  <details><summary>Why does the worker loop continue and re-check after waking?</summary><p class="ans"><strong>Waking means something changed, not that the alarm is due.</strong> A notify() might mean a new, sooner alarm was added, so the worker checks the heap again. <a href="#wait">Read the section</a></p></details>
+  <details><summary>main has finished but the program never exits. What is the likely cause?</summary><p class="ans"><strong>The worker thread is not a daemon.</strong> Java waits for normal threads before exiting. Call setDaemon(true) before start(). <a href="#daemon">Read the section</a></p></details>
+</section>
 
 <section id="related"><h2>Related</h2><ul class="related"><li><a href="queues.html">Message queues and streams</a></li><li><a href="rate-limiting.html">Rate limiting</a></li><li><a href="caching.html">Caching (stampede locks)</a></li></ul></section>
   </article>

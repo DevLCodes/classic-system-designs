@@ -1,0 +1,152 @@
+{
+  "title": "Sharding and consistent hashing",
+  "page": "sharding.html",
+  "cards": [
+    {
+      "front": "Replication vs sharding",
+      "back": "Replication copies the same data to more machines; sharding splits the data so each machine holds only part. Each shard is usually its own replicated group.",
+      "link": "sharding.html#what"
+    },
+    {
+      "front": "Try before sharding",
+      "back": "A bigger machine, read replicas, a cache, archiving old data, and splitting unrelated tables into separate databases.",
+      "link": "sharding.html#what"
+    },
+    {
+      "front": "Vertical vs horizontal partitioning",
+      "back": "Vertical splits by columns or features (separate tables or databases); horizontal sharding splits one table's rows across machines.",
+      "link": "sharding.html#strategies"
+    },
+    {
+      "front": "Range sharding",
+      "back": "Contiguous key ranges: great for range scans, but new data all lands on the last range and makes it hot.",
+      "link": "sharding.html#strategies"
+    },
+    {
+      "front": "Hash sharding",
+      "back": "hash(key) picks the shard: even load, but range queries must ask every shard.",
+      "link": "sharding.html#strategies"
+    },
+    {
+      "front": "Directory sharding",
+      "back": "A lookup table maps keys or tenants to shards, so one big tenant can be moved on its own. Cache the directory; it's a critical dependency.",
+      "link": "sharding.html#strategies"
+    },
+    {
+      "front": "A good shard key",
+      "back": "Many evenly spread values, matches the main access pattern so most queries hit one shard, and keeps things that change together on one shard.",
+      "link": "sharding.html#strategies"
+    },
+    {
+      "front": "Problem with hash % N",
+      "back": "Going from 4 to 5 shards changes the answer for about 80% of keys, so almost all data moves or every cache entry misses.",
+      "link": "sharding.html#consistent"
+    },
+    {
+      "front": "Consistent hashing",
+      "back": "Nodes and keys hash onto a ring and a key belongs to the next node clockwise. Adding a node takes only about 1/N of the keys.",
+      "link": "sharding.html#consistent"
+    },
+    {
+      "front": "Virtual nodes",
+      "back": "Each physical node gets 100 to 200 points on the ring to even out the load.",
+      "link": "sharding.html#consistent"
+    },
+    {
+      "front": "Many logical shards, few machines",
+      "back": "Create something like 1,024 logical shards up front and place many on each machine, so growth moves whole shards instead of re-splitting keys.",
+      "link": "sharding.html#hot"
+    },
+    {
+      "front": "Scatter-gather",
+      "back": "A query without the shard key goes to every shard and merges results, getting slower as shards grow. Keep a secondary index keyed the other way instead.",
+      "link": "sharding.html#hot"
+    }
+  ],
+  "quiz": [
+    {
+      "q": "A chat app shards messages. Which shard key keeps most queries on one shard?",
+      "choices": [
+        "created_at timestamp",
+        "conversation_id",
+        "message length",
+        "A random number per message"
+      ],
+      "answer": 1,
+      "why": "Queries are scoped to a conversation, so its messages and transactions stay local.",
+      "link": "sharding.html#strategies"
+    },
+    {
+      "q": "You shard orders by date range and the newest shard is overloaded. Why?",
+      "choices": [
+        "Hash collisions",
+        "All new writes land on the last range",
+        "Too many virtual nodes",
+        "Replication lag"
+      ],
+      "answer": 1,
+      "why": "Range sharding by time sends every new write to one shard.",
+      "link": "sharding.html#strategies"
+    },
+    {
+      "q": "Using hash(key) % N, you add a fifth cache node and the database is flooded. Why?",
+      "choices": [
+        "The new node is slow",
+        "About 80% of keys now map to a different node, so most lookups miss",
+        "TTLs expired",
+        "The ring is too small"
+      ],
+      "answer": 1,
+      "why": "Modulo hashing reshuffles almost everything; consistent hashing moves only about 1/N.",
+      "link": "sharding.html#consistent"
+    },
+    {
+      "q": "With consistent hashing and only one point per node, load is very uneven. What fixes it?",
+      "choices": [
+        "Fewer nodes",
+        "Virtual nodes: many points per physical node",
+        "Switch to range sharding",
+        "Bigger keys"
+      ],
+      "answer": 1,
+      "why": "Many ring points per node even out each node's share.",
+      "link": "sharding.html#consistent"
+    },
+    {
+      "q": "Users are sharded by user_id, but login looks users up by email. What keeps that fast?",
+      "choices": [
+        "Scatter-gather to every shard",
+        "A small email-to-user_id lookup table",
+        "Re-shard by email",
+        "Store every user on every shard"
+      ],
+      "answer": 1,
+      "why": "A secondary index keyed the other way avoids asking every shard.",
+      "link": "sharding.html#hot"
+    },
+    {
+      "q": "One huge tenant overwhelms its hash shard. Which strategy lets you move just that tenant?",
+      "choices": [
+        "Range sharding",
+        "Directory-based sharding",
+        "hash % N",
+        "Vertical partitioning"
+      ],
+      "answer": 1,
+      "why": "A directory maps each tenant to a shard, so one can be moved on its own.",
+      "link": "sharding.html#strategies"
+    },
+    {
+      "q": "You expect to grow from 16 to 64 machines. How do you avoid re-splitting keys later?",
+      "choices": [
+        "Start with 16 shards and rehash later",
+        "Create many logical shards up front and move whole shards",
+        "Use a timestamp shard key",
+        "Shard only when you hit 64"
+      ],
+      "answer": 1,
+      "why": "Moving logical shards between machines avoids rehashing keys.",
+      "link": "sharding.html#hot"
+    }
+  ]
+}

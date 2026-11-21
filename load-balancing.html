@@ -157,6 +157,17 @@
   .dg .dot-hr { fill: var(--c-gov); } .dg .dot-it { fill: var(--c-kb); } .dg .dot-eng { fill: var(--c-ingest); } .dg .dot-q { fill: var(--c-serve); stroke: var(--ink); stroke-width: 1.5; }
   .dg .halo { fill: none; stroke: var(--c-serve); stroke-width: 1.5; stroke-dasharray: 4 4; }
   .dg .zone { fill: var(--paper); stroke: var(--line); stroke-width: 1; }
+  /* Check yourself: self-test questions, answers in details/summary (see STYLES.md) */
+  .check { counter-reset: chk; }
+  .check details { counter-increment: chk; border: 1px solid var(--line); border-radius: 10px; background: var(--paper); margin: 0 0 10px; }
+  .check summary { position: relative; display: block; cursor: pointer; list-style: none; padding: 12px 44px 12px 48px; font-weight: 600; line-height: 1.45; }
+  .check summary::-webkit-details-marker { display: none; }
+  .check summary::before { content: "Q" counter(chk); position: absolute; left: 16px; top: 14px; font-family: var(--font-mono); font-size: 12px; font-weight: 500; color: var(--accent); }
+  .check summary::after { content: "+"; position: absolute; right: 16px; top: 10px; font-family: var(--font-mono); font-size: 18px; color: var(--muted); }
+  .check details[open] summary::after { content: "\2212"; }
+  .check summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 10px; }
+  .check .ans { margin: 0; padding: 0 16px 14px 48px; color: var(--ink); }
+  .check .ans a { font-family: var(--font-mono); font-size: 12.5px; white-space: nowrap; }
 </style>
 
 <style>
@@ -228,11 +239,11 @@
 </head>
 <body>
 <svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs><marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" class="ah" style="fill:#7d8996"/></marker></defs></svg>
-<header class="sitebar"><div class="wrap"><a class="brand" href="index.html">Classic System Design</a><nav aria-label="Site"><a href="index.html">Home</a><a href="index.html#blocks" aria-current="page">Building blocks</a><a href="index.html#designs">Designs</a><a href="https://devlcodes.github.io/agentic-ai-notebook/system-design/index.html">Agentic designs ↗</a></nav></div></header>
+<header class="sitebar"><div class="wrap"><a class="brand" href="index.html">Classic System Design</a><nav aria-label="Site"><a href="index.html">Home</a><a href="index.html#blocks" aria-current="page">Building blocks</a><a href="index.html#designs">Designs</a><a href="study.html">Study</a><a href="https://devlcodes.github.io/agentic-ai-notebook/system-design/index.html">Agentic designs ↗</a></nav></div></header>
 <main>
 <div class="wrap"><div class="intro"><p class="eyebrow">Building block · traffic</p><h1>Load balancing</h1><p class="lead">Spreading requests across many servers so no single one is overloaded, and so one failing server does not take the service down.</p></div></div>
 <div class="wrap doc">
-  <nav class="toc" aria-label="On this page"><p>On this page</p><ol><li><a href="#what">What a load balancer does</a></li><li><a href="#layers">Layer 4 or layer 7</a></li><li><a href="#algorithms">Choosing a server</a></li><li><a href="#lab">Try it: one slow server</a></li><li><a href="#health">Health checks and failure</a></li><li><a href="#interview">Saying it in an interview</a></li><li><a href="#real-world">In the real world</a></li><li><a href="#related">Related</a></li></ol></nav>
+  <nav class="toc" aria-label="On this page"><p>On this page</p><ol><li><a href="#what">What a load balancer does</a></li><li><a href="#layers">Layer 4 or layer 7</a></li><li><a href="#algorithms">Choosing a server</a></li><li><a href="#lab">Try it: one slow server</a></li><li><a href="#health">Health checks and failure</a></li><li><a href="#interview">Saying it in an interview</a></li><li><a href="#real-world">In the real world</a></li><li><a href="#check">Check yourself</a></li><li><a href="#related">Related</a></li></ol></nav>
   <article>
 <section id="what"><h2>What a load balancer does</h2>
 <p class="lead">A load balancer sits in front of a pool of identical servers. Clients talk to one address; the balancer picks a healthy server for each connection or request.</p>
@@ -304,6 +315,14 @@
 <tr><td>Inside Kubernetes</td><td>Services with kube-proxy, ingress controllers, Gateway API</td><td>The same ideas, configured as cluster objects</td></tr>
 </tbody></table></div>
 <p class="muted" style="font-size:13.5px;color:var(--muted)">Products change quickly; names here are examples, not endorsements. Check current docs before choosing.</p></section>
+
+<section id="check" class="check"><h2>Check yourself</h2>
+  <p>Answer in your head first, then open each question to compare.</p>
+  <details><summary>One of four servers develops a bad disk and runs 3× slower. Which algorithm keeps latency lowest?</summary><p class="ans"><strong>Power of two choices or least connections.</strong> Load-aware choices steer traffic away from the slow server; round robin keeps feeding it. <a href="#lab">Read the section</a></p></details>
+  <details><summary>Every deploy causes a short burst of 5xx errors. What is most likely missing?</summary><p class="ans"><strong>Connection draining.</strong> Without draining, in-flight requests are cut off when a server is removed. <a href="#health">Read the section</a></p></details>
+  <details><summary>You need /api and /images routed to different server pools. Which balancer do you need?</summary><p class="ans"><strong>Layer 7.</strong> Only an L7 balancer reads the HTTP path. <a href="#layers">Read the section</a></p></details>
+  <details><summary>During a partial outage, traffic to healthy servers triples and they fall over too. What likely caused it?</summary><p class="ans"><strong>Uncapped retries.</strong> Retries add load exactly when the system is struggling; cap them and add backoff. <a href="#health">Read the section</a></p></details>
+</section>
 
 <section id="related"><h2>Related</h2><ul class="related"><li><a href="api-gateways.html">API gateways and service mesh</a></li><li><a href="caching.html">Caching</a></li><li><a href="sharding.html">Sharding and consistent hashing</a></li><li><a href="rate-limiting.html">Rate limiting</a></li><li><a href="numbers.html">Numbers to know</a></li><li><a href="https://devlcodes.github.io/agentic-ai-notebook/system-design/routing.html">Routing for agents</a></li></ul></section>
   </article>

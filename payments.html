@@ -157,6 +157,17 @@
   .dg .dot-hr { fill: var(--c-gov); } .dg .dot-it { fill: var(--c-kb); } .dg .dot-eng { fill: var(--c-ingest); } .dg .dot-q { fill: var(--c-serve); stroke: var(--ink); stroke-width: 1.5; }
   .dg .halo { fill: none; stroke: var(--c-serve); stroke-width: 1.5; stroke-dasharray: 4 4; }
   .dg .zone { fill: var(--paper); stroke: var(--line); stroke-width: 1; }
+  /* Check yourself: self-test questions, answers in details/summary (see STYLES.md) */
+  .check { counter-reset: chk; }
+  .check details { counter-increment: chk; border: 1px solid var(--line); border-radius: 10px; background: var(--paper); margin: 0 0 10px; }
+  .check summary { position: relative; display: block; cursor: pointer; list-style: none; padding: 12px 44px 12px 48px; font-weight: 600; line-height: 1.45; }
+  .check summary::-webkit-details-marker { display: none; }
+  .check summary::before { content: "Q" counter(chk); position: absolute; left: 16px; top: 14px; font-family: var(--font-mono); font-size: 12px; font-weight: 500; color: var(--accent); }
+  .check summary::after { content: "+"; position: absolute; right: 16px; top: 10px; font-family: var(--font-mono); font-size: 18px; color: var(--muted); }
+  .check details[open] summary::after { content: "\2212"; }
+  .check summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 10px; }
+  .check .ans { margin: 0; padding: 0 16px 14px 48px; color: var(--ink); }
+  .check .ans a { font-family: var(--font-mono); font-size: 12.5px; white-space: nowrap; }
 </style>
 
 <style>
@@ -238,7 +249,7 @@
 </head>
 <body>
 <svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs><marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" class="ah" style="fill:#7d8996"/></marker></defs></svg>
-<header class="sitebar"><div class="wrap"><a class="brand" href="index.html">Classic System Design</a><nav aria-label="Site"><a href="index.html">Home</a><a href="index.html#blocks">Building blocks</a><a href="index.html#designs" aria-current="page">Designs</a><a href="https://devlcodes.github.io/agentic-ai-notebook/system-design/index.html">Agentic designs ↗</a></nav></div></header>
+<header class="sitebar"><div class="wrap"><a class="brand" href="index.html">Classic System Design</a><nav aria-label="Site"><a href="index.html">Home</a><a href="index.html#blocks">Building blocks</a><a href="index.html#designs" aria-current="page">Designs</a><a href="study.html">Study</a><a href="https://devlcodes.github.io/agentic-ai-notebook/system-design/index.html">Agentic designs ↗</a></nav></div></header>
 <main>
 <header class="wrap"><div class="intro"><p class="eyebrow">Classic system design walkthrough</p><h1>Payments</h1><p class="prompt"><q>Design the payment system for a large online marketplace. Buyers pay by card at checkout through an external payment processor, sellers are paid out later, refunds must work, and finance must be able to prove where every cent went. Expect 10 million payments a day, with ten times the usual traffic during big sales.</q></p><ul class="legend" aria-label="Colour key"><li><i style="background:var(--c-serve)"></i>Checkout path</li><li><i style="background:var(--c-ingest)"></i>Payment processing</li><li><i style="background:var(--c-kb)"></i>Ledger and storage</li><li><i style="background:var(--c-cross)"></i>Async events</li><li><i style="background:var(--c-gov)"></i>Risk and reconciliation</li></ul></div></header>
 <div class="wrap"><figure class="fig3d hero" id="hero">
@@ -249,7 +260,7 @@
   <figcaption>Illustrative. The middle row is checkout; the processor sits outside on the right; the ledger and reconciliation sit behind.</figcaption>
 </figure></div>
 <div class="wrap doc">
-  <nav class="toc" aria-label="Sections"><p>The solution</p><ol><li><a href="#requirements">Requirements</a></li><li><a href="#success">Success metrics</a></li><li><a href="#estimates">Estimates</a></li><li><a href="#api">API</a></li><li><a href="#architecture">Architecture</a></li><li><a href="#idempotency">Idempotency and the unknown state</a></li><li><a href="#lab">Try it: retries without idempotency</a></li><li><a href="#states">The payment state machine</a></li><li><a href="#ledger">The double-entry ledger</a></li><li><a href="#saga">Checkout as a saga</a></li><li><a href="#reconciliation">Reconciliation</a></li><li><a href="#payouts">Refunds and payouts</a></li><li><a href="#security">Security, PCI and fraud</a></li><li><a href="#deployment">Deployment and regions</a></li><li><a href="#observability">Observability</a></li><li><a href="#risks">Risks and v2</a></li><li><a href="#presenting">Presenting it in 45 minutes</a></li><li><a href="#numbers">Numbers to remember</a></li></ol></nav>
+  <nav class="toc" aria-label="Sections"><p>The solution</p><ol><li><a href="#requirements">Requirements</a></li><li><a href="#success">Success metrics</a></li><li><a href="#estimates">Estimates</a></li><li><a href="#api">API</a></li><li><a href="#architecture">Architecture</a></li><li><a href="#idempotency">Idempotency and the unknown state</a></li><li><a href="#lab">Try it: retries without idempotency</a></li><li><a href="#states">The payment state machine</a></li><li><a href="#ledger">The double-entry ledger</a></li><li><a href="#saga">Checkout as a saga</a></li><li><a href="#reconciliation">Reconciliation</a></li><li><a href="#payouts">Refunds and payouts</a></li><li><a href="#security">Security, PCI and fraud</a></li><li><a href="#deployment">Deployment and regions</a></li><li><a href="#observability">Observability</a></li><li><a href="#risks">Risks and v2</a></li><li><a href="#presenting">Presenting it in 45 minutes</a></li><li><a href="#numbers">Numbers to remember</a></li><li><a href="#check">Check yourself</a></li></ol></nav>
   <article>
 
 <section id="requirements">
@@ -567,6 +578,14 @@ COMMIT;
     <tr><td>Amounts</td><td class="num">integers in minor units + currency code</td></tr>
     <tr><td>Record retention</td><td class="num">7–10 years for financial records</td></tr>
   </tbody></table></div>
+</section>
+
+<section id="check" class="check"><h2>Check yourself</h2>
+  <p>Answer in your head first, then open each question to compare.</p>
+  <details><summary>A processor call times out after 10 seconds. What should the payment service do?</summary><p class="ans"><strong>Mark it UNKNOWN, then retry with the same idempotency key, query the processor or wait for the webhook.</strong> A timeout may hide a successful charge, so it must be resolved, not guessed. <a href="#idempotency">Read the section</a></p></details>
+  <details><summary>Reconciliation finds a charge in the processor's settlement file with no matching order. What most likely caused it?</summary><p class="ans"><strong>A payment left in UNKNOWN that was never resolved.</strong> Processor-only items are usually unresolved unknowns; record intent first and resolve quickly. <a href="#reconciliation">Read the section</a></p></details>
+  <details><summary>A late 'authorised' webhook arrives for a payment that is already captured. What should the handler do?</summary><p class="ans"><strong>Ignore it, since the guarded transition no longer applies.</strong> Handlers check current state and skip transitions already done or no longer valid. <a href="#states">Read the section</a></p></details>
+  <details><summary>The order service occasionally confirms an order whose payment was rolled back. What fixes this?</summary><p class="ans"><strong>A transactional outbox written in the same transaction as the state change.</strong> The outbox guarantees events match committed state. <a href="#saga">Read the section</a></p></details>
 </section>
   </article>
 </div>

@@ -1,0 +1,27 @@
+{
+  "title": "Video streaming",
+  "page": "video-streaming.html",
+  "cards": [
+    {"front": "What video streaming is mostly about", "back": "Bandwidth, not storage. Shaped by network bandwidth, device variety and format variety.", "link": "video-streaming.html#requirements"},
+    {"front": "Concurrent streams for 500M viewers watching 30 minutes a day", "back": "About 10 million at any moment on average, about 20 million at the evening peak.", "link": "video-streaming.html#estimates"},
+    {"front": "Egress for 10M streams at 2.5 Mb/s", "back": "About 26 Tb/s, 50+ Tb/s at peak. It has to come from thousands of caches near viewers.", "link": "video-streaming.html#estimates"},
+    {"front": "Why presigned multipart uploads?", "back": "Large files go straight to object storage, never through API servers, and a dropped connection resumes from the last part.", "link": "video-streaming.html#api"},
+    {"front": "Control plane vs data plane", "back": "The control plane (API, playback, metadata) handles thousands of requests a second in the cloud; the data plane (segments) handles millions from ISP caches. They scale and fail separately.", "link": "video-streaming.html#architecture"},
+    {"front": "Why chunk a video before transcoding?", "back": "Chunks cut at keyframes are transcoded in parallel by thousands of workers, so a video is playable in minutes and a failed chunk is simply retried.", "link": "video-streaming.html#upload"},
+    {"front": "Bitrate ladder", "back": "Each video encoded at several renditions, e.g. 240p at 0.4 Mb/s up to 1080p at 5 Mb/s and 4K at 15 Mb/s; AV1 or VP9 save 30-50% over H.264.", "link": "video-streaming.html#upload"},
+    {"front": "Why HLS and DASH replaced RTMP", "back": "Both are plain HTTP: segments are ordinary files any HTTP cache can serve, with no long-lived streaming connections.", "link": "video-streaming.html#playback"},
+    {"front": "Who picks the video quality?", "back": "The player, per segment: throughput-based or buffer-based rules, starting low for a fast first frame.", "link": "video-streaming.html#playback"},
+    {"front": "Push the head, pull the tail", "back": "Popular titles are predicted and pushed into caches overnight; long-tail videos are pulled on a miss.", "link": "video-streaming.html#cdn"},
+    {"front": "Why steer via the playback service instead of DNS?", "back": "It picks a specific cache using the viewer's network, cache health and load, returns fallbacks, and lets the player switch mid-stream.", "link": "video-streaming.html#cdn"},
+    {"front": "Plays started per second (SPS)", "back": "Netflix's best single health signal; alert when it drops below the forecast for that time of day.", "link": "video-streaming.html#observability"}
+  ],
+  "quiz": [
+    {"q": "Viewers abandon because the first frame takes 5 seconds. Which player change helps most?", "choices": ["Start at the highest rendition", "Lengthen segments to 10 s", "Start at a low rendition and climb", "Switch from HLS to RTMP"], "answer": 2, "why": "Fast start at a low rendition shows the first frame quickly.", "link": "video-streaming.html#playback"},
+    {"q": "Transit costs explode as viewing grows. What is the main lever?", "choices": ["More cache servers placed inside ISPs and at IXPs", "Bigger origin buckets", "More control-plane regions", "Shorter segments"], "answer": 0, "why": "The only affordable byte is one that never crosses the backbone.", "link": "video-streaming.html#cdn"},
+    {"q": "A transcoding worker crashes and its chunk job is retried, and the upload-complete event is delivered twice. How do you avoid duplicate outputs?", "choices": ["Lock the video row during processing", "Deduplicate events in Kafka", "Run each video on one worker", "Write every task's output to a deterministic path so retries overwrite"], "answer": 3, "why": "Idempotent tasks overwrite the same path instead of creating copies.", "link": "video-streaming.html#upload"},
+    {"q": "A viral video takes thousands of view increments a second on one database row. What is the fix?", "choices": ["Use a stronger primary", "Count in memory or a stream job and write aggregated deltas", "Shard by viewer ID", "Lock the row per increment"], "answer": 1, "why": "Aggregated deltas avoid the hot row; displayed counts lag by seconds.", "link": "video-streaming.html#storage"},
+    {"q": "The recommendations service is slow and the home page starts failing. What should happen?", "choices": ["A circuit breaker trips and the page shows a cached or generic row", "Playback stops until it recovers", "Retry recommendations until they succeed", "Route all traffic to one region"], "answer": 0, "why": "Each call has a timeout, retry budget and circuit breaker so the page degrades gracefully.", "link": "video-streaming.html#deployment"},
+    {"q": "A big premiere is tomorrow evening. How do you avoid a cache stampede on the origin?", "choices": ["Pull on first request as usual", "Disable adaptive bitrate", "Pre-position the title in every cache before release", "Raise segment length"], "answer": 2, "why": "Pushing ahead of demand means the premiere is served from caches.", "link": "video-streaming.html#risks"},
+    {"q": "The control plane in one region is struggling mid-evening. What must keep working?", "choices": ["The continue-watching row", "New uploads", "Search", "Playback already in progress, from caches with long-lived tokens"], "answer": 3, "why": "Stopping a film mid-scene is not acceptable; losing a row is.", "link": "video-streaming.html#deployment"}
+  ]
+}
