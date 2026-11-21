@@ -194,7 +194,7 @@
 <p class="lead">The building blocks behind every large web system, before any AI is involved: how traffic is spread, data is stored and copied, work is queued, and systems stay correct under load. Each page has a hands-on lab.</p></div></div>
 <div class="wrap" style="padding-bottom:56px">
   <ul class="doors three">
-    <li><a class="door" href="#blocks"><span class="k">20 topic pages · 20 labs · 17 walkthroughs</span><h2>Building blocks →</h2><p>Requirements, networking and DNS, load balancing, gateways and CDNs, caching, databases, sharding, queues, consistency, consensus, observability, threads and locks, and the numbers to size them.</p></a></li>
+    <li><a class="door" href="#blocks"><span class="k">20 topic pages · 20 labs · 18 walkthroughs</span><h2>Building blocks →</h2><p>Requirements, networking and DNS, load balancing, gateways and CDNs, caching, databases, sharding, queues, consistency, consensus, observability, threads and locks, and the numbers to size them.</p></a></li>
     <li><a class="door" href="study.html"><span class="k">Flashcards · quizzes</span><h2>Study →</h2><p>Flip cards for the key terms and numbers, then take a short quiz on each page. Every answer links back to the section that explains it.</p></a></li>
     <li><a class="door" href="https://devlcodes.github.io/agentic-ai-notebook/system-design/index.html"><span class="k">AI systems</span><h2>Agentic designs →</h2><p>The companion section: RAG, agents with actions, text-to-SQL and evals, built on top of these same blocks.</p></a></li>
   </ul>
@@ -266,6 +266,7 @@
     <li><a class="card" href="maps.html"><span class="k">Walkthrough · 50M routes a day · 1M location pings/s</span><h3>Maps and navigation</h3><p>Vector tiles per zoom level, geocoding, routing with Dijkstra, A* and contraction hierarchies, live traffic from phones, ETA prediction and rerouting. Two 3D scenes, a tile-storage lab and a routing lab.</p></a></li>
     <li><a class="card" href="upi.html"><span class="k">Walkthrough · 700M payments a day · 25k/s at peak</span><h3>UPI payments switch</h3><p>Payer and payee PSPs, VPA resolution, debit then credit between banks, timeouts, deemed success and reversals, one txnId for idempotency, and settlement and reconciliation. Two 3D scenes and a slow-bank lab.</p></a></li>
     <li><a class="card" href="stock-trading.html"><span class="k">Walkthrough · 15M orders a day · 2M sockets at 9:15</span><h3>Stock trading platform</h3><p>An order path with idempotency keys and per-account risk checks, how the exchange matches by price and time, market data conflated over WebSockets, the market-open spike, and T+1 settlement. Two 3D scenes and an order book lab.</p></a></li>
+    <li><a class="card" href="job-scheduler.html"><span class="k">Walkthrough · 50M runs a day · 1M due at :00</span><h3>Distributed job scheduler</h3><p>Cron at scale with partitioned schedulers, minute buckets and a timing wheel, worker leases with heartbeats and fencing, at-least-once runs with idempotency keys, retries and dead letters, and fair sharing between tenants. Two 3D scenes and a lease-timeout lab.</p></a></li>
   </ul>
 </div>
 </main>
