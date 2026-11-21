@@ -30,6 +30,7 @@ Not sure where to begin? The [learning path](https://devlcodes.github.io/classic
 20. [Monitoring, logging and tracing](https://devlcodes.github.io/classic-system-designs/observability.html)
 21. [Numbers to know](https://devlcodes.github.io/classic-system-designs/numbers.html)
 22. [Threads, locks and wait/notify](https://devlcodes.github.io/classic-system-designs/threads.html)
+23. [Monoliths, microservices and hexagonal architecture](https://devlcodes.github.io/classic-system-designs/architecture-styles.html)
 
 ## Worked designs
 
