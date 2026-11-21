@@ -462,7 +462,7 @@ user_conversations    -- the chat list on the home screen
 
 <section id="presence">
   <h2>Presence and receipts</h2>
-  <ul class="tags"><li>Control traffic</li></ul>
+  <ul class="tags"><li>Control traffic</li><li><a href="collab-docs.html#presence">Cursors in a shared doc</a></li></ul>
   <p>Presence ("online", "last seen 5 min ago") is the noisiest signal and the least important one. Each heartbeat refreshes <code>presence:{user}</code> in Redis with a 60-second TTL, and "last seen" is the timestamp left behind when it expires.</p>
   <p>Broadcasting every status change to every contact would cost far more than messages do. Instead, a client <em>subscribes</em> to presence only for the chats on screen right now, and the presence service pushes changes only to those subscribers. Status changes are also debounced, so flapping on a train doesn't spam anyone.</p>
   <p>Receipts piggyback on acks. Devices ack the highest <code>seq</code> they have, not every message, so one "delivered up to 4183" covers a burst of messages. In groups, show "delivered" and "read" as counts, and send the per-member detail only when someone opens message info.</p>

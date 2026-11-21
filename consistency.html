@@ -325,7 +325,7 @@
   <details><summary>Reserving stock and charging a card live in two services with no shared transaction. Which pattern keeps them consistent?</summary><p class="ans"><strong>A saga with compensating actions.</strong> Each step is local; if the charge fails, a compensating step releases the stock. Pair it with the outbox pattern. <a href="#practice">Read the section</a></p></details>
 </section>
 
-<section id="related"><h2>Related</h2><ul class="related"><li><a href="databases.html#replication">Replication</a></li><li><a href="sharding.html">Sharding</a></li><li><a href="caching.html">Caching</a></li><li><a href="queues.html">Message queues</a></li><li><a href="raft.html">Consensus with Raft</a></li><li><a href="merkle-trees.html">Merkle trees</a></li><li><a href="architecture-styles.html">Monoliths, microservices and hexagonal architecture</a></li></ul></section>
+<section id="related"><h2>Related</h2><ul class="related"><li><a href="databases.html#replication">Replication</a></li><li><a href="sharding.html">Sharding</a></li><li><a href="caching.html">Caching</a></li><li><a href="queues.html">Message queues</a></li><li><a href="raft.html">Consensus with Raft</a></li><li><a href="merkle-trees.html">Merkle trees</a></li><li><a href="collab-docs.html">Collaborative editing</a></li><li><a href="architecture-styles.html">Monoliths, microservices and hexagonal architecture</a></li></ul></section>
   </article>
 </div>
 </main>
