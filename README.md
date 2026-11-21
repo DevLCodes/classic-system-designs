@@ -21,14 +21,15 @@ Not sure where to begin? The [learning path](https://devlcodes.github.io/classic
 11. [Hot partitions and write buffering](https://devlcodes.github.io/classic-system-designs/hot-partitions.html)
 12. [Unique IDs and sequencers](https://devlcodes.github.io/classic-system-designs/unique-ids.html)
 13. [Search and inverted indexes](https://devlcodes.github.io/classic-system-designs/search.html)
-14. [Message queues and streams](https://devlcodes.github.io/classic-system-designs/queues.html)
-15. [Consistency and CAP](https://devlcodes.github.io/classic-system-designs/consistency.html)
-16. [Consensus with Raft](https://devlcodes.github.io/classic-system-designs/raft.html)
-17. [Merkle trees](https://devlcodes.github.io/classic-system-designs/merkle-trees.html)
-18. [Cassandra vs CockroachDB](https://devlcodes.github.io/classic-system-designs/cassandra-vs-cockroachdb.html)
-19. [Monitoring, logging and tracing](https://devlcodes.github.io/classic-system-designs/observability.html)
-20. [Numbers to know](https://devlcodes.github.io/classic-system-designs/numbers.html)
-21. [Threads, locks and wait/notify](https://devlcodes.github.io/classic-system-designs/threads.html)
+14. [Object storage, presigned and multipart uploads](https://devlcodes.github.io/classic-system-designs/object-storage.html)
+15. [Message queues and streams](https://devlcodes.github.io/classic-system-designs/queues.html)
+16. [Consistency and CAP](https://devlcodes.github.io/classic-system-designs/consistency.html)
+17. [Consensus with Raft](https://devlcodes.github.io/classic-system-designs/raft.html)
+18. [Merkle trees](https://devlcodes.github.io/classic-system-designs/merkle-trees.html)
+19. [Cassandra vs CockroachDB](https://devlcodes.github.io/classic-system-designs/cassandra-vs-cockroachdb.html)
+20. [Monitoring, logging and tracing](https://devlcodes.github.io/classic-system-designs/observability.html)
+21. [Numbers to know](https://devlcodes.github.io/classic-system-designs/numbers.html)
+22. [Threads, locks and wait/notify](https://devlcodes.github.io/classic-system-designs/threads.html)
 
 ## Worked designs
 
