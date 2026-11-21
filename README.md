@@ -48,6 +48,7 @@ Not sure where to begin? The [learning path](https://devlcodes.github.io/classic
 - [Maps and navigation](https://devlcodes.github.io/classic-system-designs/maps.html): 50M routes a day, 1M location pings/s
 - [UPI payments switch](https://devlcodes.github.io/classic-system-designs/upi.html): 700M bank-to-bank payments a day, 25k/s at peak
 - [Stock trading platform](https://devlcodes.github.io/classic-system-designs/stock-trading.html): 15M orders a day, 2M live price streams at the market open
+- [Distributed key-value store](https://devlcodes.github.io/classic-system-designs/kv-store.html): 10B keys, 1M operations/s, Dynamo-style
 
 The companion site, [agentic system designs](https://devlcodes.github.io/agentic-ai-notebook/system-design/), builds RAG, agents and evals on top of these same blocks.
 
