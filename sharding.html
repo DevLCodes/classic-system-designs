@@ -157,6 +157,17 @@
   .dg .dot-hr { fill: var(--c-gov); } .dg .dot-it { fill: var(--c-kb); } .dg .dot-eng { fill: var(--c-ingest); } .dg .dot-q { fill: var(--c-serve); stroke: var(--ink); stroke-width: 1.5; }
   .dg .halo { fill: none; stroke: var(--c-serve); stroke-width: 1.5; stroke-dasharray: 4 4; }
   .dg .zone { fill: var(--paper); stroke: var(--line); stroke-width: 1; }
+  /* Check yourself: self-test questions, answers in details/summary (see STYLES.md) */
+  .check { counter-reset: chk; }
+  .check details { counter-increment: chk; border: 1px solid var(--line); border-radius: 10px; background: var(--paper); margin: 0 0 10px; }
+  .check summary { position: relative; display: block; cursor: pointer; list-style: none; padding: 12px 44px 12px 48px; font-weight: 600; line-height: 1.45; }
+  .check summary::-webkit-details-marker { display: none; }
+  .check summary::before { content: "Q" counter(chk); position: absolute; left: 16px; top: 14px; font-family: var(--font-mono); font-size: 12px; font-weight: 500; color: var(--accent); }
+  .check summary::after { content: "+"; position: absolute; right: 16px; top: 10px; font-family: var(--font-mono); font-size: 18px; color: var(--muted); }
+  .check details[open] summary::after { content: "\2212"; }
+  .check summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 10px; }
+  .check .ans { margin: 0; padding: 0 16px 14px 48px; color: var(--ink); }
+  .check .ans a { font-family: var(--font-mono); font-size: 12.5px; white-space: nowrap; }
 </style>
 
 <style>
@@ -228,11 +239,11 @@
 </head>
 <body>
 <svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs><marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" class="ah" style="fill:#7d8996"/></marker></defs></svg>
-<header class="sitebar"><div class="wrap"><a class="brand" href="index.html">Classic System Design</a><nav aria-label="Site"><a href="index.html">Home</a><a href="index.html#blocks" aria-current="page">Building blocks</a><a href="index.html#designs">Designs</a><a href="https://devlcodes.github.io/agentic-ai-notebook/system-design/index.html">Agentic designs ↗</a></nav></div></header>
+<header class="sitebar"><div class="wrap"><a class="brand" href="index.html">Classic System Design</a><nav aria-label="Site"><a href="index.html">Home</a><a href="index.html#blocks" aria-current="page">Building blocks</a><a href="index.html#designs">Designs</a><a href="study.html">Study</a><a href="https://devlcodes.github.io/agentic-ai-notebook/system-design/index.html">Agentic designs ↗</a></nav></div></header>
 <main>
 <div class="wrap"><div class="intro"><p class="eyebrow">Building block · scale</p><h1>Sharding and consistent hashing</h1><p class="lead">Splitting data across many machines when one is no longer enough, and choosing a key so the load spreads evenly.</p></div></div>
 <div class="wrap doc">
-  <nav class="toc" aria-label="On this page"><p>On this page</p><ol><li><a href="#what">What sharding is</a></li><li><a href="#strategies">How to split</a></li><li><a href="#consistent">Consistent hashing</a></li><li><a href="#lab">Try it: add a node</a></li><li><a href="#hot">Hot partitions and resharding</a></li><li><a href="#interview">Saying it in an interview</a></li><li><a href="#real-world">In the real world</a></li><li><a href="#related">Related</a></li></ol></nav>
+  <nav class="toc" aria-label="On this page"><p>On this page</p><ol><li><a href="#what">What sharding is</a></li><li><a href="#strategies">How to split</a></li><li><a href="#consistent">Consistent hashing</a></li><li><a href="#lab">Try it: add a node</a></li><li><a href="#hot">Hot partitions and resharding</a></li><li><a href="#interview">Saying it in an interview</a></li><li><a href="#real-world">In the real world</a></li><li><a href="#check">Check yourself</a></li><li><a href="#related">Related</a></li></ol></nav>
   <article>
 <section id="what"><h2>What sharding is</h2>
 <p class="lead">Replication copies the same data to more machines. Sharding (partitioning) splits the data so each machine holds only part of it. You shard when writes or total data outgrow what one machine can handle.</p>
@@ -319,6 +330,14 @@
 <tr><td>Consistent hashing libraries</td><td>Ketama-style hashing in memcached clients, jump consistent hash, rendezvous (HRW) hashing</td><td>Jump hash needs no ring but numbers nodes 0..N-1</td></tr>
 </tbody></table></div>
 <p class="muted" style="font-size:13.5px;color:var(--muted)">Products change quickly; names here are examples, not endorsements. Check current docs before choosing.</p></section>
+
+<section id="check" class="check"><h2>Check yourself</h2>
+  <p>Answer in your head first, then open each question to compare.</p>
+  <details><summary>A chat app shards messages. Which shard key keeps most queries on one shard?</summary><p class="ans"><strong>conversation_id.</strong> Queries are scoped to a conversation, so its messages and transactions stay local. <a href="#strategies">Read the section</a></p></details>
+  <details><summary>Using hash(key) % N, you add a fifth cache node and the database is flooded. Why?</summary><p class="ans"><strong>About 80% of keys now map to a different node, so most lookups miss.</strong> Modulo hashing reshuffles almost everything; consistent hashing moves only about 1/N. <a href="#consistent">Read the section</a></p></details>
+  <details><summary>Users are sharded by user_id, but login looks users up by email. What keeps that fast?</summary><p class="ans"><strong>A small email-to-user_id lookup table.</strong> A secondary index keyed the other way avoids asking every shard. <a href="#hot">Read the section</a></p></details>
+  <details><summary>You shard orders by date range and the newest shard is overloaded. Why?</summary><p class="ans"><strong>All new writes land on the last range.</strong> Range sharding by time sends every new write to one shard. <a href="#strategies">Read the section</a></p></details>
+</section>
 
 <section id="related"><h2>Related</h2><ul class="related"><li><a href="databases.html">Databases and replication</a></li><li><a href="consistency.html">Consistency</a></li><li><a href="caching.html">Caching</a></li><li><a href="unique-ids.html">Unique IDs</a></li><li><a href="load-balancing.html">Load balancing</a></li><li><a href="hot-partitions.html">Hot partitions</a></li><li><a href="search.html">Search and inverted indexes</a></li></ul></section>
   </article>

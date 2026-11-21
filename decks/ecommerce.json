@@ -1,0 +1,27 @@
+{
+  "title": "E-commerce store",
+  "page": "ecommerce.html",
+  "cards": [
+    {"front": "The two systems inside an e-commerce site", "back": "Browsing wants low latency and high availability and can be stale; checkout wants strong consistency for stock, orders and money.", "link": "ecommerce.html#requirements"},
+    {"front": "Browse rate for 100M shoppers viewing 30 pages a day", "back": "About 3B a day, roughly 35k a second, and 10× on sale days. Mostly served from CDN and caches.", "link": "ecommerce.html#estimates"},
+    {"front": "Order rate for 10M orders a day", "back": "About 120 a second, but one 'deal of the hour' can draw thousands of attempts a second on one product.", "link": "ecommerce.html#estimates"},
+    {"front": "Why split the product page from the offer call?", "back": "The description is cached for minutes at the CDN; price and stock come from a tiny offer call cached for seconds. The shown number is a hint, checked at checkout.", "link": "ecommerce.html#api"},
+    {"front": "Why the cart uses a Dynamo-style store", "back": "'Add to cart' must always succeed; conflicting replica versions are merged (union of items) rather than lost.", "link": "ecommerce.html#cart"},
+    {"front": "Why the cart stores SKUs but not prices", "back": "Prices are re-read at checkout, so a stale price is never charged.", "link": "ecommerce.html#cart"},
+    {"front": "The conditional stock reservation", "back": "UPDATE stock SET available = available - 1, reserved = reserved + 1 WHERE sku = ? AND available >= 1, plus a reservation row expiring in about 10 minutes.", "link": "ecommerce.html#checkout"},
+    {"front": "Checkout saga steps", "back": "Create a PENDING order under the idempotency key, reserve stock, charge with the order id as key, confirm with an outbox event. Compensate by releasing, refunding and failing.", "link": "ecommerce.html#checkout"},
+    {"front": "What a payment timeout at checkout means", "back": "Unknown, not failed: query the provider before deciding.", "link": "ecommerce.html#checkout"},
+    {"front": "Waiting room", "back": "A queue page in front of checkout admits buyers at the rate the back end can handle, shows everyone else their place, and blocks most bots.", "link": "ecommerce.html#flash"},
+    {"front": "Pre-split stock for a flash sale", "back": "Load units into sharded in-memory counters (e.g. 20 counters of 500); a successful decrement is a token to proceed to a durable reservation.", "link": "ecommerce.html#flash"},
+    {"front": "Throughput of one hot inventory row with locks", "back": "About 200-1,000 updates a second, far below a flash-sale spike.", "link": "ecommerce.html#numbers"}
+  ],
+  "quiz": [
+    {"q": "Stock checks read 'available', then decrement in a second statement. On a busy sale, 10,050 units of 10,000 are sold. What is the fix?", "choices": ["A conditional decrement WHERE available >= 1 in one statement", "A bigger cache", "Read replicas for inventory", "A longer reservation hold"], "answer": 0, "why": "Read-then-write races; the condition makes the decrement atomic.", "link": "ecommerce.html#checkout"},
+    {"q": "At noon, 2 million people press 'buy' on 10,000 phones and the single inventory row's lock queue explodes. Which approach scales?", "choices": ["Retry the conditional update harder", "Sharded in-memory counters behind a waiting room", "Let the CDN handle checkout", "Increase the database connection pool"], "answer": 1, "why": "Admission control plus pre-split counters avoid one hot row.", "link": "ecommerce.html#flash"},
+    {"q": "A shopper double-clicks 'Place order' after a slow response. How do you avoid two orders?", "choices": ["Disable the button in the UI only", "Deduplicate in the warehouse", "Checkout takes an idempotency key so a retry finds the same order", "Charge first, then create the order"], "answer": 2, "why": "The order is keyed by the idempotency key.", "link": "ecommerce.html#api"},
+    {"q": "The reviews service is slow, and product pages are timing out. What should the page do?", "choices": ["Wait for reviews", "Return a 503", "Retry reviews three times", "Render without reviews after a timeout"], "answer": 3, "why": "The page fans out with timeouts so non-essential parts degrade.", "link": "ecommerce.html#browse"},
+    {"q": "Thousands of units sit reserved by carts abandoned mid-checkout during a sale. What returns them?", "choices": ["Reservation expiry after about 10 minutes, released by a sweeper", "Manual cleanup after the sale", "Cancelling the orders' payments", "Raising available stock by hand"], "answer": 0, "why": "Expired holds go back to the counter so stock sells again.", "link": "ecommerce.html#flash"},
+    {"q": "A flash sale brings the whole store down, including unrelated product pages. What should have been in place?", "choices": ["Larger reservation holds", "Separate capacity or deployment for the sale path", "A single global inventory row", "Turning off caching"], "answer": 1, "why": "Isolating the sale keeps the rest of the store working.", "link": "ecommerce.html#flash"},
+    {"q": "The cart showed $49 but the price changed to $59 before checkout. What should happen?", "choices": ["Charge $49 because the cart said so", "Charge $59 silently", "Re-price at checkout and show the change before charging", "Cancel the order"], "answer": 2, "why": "The cart holds SKUs, not prices; checkout re-reads and surfaces changes.", "link": "ecommerce.html#risks"}
+  ]
+}
