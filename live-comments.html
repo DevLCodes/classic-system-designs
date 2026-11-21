@@ -447,7 +447,7 @@ GET /api/streams/{id}/comments?before=c_77&amp;limit=50   (history on open)</cod
 
 <section id="moderation">
   <h2>Moderation</h2>
-  <ul class="tags"><li>Governance</li><li><a href="rate-limiting.html">Rate limiting</a></li></ul>
+  <ul class="tags"><li>Governance</li><li><a href="rate-limiting.html">Rate limiting</a></li><li><a href="qa-site.html#spam">Q&amp;A spam signals</a></li></ul>
   <ul class="plain">
     <li><strong>Before fan-out:</strong> per-user and per-stream rate limits, blocklists, and a fast classifier for spam and slurs. Anything flagged is stored but not delivered.</li>
     <li><strong>After fan-out:</strong> a hide or delete sends a tombstone message on the same path, so clients remove the comment already on screen.</li>
