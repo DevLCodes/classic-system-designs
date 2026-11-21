@@ -157,6 +157,17 @@
   .dg .dot-hr { fill: var(--c-gov); } .dg .dot-it { fill: var(--c-kb); } .dg .dot-eng { fill: var(--c-ingest); } .dg .dot-q { fill: var(--c-serve); stroke: var(--ink); stroke-width: 1.5; }
   .dg .halo { fill: none; stroke: var(--c-serve); stroke-width: 1.5; stroke-dasharray: 4 4; }
   .dg .zone { fill: var(--paper); stroke: var(--line); stroke-width: 1; }
+  /* Check yourself: self-test questions, answers in details/summary (see STYLES.md) */
+  .check { counter-reset: chk; }
+  .check details { counter-increment: chk; border: 1px solid var(--line); border-radius: 10px; background: var(--paper); margin: 0 0 10px; }
+  .check summary { position: relative; display: block; cursor: pointer; list-style: none; padding: 12px 44px 12px 48px; font-weight: 600; line-height: 1.45; }
+  .check summary::-webkit-details-marker { display: none; }
+  .check summary::before { content: "Q" counter(chk); position: absolute; left: 16px; top: 14px; font-family: var(--font-mono); font-size: 12px; font-weight: 500; color: var(--accent); }
+  .check summary::after { content: "+"; position: absolute; right: 16px; top: 10px; font-family: var(--font-mono); font-size: 18px; color: var(--muted); }
+  .check details[open] summary::after { content: "\2212"; }
+  .check summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 10px; }
+  .check .ans { margin: 0; padding: 0 16px 14px 48px; color: var(--ink); }
+  .check .ans a { font-family: var(--font-mono); font-size: 12.5px; white-space: nowrap; }
 </style>
 
 <style>
@@ -228,11 +239,11 @@
 </head>
 <body>
 <svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs><marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" class="ah" style="fill:#7d8996"/></marker></defs></svg>
-<header class="sitebar"><div class="wrap"><a class="brand" href="index.html">Classic System Design</a><nav aria-label="Site"><a href="index.html">Home</a><a href="index.html#blocks" aria-current="page">Building blocks</a><a href="index.html#designs">Designs</a><a href="https://devlcodes.github.io/agentic-ai-notebook/system-design/index.html">Agentic designs ↗</a></nav></div></header>
+<header class="sitebar"><div class="wrap"><a class="brand" href="index.html">Classic System Design</a><nav aria-label="Site"><a href="index.html">Home</a><a href="index.html#blocks" aria-current="page">Building blocks</a><a href="index.html#designs">Designs</a><a href="study.html">Study</a><a href="https://devlcodes.github.io/agentic-ai-notebook/system-design/index.html">Agentic designs ↗</a></nav></div></header>
 <main>
 <div class="wrap"><div class="intro"><p class="eyebrow">Building block · traffic</p><h1>CDNs, PoPs and IXPs</h1><p class="lead">A content delivery network keeps copies of your content in hundreds of small data centers close to users. Requests travel a few kilometers instead of across an ocean, and your own servers only see the small share the edge can't answer.</p></div></div>
 <div class="wrap doc">
-  <nav class="toc" aria-label="On this page"><p>On this page</p><ol><li><a href="#what">What a CDN does</a></li><li><a href="#pops">PoPs and anycast</a></li><li><a href="#ixps">IXPs and peering</a></li><li><a href="#hierarchy">Cache hierarchy and origin shield</a></li><li><a href="#keys">Cache keys, TTLs and purges</a></li><li><a href="#lab">Try it: what the edge saves</a></li><li><a href="#edge">More than caching</a></li><li><a href="#failure">How CDNs fail</a></li><li><a href="#interview">Saying it in an interview</a></li><li><a href="#real-world">In the real world</a></li><li><a href="#related">Related</a></li></ol></nav>
+  <nav class="toc" aria-label="On this page"><p>On this page</p><ol><li><a href="#what">What a CDN does</a></li><li><a href="#pops">PoPs and anycast</a></li><li><a href="#ixps">IXPs and peering</a></li><li><a href="#hierarchy">Cache hierarchy and origin shield</a></li><li><a href="#keys">Cache keys, TTLs and purges</a></li><li><a href="#lab">Try it: what the edge saves</a></li><li><a href="#edge">More than caching</a></li><li><a href="#failure">How CDNs fail</a></li><li><a href="#interview">Saying it in an interview</a></li><li><a href="#real-world">In the real world</a></li><li><a href="#check">Check yourself</a></li><li><a href="#related">Related</a></li></ol></nav>
   <article>
 <section id="what"><h2>What a CDN does</h2>
 <p class="lead">Light in fiber covers about 200 km per millisecond. A user in Chennai fetching from a server in Virginia waits about 230 ms per round trip before any work happens, and opening a secure connection takes two or three round trips.</p>
@@ -322,6 +333,14 @@
 <tr><td>Self-hosted caching</td><td>Varnish, NGINX, Apache Traffic Server</td><td>Your own edge or shield tier</td></tr>
 </tbody></table></div>
 <p class="muted" style="font-size:13.5px;color:var(--muted)">Products change quickly; names here are examples, not endorsements. Check current docs before choosing.</p></section>
+
+<section id="check" class="check"><h2>Check yourself</h2>
+  <p>Answer in your head first, then open each question to compare.</p>
+  <details><summary>The CDN hit ratio suddenly drops and origin load jumps 10×. What should you check first?</summary><p class="ans"><strong>The cache key: random query strings, cookies or Vary: User-Agent.</strong> A bad cache key splits one file into thousands of entries; fix it before scaling the origin. <a href="#failure">Read the section</a></p></details>
+  <details><summary>A new release asset is requested from 300 PoPs at once and the origin struggles. What helps?</summary><p class="ans"><strong>An origin shield that collapses misses.</strong> PoPs ask the shield, and only the shield asks the origin. <a href="#hierarchy">Read the section</a></p></details>
+  <details><summary>How should you ship a changed JavaScript bundle without purging?</summary><p class="ans"><strong>Deploy it under a new content-hashed file name.</strong> Versioned names mean nothing needs purging, and the old file can stay cached. <a href="#keys">Read the section</a></p></details>
+  <details><summary>An API's responses can't be cached. Can a CDN still make it faster?</summary><p class="ans"><strong>Yes, TLS terminates at the edge near the user.</strong> The handshake happens 8 ms away instead of 230 ms, and the PoP keeps a warm connection to the origin. <a href="#edge">Read the section</a></p></details>
+</section>
 
 <section id="related"><h2>Related</h2><ul class="related"><li><a href="caching.html">Caching</a></li><li><a href="dns.html">DNS</a></li><li><a href="api-gateways.html">API gateways and service mesh</a></li><li><a href="video-streaming.html">Video streaming</a></li><li><a href="maps.html#tiles">Map tiles</a></li><li><a href="numbers.html">Numbers to know</a></li></ul></section>
   </article>
