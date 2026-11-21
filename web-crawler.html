@@ -157,6 +157,17 @@
   .dg .dot-hr { fill: var(--c-gov); } .dg .dot-it { fill: var(--c-kb); } .dg .dot-eng { fill: var(--c-ingest); } .dg .dot-q { fill: var(--c-serve); stroke: var(--ink); stroke-width: 1.5; }
   .dg .halo { fill: none; stroke: var(--c-serve); stroke-width: 1.5; stroke-dasharray: 4 4; }
   .dg .zone { fill: var(--paper); stroke: var(--line); stroke-width: 1; }
+  /* Check yourself: self-test questions, answers in details/summary (see STYLES.md) */
+  .check { counter-reset: chk; }
+  .check details { counter-increment: chk; border: 1px solid var(--line); border-radius: 10px; background: var(--paper); margin: 0 0 10px; }
+  .check summary { position: relative; display: block; cursor: pointer; list-style: none; padding: 12px 44px 12px 48px; font-weight: 600; line-height: 1.45; }
+  .check summary::-webkit-details-marker { display: none; }
+  .check summary::before { content: "Q" counter(chk); position: absolute; left: 16px; top: 14px; font-family: var(--font-mono); font-size: 12px; font-weight: 500; color: var(--accent); }
+  .check summary::after { content: "+"; position: absolute; right: 16px; top: 10px; font-family: var(--font-mono); font-size: 18px; color: var(--muted); }
+  .check details[open] summary::after { content: "\2212"; }
+  .check summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 10px; }
+  .check .ans { margin: 0; padding: 0 16px 14px 48px; color: var(--ink); }
+  .check .ans a { font-family: var(--font-mono); font-size: 12.5px; white-space: nowrap; }
 </style>
 
 <style>
@@ -238,7 +249,7 @@
 </head>
 <body>
 <svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs><marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" class="ah" style="fill:#7d8996"/></marker></defs></svg>
-<header class="sitebar"><div class="wrap"><a class="brand" href="index.html">Classic System Design</a><nav aria-label="Site"><a href="index.html">Home</a><a href="index.html#blocks">Building blocks</a><a href="index.html#designs" aria-current="page">Designs</a><a href="https://devlcodes.github.io/agentic-ai-notebook/system-design/index.html">Agentic designs ↗</a></nav></div></header>
+<header class="sitebar"><div class="wrap"><a class="brand" href="index.html">Classic System Design</a><nav aria-label="Site"><a href="index.html">Home</a><a href="index.html#blocks">Building blocks</a><a href="index.html#designs" aria-current="page">Designs</a><a href="study.html">Study</a><a href="https://devlcodes.github.io/agentic-ai-notebook/system-design/index.html">Agentic designs ↗</a></nav></div></header>
 <main>
 <header class="wrap"><div class="intro"><p class="eyebrow">Classic system design walkthrough</p><h1>Web Crawler</h1><p class="prompt"><q>Design a crawler for a search engine. Starting from a set of seed URLs, it should download 15 billion pages in four weeks, keep them fresh afterwards, never overload a website, respect robots.txt, and not get stuck in endless generated pages. Assume HTML only for now, but make it easy to add other content types.</q></p><ul class="legend" aria-label="Colour key"><li><i style="background:var(--c-ingest)"></i>Fetch path</li><li><i style="background:var(--c-serve)"></i>Parsing and extraction</li><li><i style="background:var(--c-kb)"></i>Storage</li><li><i style="background:var(--c-cross)"></i>Frontier and queues</li><li><i style="background:var(--c-gov)"></i>Politeness and filters</li></ul></div></header>
 <div class="wrap"><figure class="fig3d hero" id="hero">
@@ -249,7 +260,7 @@
   <figcaption>Illustrative. The crawl is a loop: every page fetched feeds new URLs back into the frontier.</figcaption>
 </figure></div>
 <div class="wrap doc">
-  <nav class="toc" aria-label="Sections"><p>The solution</p><ol><li><a href="#requirements">Requirements</a></li><li><a href="#success">Success metrics</a></li><li><a href="#estimates">Estimates</a></li><li><a href="#interfaces">Interfaces</a></li><li><a href="#architecture">Architecture</a></li><li><a href="#frontier">The URL frontier</a></li><li><a href="#politeness">Politeness, robots.txt and DNS</a></li><li><a href="#dedupe">Seen it before?</a></li><li><a href="#lab">Try it: size the URL-seen filter</a></li><li><a href="#traps">Crawler traps</a></li><li><a href="#storage">Storage</a></li><li><a href="#distribution">Distributing the crawl</a></li><li><a href="#freshness">Freshness and recrawling</a></li><li><a href="#observability">Observability</a></li><li><a href="#risks">Risks and v2</a></li><li><a href="#presenting">Presenting it in 45 minutes</a></li><li><a href="#numbers">Numbers to remember</a></li></ol></nav>
+  <nav class="toc" aria-label="Sections"><p>The solution</p><ol><li><a href="#requirements">Requirements</a></li><li><a href="#success">Success metrics</a></li><li><a href="#estimates">Estimates</a></li><li><a href="#interfaces">Interfaces</a></li><li><a href="#architecture">Architecture</a></li><li><a href="#frontier">The URL frontier</a></li><li><a href="#politeness">Politeness, robots.txt and DNS</a></li><li><a href="#dedupe">Seen it before?</a></li><li><a href="#lab">Try it: size the URL-seen filter</a></li><li><a href="#traps">Crawler traps</a></li><li><a href="#storage">Storage</a></li><li><a href="#distribution">Distributing the crawl</a></li><li><a href="#freshness">Freshness and recrawling</a></li><li><a href="#observability">Observability</a></li><li><a href="#risks">Risks and v2</a></li><li><a href="#presenting">Presenting it in 45 minutes</a></li><li><a href="#numbers">Numbers to remember</a></li><li><a href="#check">Check yourself</a></li></ol></nav>
   <article>
 
 <section id="requirements">
@@ -523,6 +534,14 @@ page.changed  { url, old_hash, new_hash }</code></pre>
     <tr><td>Bloom filter at 10 bits per item</td><td class="num">~1% false positives</td></tr>
     <tr><td>robots.txt cache</td><td class="num">~1 day per host</td></tr>
   </tbody></table></div>
+</section>
+
+<section id="check" class="check"><h2>Check yourself</h2>
+  <p>Answer in your head first, then open each question to compare.</p>
+  <details><summary>A site owner complains the crawler is opening dozens of connections at once to their server. Which design piece should prevent this?</summary><p class="ans"><strong>Per-host back queues mapped to a single worker, with a next-allowed-time heap.</strong> One host maps to one back queue and one worker, with a delay between requests. <a href="#frontier">Read the section</a></p></details>
+  <details><summary>Fetch throughput is well below target even though fetchers have idle CPU. Which component is most likely the bottleneck?</summary><p class="ans"><strong>DNS resolution.</strong> Thousands of synchronous lookups a second stall fetchers unless DNS is cached and asynchronous. <a href="#politeness">Read the section</a></p></details>
+  <details><summary>A low-importance site appears in the top 100 hosts by URL count in the frontier, with URLs like /calendar?date=2391-04-17. What is the defence?</summary><p class="ans"><strong>Per-host page budgets scaled by importance, plus URL pattern detection.</strong> Budgets turn every trap into a bounded cost. <a href="#traps">Read the section</a></p></details>
+  <details><summary>Important new pages are mysteriously never crawled. The URL-seen set is a small Bloom filter. Why?</summary><p class="ans"><strong>False positives mark them as already seen.</strong> Size the filter generously or confirm positives against the exact store for important URLs. <a href="#dedupe">Read the section</a></p></details>
 </section>
   </article>
 </div>

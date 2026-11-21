@@ -1,0 +1,147 @@
+{
+  "title": "Databases, indexes and replication",
+  "page": "databases.html",
+  "cards": [
+    {
+      "front": "Default database choice",
+      "back": "Start with a relational database unless you can name an access pattern or scale number that rules it out.",
+      "link": "databases.html#families"
+    },
+    {
+      "front": "Wide-column stores",
+      "back": "Rows keyed by partition and sorted by a clustering key: huge write volumes and time-ordered data per key, like messages. Cassandra, ScyllaDB, Bigtable.",
+      "link": "databases.html#families"
+    },
+    {
+      "front": "Columnar (analytics) stores",
+      "back": "Each column stored together and compressed, for scans and aggregates over a few columns of billions of rows. BigQuery, Redshift, ClickHouse.",
+      "link": "databases.html#families"
+    },
+    {
+      "front": "B-tree index",
+      "back": "Updates pages in place and reads one page per level; upper levels stay in memory, so a lookup costs one or two disk reads at most.",
+      "link": "databases.html#indexes"
+    },
+    {
+      "front": "LSM tree",
+      "back": "Appends writes to memory, flushes sorted files and merges them in the background (compaction). Reads may check several files, with Bloom filters skipping most.",
+      "link": "databases.html#indexes"
+    },
+    {
+      "front": "Cost of an index",
+      "back": "Every index is updated on every write and takes disk and memory, so index only what frequent queries filter and sort by.",
+      "link": "databases.html#indexes"
+    },
+    {
+      "front": "Composite index",
+      "back": "An index on several columns, like (user_id, created_at), for a query that filters on one column and sorts by another.",
+      "link": "databases.html#indexes"
+    },
+    {
+      "front": "ACID",
+      "back": "Atomic (all or nothing), consistent (constraints hold), isolated (no half-done work seen), durable (committed means on disk).",
+      "link": "databases.html#transactions"
+    },
+    {
+      "front": "Synchronous vs asynchronous replication",
+      "back": "Synchronous waits for a follower: no loss on failover, slower writes. Async waits only for the leader: fast, but failover can lose the last changes. Semi-sync is the middle ground.",
+      "link": "databases.html#replication"
+    },
+    {
+      "front": "Replication lag fixes",
+      "back": "Read your own recent writes from the leader for a few seconds, pin a user's reads to one follower, or wait until the follower reaches the write's log position.",
+      "link": "databases.html#replication"
+    },
+    {
+      "front": "Three reasons to replicate",
+      "back": "Durability (a disk dies, data survives), availability (promote a follower) and read scale (spread reads over followers).",
+      "link": "databases.html#replication"
+    }
+  ],
+  "quiz": [
+    {
+      "q": "A user updates their profile, reloads, and sees the old version. What is the likeliest cause?",
+      "choices": [
+        "A missing index",
+        "Replication lag on a read follower",
+        "A failed transaction",
+        "Write-back caching"
+      ],
+      "answer": 1,
+      "why": "Followers can be seconds behind under load; read your own recent writes from the leader.",
+      "link": "databases.html#replication"
+    },
+    {
+      "q": "'My recent orders' filters by user_id and sorts by created_at. Which index fits?",
+      "choices": [
+        "An index on created_at only",
+        "A composite index on (user_id, created_at)",
+        "No index, scan instead",
+        "An index on every column"
+      ],
+      "answer": 1,
+      "why": "A composite index serves the filter and the sort together.",
+      "link": "databases.html#indexes"
+    },
+    {
+      "q": "You must move money between two accounts so both writes happen or neither does. What do you use?",
+      "choices": [
+        "Two separate API calls",
+        "A transaction",
+        "Async replication",
+        "An LSM tree"
+      ],
+      "answer": 1,
+      "why": "Transactions give all-or-nothing writes when two writes must agree.",
+      "link": "databases.html#transactions"
+    },
+    {
+      "q": "A workload is a massive stream of writes of time-ordered events per key. Which family suits it best?",
+      "choices": [
+        "Graph database",
+        "Wide-column store",
+        "Columnar analytics store",
+        "Single-node relational database with many indexes"
+      ],
+      "answer": 1,
+      "why": "Wide-column stores handle huge write volumes and time-ordered data per partition.",
+      "link": "databases.html#families"
+    },
+    {
+      "q": "A table has eight indexes and inserts are slow. Why?",
+      "choices": [
+        "Indexes speed up writes",
+        "Every index is updated on every write",
+        "The B-tree has too few levels",
+        "Replication is synchronous"
+      ],
+      "answer": 1,
+      "why": "Each index adds write cost; drop the ones queries don't use.",
+      "link": "databases.html#indexes"
+    },
+    {
+      "q": "Failover must lose no committed writes. Which replication mode do you need?",
+      "choices": [
+        "Asynchronous",
+        "Synchronous or semi-synchronous to at least one follower",
+        "Statement-based",
+        "None, backups are enough"
+      ],
+      "answer": 1,
+      "why": "Commit must wait for a follower's confirmation so a promoted follower has every write.",
+      "link": "databases.html#replication"
+    },
+    {
+      "q": "You need sum of amounts per month over billions of rows. Which store fits?",
+      "choices": [
+        "Key-value store",
+        "Columnar analytics store",
+        "Document store",
+        "Graph database"
+      ],
+      "answer": 1,
+      "why": "Columnar stores scan and aggregate a few columns of huge tables efficiently.",
+      "link": "databases.html#families"
+    }
+  ]
+}
