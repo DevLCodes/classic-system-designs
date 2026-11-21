@@ -51,6 +51,7 @@ Not sure where to begin? The [learning path](https://devlcodes.github.io/classic
 - [Maps and navigation](https://devlcodes.github.io/classic-system-designs/maps.html): 50M routes a day, 1M location pings/s
 - [UPI payments switch](https://devlcodes.github.io/classic-system-designs/upi.html): 700M bank-to-bank payments a day, 25k/s at peak
 - [Stock trading platform](https://devlcodes.github.io/classic-system-designs/stock-trading.html): 15M orders a day, 2M live price streams at the market open
+- [Distributed job scheduler](https://devlcodes.github.io/classic-system-designs/job-scheduler.html): 50M runs a day, 1M due at the top of the hour
 - [Collaborative document editor](https://devlcodes.github.io/classic-system-designs/collab-docs.html): 5M open editing sessions, 2M edits/s at peak
 - [Notification system](https://devlcodes.github.io/classic-system-designs/notifications.html): 2B push, SMS and email messages a day, login codes in seconds during 50M-user campaigns
 
