@@ -1,0 +1,27 @@
+{
+  "title": "Distributed rate limiter",
+  "page": "rate-limiter.html",
+  "cards": [
+    {"front": "Latency budget for the limiter", "back": "Under 1 ms p50 and 3 ms p99. The limiter must cost less than the requests it protects.", "link": "rate-limiter.html#requirements"},
+    {"front": "Counter operations at 1M requests a second", "back": "About 2.5M a second, since each request checks about 2.5 limits (key, user or IP, sometimes endpoint).", "link": "rate-limiter.html#estimates"},
+    {"front": "Total limiter state for 10M identities", "back": "About 3 GB (2.5 buckets each at about 100 bytes). It fits in memory several times over.", "link": "rate-limiter.html#estimates"},
+    {"front": "Where the limiter runs", "back": "As a library inside each API gateway (or a sidecar), not a separate network hop.", "link": "rate-limiter.html#api"},
+    {"front": "What a limited client receives", "back": "429 Too Many Requests with Retry-After and RateLimit-* headers. Send the RateLimit headers on every response so clients slow down early.", "link": "rate-limiter.html#api"},
+    {"front": "Why a Lua script in Redis?", "back": "GET then SET from the gateway races; INCR can't express refill. A script runs the read-modify-write as one atomic step on the shard.", "link": "rate-limiter.html#counters"},
+    {"front": "Token bucket vs daily quota counter", "back": "Token bucket for rates (bursts up to bucket size, steady refill); a plain counter with a TTL for daily quotas.", "link": "rate-limiter.html#counters"},
+    {"front": "Why hash-tag keys like rl:{ak_29f1}:...?", "back": "All of one key's buckets land on one shard, so one script checks them together and refuses all if any refuses.", "link": "rate-limiter.html#counters"},
+    {"front": "Local leases", "back": "A gateway takes a small batch of tokens from Redis and spends them from memory, cutting round trips. Worst-case overshoot is gateways × lease size.", "link": "rate-limiter.html#scale"},
+    {"front": "Local deny cache", "back": "Once a key is refused, the gateway remembers until its reset time, so an abusive client gets 429s from memory without touching Redis.", "link": "rate-limiter.html#scale"},
+    {"front": "Fail open or fail closed?", "back": "Fail open (with local limits) for a public API; fail closed for limits guarding money or security, like logins, password resets and SMS sends.", "link": "rate-limiter.html#failure"},
+    {"front": "Why not one global Redis across regions?", "back": "It would add 70-150 ms to every request. Each region keeps its own counters, with a static split or async usage sync.", "link": "rate-limiter.html#regions"}
+  ],
+  "quiz": [
+    {"q": "Two gateways both see one token left for a key and both allow the request. What is the root cause?", "choices": ["The read-modify-write isn't atomic; it should be one Lua script in Redis", "Leases are too small", "The bucket TTL expired", "Clocks are NTP-synced"], "answer": 0, "why": "A separate GET and SET leaves a race; the script runs as one step.", "link": "rate-limiter.html#counters"},
+    {"q": "A customer with a limit of 10 requests a minute regularly gets 40 through. Leases are 20 tokens across 300 gateways. What is the fix?", "choices": ["Fail closed", "Add Redis replicas", "Send small limits straight to Redis on every check and scale leases with the limit", "Move the limiter to a separate service"], "answer": 2, "why": "Overshoot is bounded by gateways × lease size, so small limits must skip leasing.", "link": "rate-limiter.html#scale"},
+    {"q": "A Redis shard fails over and p99 jumps above 5 ms. What should gateways do for the public API?", "choices": ["Reject every request until Redis recovers", "Trip a circuit breaker and enforce limit ÷ gateways from local memory", "Route checks to another region's Redis", "Stop sending RateLimit headers"], "answer": 1, "why": "Failing open with approximate local limits keeps the API up while still capping abuse.", "link": "rate-limiter.html#failure"},
+    {"q": "The limiter guards SMS verification sends, and Redis is down. What is the right behaviour?", "choices": ["Fail open with local limits", "Ignore limits until Redis returns", "Use the static split from last week", "Fail closed"], "answer": 3, "why": "Limits guarding money or security should fail closed.", "link": "rate-limiter.html#failure"},
+    {"q": "An abusive client sends 50,000 requests a second after being limited and Redis CPU climbs. What helps most?", "choices": ["A local deny cache that answers 429 from memory until reset", "Bigger leases", "Logging every allow to Kafka", "A longer bucket TTL"], "answer": 0, "why": "Refusals cached locally never touch Redis.", "link": "rate-limiter.html#scale"},
+    {"q": "One enterprise customer makes a single Redis shard run hot. What do you do?", "choices": ["Move them to fail-closed", "Split their bucket into N sub-buckets on different shards, each with 1/N of the rate", "Lower their limit", "Turn off hash tags for everyone"], "answer": 1, "why": "Sub-buckets spread one hot key across shards.", "link": "rate-limiter.html#scale"},
+    {"q": "Right after a config push, 429s spike for every plan. What safeguard should have caught it?", "choices": ["The local deny cache", "GCRA instead of token buckets", "Staged rule rollouts with a dry-run mode and instant rollback", "More Kafka partitions"], "answer": 2, "why": "A bad rule can block everyone, so rules roll out in stages and can log without enforcing.", "link": "rate-limiter.html#risks"}
+  ]
+}

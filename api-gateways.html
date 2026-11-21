@@ -157,6 +157,17 @@
   .dg .dot-hr { fill: var(--c-gov); } .dg .dot-it { fill: var(--c-kb); } .dg .dot-eng { fill: var(--c-ingest); } .dg .dot-q { fill: var(--c-serve); stroke: var(--ink); stroke-width: 1.5; }
   .dg .halo { fill: none; stroke: var(--c-serve); stroke-width: 1.5; stroke-dasharray: 4 4; }
   .dg .zone { fill: var(--paper); stroke: var(--line); stroke-width: 1; }
+  /* Check yourself: self-test questions, answers in details/summary (see STYLES.md) */
+  .check { counter-reset: chk; }
+  .check details { counter-increment: chk; border: 1px solid var(--line); border-radius: 10px; background: var(--paper); margin: 0 0 10px; }
+  .check summary { position: relative; display: block; cursor: pointer; list-style: none; padding: 12px 44px 12px 48px; font-weight: 600; line-height: 1.45; }
+  .check summary::-webkit-details-marker { display: none; }
+  .check summary::before { content: "Q" counter(chk); position: absolute; left: 16px; top: 14px; font-family: var(--font-mono); font-size: 12px; font-weight: 500; color: var(--accent); }
+  .check summary::after { content: "+"; position: absolute; right: 16px; top: 10px; font-family: var(--font-mono); font-size: 18px; color: var(--muted); }
+  .check details[open] summary::after { content: "\2212"; }
+  .check summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 10px; }
+  .check .ans { margin: 0; padding: 0 16px 14px 48px; color: var(--ink); }
+  .check .ans a { font-family: var(--font-mono); font-size: 12.5px; white-space: nowrap; }
 </style>
 
 <style>
@@ -228,11 +239,11 @@
 </head>
 <body>
 <svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs><marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" class="ah" style="fill:#7d8996"/></marker></defs></svg>
-<header class="sitebar"><div class="wrap"><a class="brand" href="index.html">Classic System Design</a><nav aria-label="Site"><a href="index.html">Home</a><a href="index.html#blocks" aria-current="page">Building blocks</a><a href="index.html#designs">Designs</a><a href="https://devlcodes.github.io/agentic-ai-notebook/system-design/index.html">Agentic designs ↗</a></nav></div></header>
+<header class="sitebar"><div class="wrap"><a class="brand" href="index.html">Classic System Design</a><nav aria-label="Site"><a href="index.html">Home</a><a href="index.html#blocks" aria-current="page">Building blocks</a><a href="index.html#designs">Designs</a><a href="study.html">Study</a><a href="https://devlcodes.github.io/agentic-ai-notebook/system-design/index.html">Agentic designs ↗</a></nav></div></header>
 <main>
 <div class="wrap"><div class="intro"><p class="eyebrow">Building block · traffic</p><h1>API gateways and service mesh</h1><p class="lead">The front door and the hallways. A gateway is the one place every outside request enters, where you check who it is, how much it may do, and where it goes. A service mesh does the same jobs for the calls services make to each other, without changing their code.</p></div></div>
 <div class="wrap doc">
-  <nav class="toc" aria-label="On this page"><p>On this page</p><ol><li><a href="#what">Proxy, load balancer or gateway?</a></li><li><a href="#jobs">What a gateway does</a></li><li><a href="#bff">Aggregation and backends for frontends</a></li><li><a href="#mesh">Service mesh</a></li><li><a href="#resilience">Timeouts, retries and circuit breakers</a></li><li><a href="#lab">Try it: a retry storm</a></li><li><a href="#failure">How gateways fail</a></li><li><a href="#interview">Saying it in an interview</a></li><li><a href="#real-world">In the real world</a></li><li><a href="#related">Related</a></li></ol></nav>
+  <nav class="toc" aria-label="On this page"><p>On this page</p><ol><li><a href="#what">Proxy, load balancer or gateway?</a></li><li><a href="#jobs">What a gateway does</a></li><li><a href="#bff">Aggregation and backends for frontends</a></li><li><a href="#mesh">Service mesh</a></li><li><a href="#resilience">Timeouts, retries and circuit breakers</a></li><li><a href="#lab">Try it: a retry storm</a></li><li><a href="#failure">How gateways fail</a></li><li><a href="#interview">Saying it in an interview</a></li><li><a href="#real-world">In the real world</a></li><li><a href="#check">Check yourself</a></li><li><a href="#related">Related</a></li></ol></nav>
   <article>
 <section id="what"><h2>Proxy, load balancer or gateway?</h2>
 <p class="lead">All three sit between clients and servers and forward requests. They differ in how much they understand about each request.</p>
@@ -339,6 +350,14 @@
 <tr><td>Resilience libraries</td><td>Resilience4j (Java), Polly (.NET), gRPC retry and hedging policies</td><td>When you don't run a mesh</td></tr>
 </tbody></table></div>
 <p class="muted" style="font-size:13.5px;color:var(--muted)">Products change quickly; names here are examples, not endorsements. Check current docs before choosing.</p></section>
+
+<section id="check" class="check"><h2>Check yourself</h2>
+  <p>Answer in your head first, then open each question to compare.</p>
+  <details><summary>A bad deploy makes 20% of calls fail and callers retry 3 times. The service, sized for 12k/s at 10k/s normal, melts. What stops the spiral?</summary><p class="ans"><strong>A retry budget and circuit breaker.</strong> Budgets cap retry load and breakers fail fast, so overload doesn't feed more failures. <a href="#lab">Read the section</a></p></details>
+  <details><summary>A mobile home screen makes three slow round trips to three services. What helps?</summary><p class="ans"><strong>Aggregate the calls in a gateway or BFF inside the data center.</strong> Inside the data center a round trip is about half a millisecond, so one combined response is much faster. <a href="#bff">Read the section</a></p></details>
+  <details><summary>One slow upstream uses up all gateway workers and every route starts timing out. What prevents this?</summary><p class="ans"><strong>Per-route connection limits and timeouts.</strong> Per-route limits keep one bad service from taking the whole API down. <a href="#failure">Read the section</a></p></details>
+  <details><summary>You run five services. Do you need a service mesh?</summary><p class="ans"><strong>No, a good HTTP client library is usually enough.</strong> The mesh's cost pays off at many services; with a handful, a library is enough. <a href="#mesh">Read the section</a></p></details>
+</section>
 
 <section id="related"><h2>Related</h2><ul class="related"><li><a href="load-balancing.html">Load balancing</a></li><li><a href="rate-limiting.html">Rate limiting</a></li><li><a href="rate-limiter.html">Distributed rate limiter</a></li><li><a href="protocols.html">Network protocols and APIs</a></li><li><a href="cdn.html">CDNs, PoPs and IXPs</a></li><li><a href="observability.html">Monitoring, logging and tracing</a></li><li><a href="architecture-styles.html">Monoliths, microservices and hexagonal architecture</a></li></ul></section>
   </article>

@@ -157,6 +157,17 @@
   .dg .dot-hr { fill: var(--c-gov); } .dg .dot-it { fill: var(--c-kb); } .dg .dot-eng { fill: var(--c-ingest); } .dg .dot-q { fill: var(--c-serve); stroke: var(--ink); stroke-width: 1.5; }
   .dg .halo { fill: none; stroke: var(--c-serve); stroke-width: 1.5; stroke-dasharray: 4 4; }
   .dg .zone { fill: var(--paper); stroke: var(--line); stroke-width: 1; }
+  /* Check yourself: self-test questions, answers in details/summary (see STYLES.md) */
+  .check { counter-reset: chk; }
+  .check details { counter-increment: chk; border: 1px solid var(--line); border-radius: 10px; background: var(--paper); margin: 0 0 10px; }
+  .check summary { position: relative; display: block; cursor: pointer; list-style: none; padding: 12px 44px 12px 48px; font-weight: 600; line-height: 1.45; }
+  .check summary::-webkit-details-marker { display: none; }
+  .check summary::before { content: "Q" counter(chk); position: absolute; left: 16px; top: 14px; font-family: var(--font-mono); font-size: 12px; font-weight: 500; color: var(--accent); }
+  .check summary::after { content: "+"; position: absolute; right: 16px; top: 10px; font-family: var(--font-mono); font-size: 18px; color: var(--muted); }
+  .check details[open] summary::after { content: "\2212"; }
+  .check summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 10px; }
+  .check .ans { margin: 0; padding: 0 16px 14px 48px; color: var(--ink); }
+  .check .ans a { font-family: var(--font-mono); font-size: 12.5px; white-space: nowrap; }
 </style>
 
 <style>
@@ -238,7 +249,7 @@
 </head>
 <body>
 <svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs><marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" class="ah" style="fill:#7d8996"/></marker></defs></svg>
-<header class="sitebar"><div class="wrap"><a class="brand" href="index.html">Classic System Design</a><nav aria-label="Site"><a href="index.html">Home</a><a href="index.html#blocks">Building blocks</a><a href="index.html#designs" aria-current="page">Designs</a><a href="https://devlcodes.github.io/agentic-ai-notebook/system-design/index.html">Agentic designs ↗</a></nav></div></header>
+<header class="sitebar"><div class="wrap"><a class="brand" href="index.html">Classic System Design</a><nav aria-label="Site"><a href="index.html">Home</a><a href="index.html#blocks">Building blocks</a><a href="index.html#designs" aria-current="page">Designs</a><a href="study.html">Study</a><a href="https://devlcodes.github.io/agentic-ai-notebook/system-design/index.html">Agentic designs ↗</a></nav></div></header>
 <main>
 <header class="wrap"><div class="intro"><p class="eyebrow">Classic system design walkthrough</p><h1>Nearby Places</h1><p class="prompt"><q>Design a service like Yelp: given where the user is, find restaurants, cafés and other places within a radius, filtered by category and ranked well, with reviews, ratings and photos. There are 500 million places, growing 20% a year, and 100,000 searches a second.</q></p><ul class="legend" aria-label="Colour key"><li><i style="background:var(--c-ingest)"></i>Place updates</li><li><i style="background:var(--c-serve)"></i>Search path</li><li><i style="background:var(--c-kb)"></i>Storage and index</li><li><i style="background:var(--c-cross)"></i>Async</li><li><i style="background:var(--c-gov)"></i>Trust and safety</li></ul></div></header>
 <div class="wrap"><figure class="fig3d hero" id="hero">
@@ -249,7 +260,7 @@
   <figcaption>Illustrative. The back row is the slow write path, the front row the fast search path; they meet only at the geo index.</figcaption>
 </figure></div>
 <div class="wrap doc">
-  <nav class="toc" aria-label="Sections"><p>The solution</p><ol><li><a href="#requirements">Requirements</a></li><li><a href="#success">Success metrics</a></li><li><a href="#estimates">Estimates</a></li><li><a href="#api">API</a></li><li><a href="#architecture">Architecture</a></li><li><a href="#index">Finding what's nearby</a></li><li><a href="#lab">Try it: a quadtree</a></li><li><a href="#ranking">Filtering and ranking</a></li><li><a href="#storage">Storage</a></li><li><a href="#sharding">Sharding and replicas</a></li><li><a href="#reviews">Reviews and trust</a></li><li><a href="#deployment">Deployment</a></li><li><a href="#observability">Observability</a></li><li><a href="#risks">Risks and v2</a></li><li><a href="#presenting">Presenting it in 45 minutes</a></li><li><a href="#numbers">Numbers to remember</a></li></ol></nav>
+  <nav class="toc" aria-label="Sections"><p>The solution</p><ol><li><a href="#requirements">Requirements</a></li><li><a href="#success">Success metrics</a></li><li><a href="#estimates">Estimates</a></li><li><a href="#api">API</a></li><li><a href="#architecture">Architecture</a></li><li><a href="#index">Finding what's nearby</a></li><li><a href="#lab">Try it: a quadtree</a></li><li><a href="#ranking">Filtering and ranking</a></li><li><a href="#storage">Storage</a></li><li><a href="#sharding">Sharding and replicas</a></li><li><a href="#reviews">Reviews and trust</a></li><li><a href="#deployment">Deployment</a></li><li><a href="#observability">Observability</a></li><li><a href="#risks">Risks and v2</a></li><li><a href="#presenting">Presenting it in 45 minutes</a></li><li><a href="#numbers">Numbers to remember</a></li><li><a href="#check">Check yourself</a></li></ol></nav>
   <article>
 
 <section id="requirements">
@@ -515,6 +526,14 @@ place_stats                   (Redis + periodic rollup)
     <tr><td>Geohash length 5 / 6 / 7</td><td class="num">~5 km / ~1.2 km / ~150 m cells</td></tr>
     <tr><td>Searches per server</td><td class="num">~2,000/s with ranking</td></tr>
   </tbody></table></div>
+</section>
+
+<section id="check" class="check"><h2>Check yourself</h2>
+  <p>Answer in your head first, then open each question to compare.</p>
+  <details><summary>Searches in Manhattan scan thousands of candidates while rural searches find nothing nearby. The index is a fixed 10-mile grid. What fixes both?</summary><p class="ans"><strong>A quadtree that splits dense cells and keeps sparse cells large.</strong> Quadtree cells are small where places are dense and large where they are sparse. <a href="#index">Read the section</a></p></details>
+  <details><summary>Thousands of users a minute search 'restaurants near Times Square' and the index is overloaded at lunch. What takes most load off?</summary><p class="ans"><strong>Round locations and cache results per cell and filters for 30-60 s.</strong> Identical queries in popular areas can be cached briefly. <a href="#ranking">Read the section</a></p></details>
+  <details><summary>The index is sharded by place id and p99 latency is set by one slow shard. What helps?</summary><p class="ans"><strong>Send a hedged request to a replica when one shard is slow.</strong> Scatter-gather tail latency depends on the slowest shard; hedging cuts it. <a href="#sharding">Read the section</a></p></details>
+  <details><summary>A newly added café doesn't appear in search after an hour. Which signal points to the cause?</summary><p class="ans"><strong>Index lag between the newest applied change and now.</strong> Edits flow through CDC and Kafka; lag means servers aren't applying deltas. <a href="#observability">Read the section</a></p></details>
 </section>
   </article>
 </div>

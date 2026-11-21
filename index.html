@@ -170,6 +170,8 @@
   .group-h + .grid { margin-bottom: 12px; }
   .sub { margin: -4px 0 12px; color: var(--muted); }
   .concepts .card { border-left: 3px solid var(--c-kb); }
+  .doors.three { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  @media (max-width: 1000px) { .doors.three { grid-template-columns: minmax(0, 1fr); } }
   @media (max-width: 700px) { .doors { grid-template-columns: minmax(0, 1fr); } .walks { grid-template-columns: minmax(0, 1fr); } }
 </style>
 
@@ -186,18 +188,19 @@
 </head>
 <body>
 <svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs><marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" class="ah" style="fill:#7d8996"/></marker></defs></svg>
-<header class="sitebar"><div class="wrap"><a class="brand" href="index.html">Classic System Design</a><nav aria-label="Site"><a href="index.html" aria-current="page">Home</a><a href="index.html#blocks">Building blocks</a><a href="index.html#designs">Designs</a><a href="https://devlcodes.github.io/agentic-ai-notebook/system-design/index.html">Agentic designs ↗</a></nav></div></header>
+<header class="sitebar"><div class="wrap"><a class="brand" href="index.html">Classic System Design</a><nav aria-label="Site"><a href="index.html" aria-current="page">Home</a><a href="index.html#blocks">Building blocks</a><a href="index.html#designs">Designs</a><a href="study.html">Study</a><a href="https://devlcodes.github.io/agentic-ai-notebook/system-design/index.html">Agentic designs ↗</a></nav></div></header>
 <main>
 <div class="wrap"><div class="intro"><p class="eyebrow">Building blocks and worked designs</p><h1>Classic System Design</h1>
 <p class="lead">The building blocks behind every large web system, before any AI is involved: how traffic is spread, data is stored and copied, work is queued, and systems stay correct under load. Each page has a hands-on lab.</p></div></div>
 <div class="wrap" style="padding-bottom:56px">
-  <ul class="doors">
-    <li><a class="door" href="#blocks"><span class="k">21 topic pages · 21 labs · 17 walkthroughs</span><h2>Building blocks →</h2><p>Requirements, networking and DNS, load balancing, gateways and CDNs, caching, databases, sharding, queues, consistency, consensus, observability, threads and locks, architecture styles, and the numbers to size them.</p></a></li>
+  <ul class="doors three">
+    <li><a class="door" href="#blocks"><span class="k">21 topic pages · 21 labs · 17 walkthroughs</span><h2>Building blocks →</h2><p>Requirements, networking and DNS, load balancing, gateways and CDNs, caching, databases, sharding, queues, consistency, consensus, observability, threads and locks, and the numbers to size them.</p></a></li>
+    <li><a class="door" href="study.html"><span class="k">Flashcards · quizzes</span><h2>Study →</h2><p>Flip cards for the key terms and numbers, then take a short quiz on each page. Every answer links back to the section that explains it.</p></a></li>
     <li><a class="door" href="https://devlcodes.github.io/agentic-ai-notebook/system-design/index.html"><span class="k">AI systems</span><h2>Agentic designs →</h2><p>The companion section: RAG, agents with actions, text-to-SQL and evals, built on top of these same blocks.</p></a></li>
   </ul>
 
   <h2 class="home-h" id="blocks">Building blocks</h2>
-  <p class="sub">Read them in order, or jump to what a design needs.</p>
+  <p class="sub">Read them in order, jump to what a design needs, or follow the <a href="learning-path.html">learning path</a>: four stages with a checkbox per page that remembers your progress.</p>
   <h3 class="group-h">Foundations</h3>
   <ul class="grid">
     <li><a class="card" href="requirements.html"><span class="num">01</span><h3>Non-functional requirements</h3><p>Scale, latency, availability, durability and consistency targets; SLIs, SLOs, percentiles, RTO and RPO. Lab: availability of a request path.</p></a></li>

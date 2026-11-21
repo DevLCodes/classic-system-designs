@@ -157,6 +157,17 @@
   .dg .dot-hr { fill: var(--c-gov); } .dg .dot-it { fill: var(--c-kb); } .dg .dot-eng { fill: var(--c-ingest); } .dg .dot-q { fill: var(--c-serve); stroke: var(--ink); stroke-width: 1.5; }
   .dg .halo { fill: none; stroke: var(--c-serve); stroke-width: 1.5; stroke-dasharray: 4 4; }
   .dg .zone { fill: var(--paper); stroke: var(--line); stroke-width: 1; }
+  /* Check yourself: self-test questions, answers in details/summary (see STYLES.md) */
+  .check { counter-reset: chk; }
+  .check details { counter-increment: chk; border: 1px solid var(--line); border-radius: 10px; background: var(--paper); margin: 0 0 10px; }
+  .check summary { position: relative; display: block; cursor: pointer; list-style: none; padding: 12px 44px 12px 48px; font-weight: 600; line-height: 1.45; }
+  .check summary::-webkit-details-marker { display: none; }
+  .check summary::before { content: "Q" counter(chk); position: absolute; left: 16px; top: 14px; font-family: var(--font-mono); font-size: 12px; font-weight: 500; color: var(--accent); }
+  .check summary::after { content: "+"; position: absolute; right: 16px; top: 10px; font-family: var(--font-mono); font-size: 18px; color: var(--muted); }
+  .check details[open] summary::after { content: "\2212"; }
+  .check summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 10px; }
+  .check .ans { margin: 0; padding: 0 16px 14px 48px; color: var(--ink); }
+  .check .ans a { font-family: var(--font-mono); font-size: 12.5px; white-space: nowrap; }
 </style>
 
 <style>
@@ -228,11 +239,11 @@
 </head>
 <body>
 <svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs><marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" class="ah" style="fill:#7d8996"/></marker></defs></svg>
-<header class="sitebar"><div class="wrap"><a class="brand" href="index.html">Classic System Design</a><nav aria-label="Site"><a href="index.html">Home</a><a href="index.html#blocks" aria-current="page">Building blocks</a><a href="index.html#designs">Designs</a><a href="https://devlcodes.github.io/agentic-ai-notebook/system-design/index.html">Agentic designs ↗</a></nav></div></header>
+<header class="sitebar"><div class="wrap"><a class="brand" href="index.html">Classic System Design</a><nav aria-label="Site"><a href="index.html">Home</a><a href="index.html#blocks" aria-current="page">Building blocks</a><a href="index.html#designs">Designs</a><a href="study.html">Study</a><a href="https://devlcodes.github.io/agentic-ai-notebook/system-design/index.html">Agentic designs ↗</a></nav></div></header>
 <main>
 <div class="wrap"><div class="intro"><p class="eyebrow">Building block · requirements</p><h1>Non-functional requirements</h1><p class="lead">Functional requirements say what the system does. Non-functional requirements say how well: how fast, how big, how available, how safe, how cheap. They decide the architecture, so pin them down with numbers before drawing any boxes.</p></div></div>
 <div class="wrap doc">
-  <nav class="toc" aria-label="On this page"><p>On this page</p><ol><li><a href="#what">Functional vs non-functional</a></li><li><a href="#checklist">The checklist</a></li><li><a href="#numbers">Turning words into numbers</a></li><li><a href="#lab">Try it: availability of a request path</a></li><li><a href="#tradeoffs">They pull against each other</a></li><li><a href="#failure">Common mistakes</a></li><li><a href="#interview">Saying it in an interview</a></li><li><a href="#related">Related</a></li></ol></nav>
+  <nav class="toc" aria-label="On this page"><p>On this page</p><ol><li><a href="#what">Functional vs non-functional</a></li><li><a href="#checklist">The checklist</a></li><li><a href="#numbers">Turning words into numbers</a></li><li><a href="#lab">Try it: availability of a request path</a></li><li><a href="#tradeoffs">They pull against each other</a></li><li><a href="#failure">Common mistakes</a></li><li><a href="#interview">Saying it in an interview</a></li><li><a href="#check">Check yourself</a></li><li><a href="#related">Related</a></li></ol></nav>
   <article>
 <section id="what"><h2>Functional vs non-functional</h2>
 <p class="lead">"Users can post a photo" is functional. "A posted photo appears in followers' feeds within 5 seconds, for 200 million daily users, at 99.95% availability" is non-functional, and it is the part that tells you whether you need a cache, a queue, sharding or a second region.</p>
@@ -301,6 +312,14 @@
 
 <section id="interview"><h2>Saying it in an interview</h2>
 <div class="say"><p>"Before designing, let me pin down the non-functional side. I'll assume 50 million daily users and a 20:1 read-to-write ratio, so roughly 25k reads a second at peak. Reads should be under 200 ms at p99. Availability target 99.95%, which is about 22 minutes a month. Posts must never be lost once acknowledged, but feeds can be a few seconds stale, so I'll take eventual consistency there. Data stays in-region for EU users. Does that match what you had in mind?"</p></div></section>
+
+<section id="check" class="check"><h2>Check yourself</h2>
+  <p>Answer in your head first, then open each question to compare.</p>
+  <details><summary>A team says the system must be 'highly available and scalable'. What is the most useful next step?</summary><p class="ans"><strong>Turn it into numbers such as 99.95% and 50k reads/s at peak.</strong> Adjectives decide nothing; numbers like a nines target and peak throughput do. <a href="#failure">Read the section</a></p></details>
+  <details><summary>Your SLO is 99.9% over 30 days. Roughly how much failure can you spend each month?</summary><p class="ans"><strong>About 43 minutes.</strong> The error budget at 99.9% is about 43 minutes a month. <a href="#numbers">Read the section</a></p></details>
+  <details><summary>An interviewer wants checkout and the product page designed. Which consistency choice fits best?</summary><p class="ans"><strong>Checkout strong, product page eventual.</strong> Most systems need strong consistency in one or two places, such as checkout to avoid overselling, and eventual elsewhere. <a href="#tradeoffs">Read the section</a></p></details>
+  <details><summary>Average latency is 80 ms but users complain the page is slow. The page makes 50 backend calls. What should you look at?</summary><p class="ans"><strong>The p99 of the backend calls.</strong> With 50 calls, about 40% of page loads hit at least one call's p99, so tail latency is what users feel. <a href="#numbers">Read the section</a></p></details>
+</section>
 
 <section id="related"><h2>Related</h2><ul class="related"><li><a href="numbers.html">Numbers to know</a></li><li><a href="observability.html">Monitoring, logging and tracing</a></li><li><a href="consistency.html">Consistency and CAP</a></li><li><a href="load-balancing.html">Load balancing</a></li><li><a href="url-shortener.html">URL shortener</a></li><li><a href="architecture-styles.html">Monoliths, microservices and hexagonal architecture</a></li></ul></section>
   </article>
