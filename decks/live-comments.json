@@ -1,0 +1,27 @@
+{
+  "title": "Live comments",
+  "page": "live-comments.html",
+  "cards": [
+    {"front": "Where the difficulty in live comments lies", "back": "Not writes (about 11k a second) but knowing who is watching what as people scroll, and fanning out to huge audiences on a few hot streams.", "link": "live-comments.html#requirements"},
+    {"front": "Comment volume: 650k a minute", "back": "About 11k a second; at about 1 KB each, roughly 40 GB an hour.", "link": "live-comments.html#estimates"},
+    {"front": "Gateways for 50M viewers", "back": "About 500, at roughly 100k connections each.", "link": "live-comments.html#estimates"},
+    {"front": "The busiest write stream", "back": "Subscription churn: viewers changing streams every ~100 s is about 500k watch or unwatch events a second, more than comments.", "link": "live-comments.html#estimates"},
+    {"front": "Why polling fails at this scale", "back": "50M viewers polling every 5 s is 10M requests a second, nearly all 'nothing new', and comments still arrive 2.5 s late on average.", "link": "live-comments.html#push"},
+    {"front": "Why key Kafka by stream_id?", "back": "A stream's comments stay in order on one partition.", "link": "live-comments.html#architecture"},
+    {"front": "Registry key: stream → gateways, not users", "back": "At most about 500 entries per stream, updated only when a gateway's first viewer arrives or last one leaves. Most scrolling stays inside the gateway.", "link": "live-comments.html#routing"},
+    {"front": "Why TTLs on registry entries?", "back": "Gateways refresh entries while they have viewers; a crashed gateway's entries expire on their own and fan-out stops sending to it.", "link": "live-comments.html#routing"},
+    {"front": "Write locally, read globally", "back": "Each region keeps its own registry and gateways; comments are replicated to every region's Kafka and fanned out locally.", "link": "live-comments.html#routing"},
+    {"front": "Readable comment rate on a busy stream", "back": "About 10 comments a second, ranked (friends first, then quality) and batched once a second. The rest are stored but not shown live.", "link": "live-comments.html#hot"},
+    {"front": "Why replication doesn't fix a hot registry key", "back": "The problem is write volume and every replica takes every write. Coalescing updates and sub-sharding the key do help.", "link": "live-comments.html#hot"},
+    {"front": "Why Cassandra for comments", "back": "Append-only, read newest-first per stream, steady writes with spikes: leaderless, no primary to fail over, scales by adding nodes.", "link": "live-comments.html#storage"}
+  ],
+  "quiz": [
+    {"q": "A World Cup stream has 1M viewers and 200 comments a second, and naive fan-out would be 200M pushes a second. What brings it down most?", "choices": ["Replicate the registry", "Rank to about 10 comments a second and batch once a second per gateway", "Add more Kafka partitions", "Switch to short polling"], "answer": 1, "why": "Ranking and batching bound fan-out by gateways, not comments.", "link": "live-comments.html#hot"},
+    {"q": "The registry shard for a hot stream melts because every scroll writes a user ID to it. What redesign fixes this?", "choices": ["Store stream → gateways and update only on a gateway's first or last viewer", "Add read replicas", "Store one big list value per stream", "Move the registry to Cassandra"], "answer": 0, "why": "Keying by gateway keeps most scrolling inside the gateway.", "link": "live-comments.html#routing"},
+    {"q": "A gateway crashes. Fan-out workers keep sending it comments for a while. What limits the damage?", "choices": ["Fan-out workers ping each gateway first", "Kafka retries", "Registry entries expire by TTL since the gateway stops refreshing them", "Clients poll instead"], "answer": 2, "why": "Expire, don't trust: dead gateways' entries vanish on their own.", "link": "live-comments.html#routing"},
+    {"q": "Fan-out lags 30 seconds behind on a busy evening. What should it do?", "choices": ["Deliver everything in order regardless of age", "Pause commenting", "Switch to cross-region lookups", "Drop the oldest live deliveries first; they remain in history"], "answer": 3, "why": "A comment 30 s late is worse than one shown only in history.", "link": "live-comments.html#deployment"},
+    {"q": "Kafka goes down. What does the comment service do?", "choices": ["Write straight to Cassandra and return success; live delivery pauses", "Reject all comments", "Buffer comments in gateway memory", "Broadcast directly to all gateways"], "answer": 0, "why": "Live delivery can be best effort but the stored comment must not be lost.", "link": "live-comments.html#deployment"},
+    {"q": "A moderator hides an abusive comment already on viewers' screens. How is it removed?", "choices": ["Clients poll for deletions every minute", "A tombstone message travels the same fan-out path", "The comment is deleted from Kafka", "Gateways restart"], "answer": 1, "why": "Hides and deletes go out as tombstones so clients remove them.", "link": "live-comments.html#moderation"},
+    {"q": "A registry shard is lost. What keeps comments flowing until it's rebuilt?", "choices": ["Nothing; those streams go silent", "Viewers reconnect to a new region", "Fan-out broadcasts those streams to all gateways in the region", "Kafka holds them until the shard returns"], "answer": 2, "why": "Broadcasting costs more but delivers while gateways re-announce their streams.", "link": "live-comments.html#deployment"}
+  ]
+}
