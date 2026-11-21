@@ -434,7 +434,7 @@ POST /v1/media/uploads → { media_id, upload_url }                 // direct to
 
 <section id="groups">
   <h2>Group chats</h2>
-  <ul class="tags"><li>Fan-out</li><li><a href="queues.html">Queues</a></li></ul>
+  <ul class="tags"><li>Fan-out</li><li><a href="queues.html">Queues</a></li><li><a href="notifications.html">Notification system</a></li></ul>
   <p>A group message is stored once, with one sequence number, and delivered to every member's online devices. For a 500-member group that's up to 500 registry lookups and pushes for one message, so the chat service batches them: look up all members' gateways in one Redis pipeline, group recipients by gateway, and send one frame per gateway carrying the list of local recipients.</p>
   <p>Members who are offline need nothing at send time; they catch up by sequence when they reconnect. Only those with notifications on get a push, and a busy group collapses many messages into one "12 new messages" notification.</p>
   <p>Much larger rooms (Slack-style channels with 100,000 members) flip to a subscribe model: gateways subscribe to a per-channel topic only while one of their users has the channel open, and everyone else just sees an unread badge. That's the same push-vs-pull trade-off as the <a href="news-feed.html">news feed</a>.</p>
@@ -462,7 +462,7 @@ user_conversations    -- the chat list on the home screen
 
 <section id="presence">
   <h2>Presence and receipts</h2>
-  <ul class="tags"><li>Control traffic</li></ul>
+  <ul class="tags"><li>Control traffic</li><li><a href="collab-docs.html#presence">Cursors in a shared doc</a></li></ul>
   <p>Presence ("online", "last seen 5 min ago") is the noisiest signal and the least important one. Each heartbeat refreshes <code>presence:{user}</code> in Redis with a 60-second TTL, and "last seen" is the timestamp left behind when it expires.</p>
   <p>Broadcasting every status change to every contact would cost far more than messages do. Instead, a client <em>subscribes</em> to presence only for the chats on screen right now, and the presence service pushes changes only to those subscribers. Status changes are also debounced, so flapping on a train doesn't spam anyone.</p>
   <p>Receipts piggyback on acks. Devices ack the highest <code>seq</code> they have, not every message, so one "delivered up to 4183" covers a burst of messages. In groups, show "delivered" and "read" as counts, and send the per-member detail only when someone opens message info.</p>
