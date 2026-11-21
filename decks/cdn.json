@@ -1,0 +1,135 @@
+{
+  "title": "CDNs, PoPs and IXPs",
+  "page": "cdn.html",
+  "cards": [
+    {
+      "front": "Why distance matters",
+      "back": "Light in fiber covers about 200 km per millisecond. Chennai to Virginia is about 230 ms per round trip, and a secure connection takes two or three round trips before any work.",
+      "link": "cdn.html#what"
+    },
+    {
+      "front": "What a CDN does",
+      "back": "Serves users from a nearby server 5 to 20 ms away. On a miss it fetches from your origin over a warm connection and caches the file for the next user.",
+      "link": "cdn.html#what"
+    },
+    {
+      "front": "Point of presence (PoP)",
+      "back": "A small CDN site in a city: a few racks of cache servers and routers, usually in a shared data center.",
+      "link": "cdn.html#pops"
+    },
+    {
+      "front": "Anycast for CDNs",
+      "back": "Every PoP announces the same IP and BGP carries packets to the nearest one. A failed PoP stops announcing, and DDoS traffic spreads across all PoPs.",
+      "link": "cdn.html#pops"
+    },
+    {
+      "front": "IXP and peering",
+      "back": "An internet exchange point is a building where networks plug into a shared switch and exchange traffic directly, usually free (peering), instead of paying transit.",
+      "link": "cdn.html#ixps"
+    },
+    {
+      "front": "A CDN's real value",
+      "back": "Its peering: short, cheap paths into each ISP. Huge video volumes are affordable only because they're served from caches inside or next to the user's ISP.",
+      "link": "cdn.html#ixps"
+    },
+    {
+      "front": "Origin shield",
+      "back": "A mid-tier cache between PoPs and origin, so a new file causes one origin request per shield instead of one per PoP. It also collapses simultaneous requests.",
+      "link": "cdn.html#hierarchy"
+    },
+    {
+      "front": "Content-hashed file names",
+      "back": "Files like app.3f9a1c.js never change, so cache them for a year with max-age=31536000, immutable, and deploy new names instead of purging.",
+      "link": "cdn.html#keys"
+    },
+    {
+      "front": "Cache key hygiene",
+      "back": "Leave out query parameters that don't change the response, like utm_source, and use Vary only for headers that really matter, or the hit ratio collapses.",
+      "link": "cdn.html#keys"
+    },
+    {
+      "front": "stale-while-revalidate and stale-if-error",
+      "back": "Serve the old copy while fetching a new one, and keep serving it if the origin is down.",
+      "link": "cdn.html#keys"
+    },
+    {
+      "front": "TLS at the edge",
+      "back": "The expensive handshake happens near the user instead of across the world, which speeds up even uncacheable API calls.",
+      "link": "cdn.html#edge"
+    }
+  ],
+  "quiz": [
+    {
+      "q": "The CDN hit ratio suddenly drops and origin load jumps 10×. What should you check first?",
+      "choices": [
+        "Buy more origin servers",
+        "The cache key: random query strings, cookies or Vary: User-Agent",
+        "The TLS certificate",
+        "The PoP count"
+      ],
+      "answer": 1,
+      "why": "A bad cache key splits one file into thousands of entries; fix it before scaling the origin.",
+      "link": "cdn.html#failure"
+    },
+    {
+      "q": "A user's account page got served to other users from the CDN. What went wrong?",
+      "choices": [
+        "The TTL was too short",
+        "A personal response was cached under a shared key",
+        "The shield was off",
+        "Anycast routed to the wrong PoP"
+      ],
+      "answer": 1,
+      "why": "Mark personal responses private and test with two accounts.",
+      "link": "cdn.html#failure"
+    },
+    {
+      "q": "A new release asset is requested from 300 PoPs at once and the origin struggles. What helps?",
+      "choices": [
+        "Lower the TTL",
+        "An origin shield that collapses misses",
+        "Turn off anycast",
+        "Use bigger files"
+      ],
+      "answer": 1,
+      "why": "PoPs ask the shield, and only the shield asks the origin.",
+      "link": "cdn.html#hierarchy"
+    },
+    {
+      "q": "How should you ship a changed JavaScript bundle without purging?",
+      "choices": [
+        "Purge everything",
+        "Deploy it under a new content-hashed file name",
+        "Set max-age to 0 forever",
+        "Use Vary: Cookie"
+      ],
+      "answer": 1,
+      "why": "Versioned names mean nothing needs purging, and the old file can stay cached.",
+      "link": "cdn.html#keys"
+    },
+    {
+      "q": "You purge the entire CDN before a launch and the origin falls over. Why?",
+      "choices": [
+        "Purges are slow",
+        "Full load hit an origin sized for about 10% of it",
+        "DNS TTLs expired",
+        "Peering failed"
+      ],
+      "answer": 1,
+      "why": "Purge by tag, warm caches for big launches, and keep the shield on.",
+      "link": "cdn.html#failure"
+    },
+    {
+      "q": "An API's responses can't be cached. Can a CDN still make it faster?",
+      "choices": [
+        "No, CDNs only help static files",
+        "Yes, TLS terminates at the edge near the user",
+        "Only with HTTP/1.1",
+        "Only if you use GraphQL"
+      ],
+      "answer": 1,
+      "why": "The handshake happens 8 ms away instead of 230 ms, and the PoP keeps a warm connection to the origin.",
+      "link": "cdn.html#edge"
+    }
+  ]
+}

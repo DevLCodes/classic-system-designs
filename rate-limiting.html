@@ -157,6 +157,17 @@
   .dg .dot-hr { fill: var(--c-gov); } .dg .dot-it { fill: var(--c-kb); } .dg .dot-eng { fill: var(--c-ingest); } .dg .dot-q { fill: var(--c-serve); stroke: var(--ink); stroke-width: 1.5; }
   .dg .halo { fill: none; stroke: var(--c-serve); stroke-width: 1.5; stroke-dasharray: 4 4; }
   .dg .zone { fill: var(--paper); stroke: var(--line); stroke-width: 1; }
+  /* Check yourself: self-test questions, answers in details/summary (see STYLES.md) */
+  .check { counter-reset: chk; }
+  .check details { counter-increment: chk; border: 1px solid var(--line); border-radius: 10px; background: var(--paper); margin: 0 0 10px; }
+  .check summary { position: relative; display: block; cursor: pointer; list-style: none; padding: 12px 44px 12px 48px; font-weight: 600; line-height: 1.45; }
+  .check summary::-webkit-details-marker { display: none; }
+  .check summary::before { content: "Q" counter(chk); position: absolute; left: 16px; top: 14px; font-family: var(--font-mono); font-size: 12px; font-weight: 500; color: var(--accent); }
+  .check summary::after { content: "+"; position: absolute; right: 16px; top: 10px; font-family: var(--font-mono); font-size: 18px; color: var(--muted); }
+  .check details[open] summary::after { content: "\2212"; }
+  .check summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 10px; }
+  .check .ans { margin: 0; padding: 0 16px 14px 48px; color: var(--ink); }
+  .check .ans a { font-family: var(--font-mono); font-size: 12.5px; white-space: nowrap; }
 </style>
 
 <style>
@@ -228,11 +239,11 @@
 </head>
 <body>
 <svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs><marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" class="ah" style="fill:#7d8996"/></marker></defs></svg>
-<header class="sitebar"><div class="wrap"><a class="brand" href="index.html">Classic System Design</a><nav aria-label="Site"><a href="index.html">Home</a><a href="index.html#blocks" aria-current="page">Building blocks</a><a href="index.html#designs">Designs</a><a href="https://devlcodes.github.io/agentic-ai-notebook/system-design/index.html">Agentic designs ↗</a></nav></div></header>
+<header class="sitebar"><div class="wrap"><a class="brand" href="index.html">Classic System Design</a><nav aria-label="Site"><a href="index.html">Home</a><a href="index.html#blocks" aria-current="page">Building blocks</a><a href="index.html#designs">Designs</a><a href="study.html">Study</a><a href="https://devlcodes.github.io/agentic-ai-notebook/system-design/index.html">Agentic designs ↗</a></nav></div></header>
 <main>
 <div class="wrap"><div class="intro"><p class="eyebrow">Building block · protection</p><h1>Rate limiting</h1><p class="lead">Capping how many requests a client can make in a period, so one noisy user or a bug can't take the service down for everyone.</p></div></div>
 <div class="wrap doc">
-  <nav class="toc" aria-label="On this page"><p>On this page</p><ol><li><a href="#why">Why limit</a></li><li><a href="#algorithms">Algorithms</a></li><li><a href="#lab">Try it: four limiters, same traffic</a></li><li><a href="#where">Where to enforce</a></li><li><a href="#interview">Saying it in an interview</a></li><li><a href="#real-world">In the real world</a></li><li><a href="#related">Related</a></li></ol></nav>
+  <nav class="toc" aria-label="On this page"><p>On this page</p><ol><li><a href="#why">Why limit</a></li><li><a href="#algorithms">Algorithms</a></li><li><a href="#lab">Try it: four limiters, same traffic</a></li><li><a href="#where">Where to enforce</a></li><li><a href="#interview">Saying it in an interview</a></li><li><a href="#real-world">In the real world</a></li><li><a href="#check">Check yourself</a></li><li><a href="#related">Related</a></li></ol></nav>
   <article>
 <section id="why"><h2>Why limit</h2>
 <p class="lead">Without limits, the heaviest client decides how the service performs for everyone else.</p>
@@ -302,6 +313,14 @@
 <tr><td>Libraries</td><td>redis-cell, Bucket4j, rate-limiter-flexible, Upstash Ratelimit</td><td>Token bucket and sliding windows over Redis</td></tr>
 </tbody></table></div>
 <p class="muted" style="font-size:13.5px;color:var(--muted)">Products change quickly; names here are examples, not endorsements. Check current docs before choosing.</p></section>
+
+<section id="check" class="check"><h2>Check yourself</h2>
+  <p>Answer in your head first, then open each question to compare.</p>
+  <details><summary>A client sends 20 requests at 0:59 and 20 more at 1:01 against a 20-per-minute fixed window. What happens?</summary><p class="ans"><strong>All 40 succeed within two seconds.</strong> Fixed windows reset at the boundary, allowing up to 2× the limit around it. <a href="#algorithms">Read the section</a></p></details>
+  <details><summary>Your limit is 100/min, but customers get 5,000/min through 50 gateway pods. Why?</summary><p class="ans"><strong>Each pod counts in its own memory.</strong> Counters must be shared, typically in Redis, so every pod sees one count. <a href="#where">Read the section</a></p></details>
+  <details><summary>You need to allow short bursts but keep the long-run rate at the plan limit. Which algorithm?</summary><p class="ans"><strong>Token bucket.</strong> The capacity allows bursts while the refill rate holds the long-run average. <a href="#algorithms">Read the section</a></p></details>
+  <details><summary>Redis, which holds the limiter state, goes down. What should the login endpoint do?</summary><p class="ans"><strong>Fail closed and reject.</strong> Logins should fail closed to keep password guessing in check. <a href="#where">Read the section</a></p></details>
+</section>
 
 <section id="related"><h2>Related</h2><ul class="related"><li><a href="api-gateways.html">API gateways and service mesh</a></li><li><a href="load-balancing.html">Load balancing</a></li><li><a href="caching.html">Caching (Redis)</a></li><li><a href="queues.html">Queues and backpressure</a></li></ul></section>
   </article>
