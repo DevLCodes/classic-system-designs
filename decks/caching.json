@@ -1,0 +1,147 @@
+{
+  "title": "Caching",
+  "page": "caching.html",
+  "cards": [
+    {
+      "front": "Cache read vs database read",
+      "back": "A Redis read takes well under a millisecond; a database read that touches disk or runs a join can take 5 to 50 ms.",
+      "link": "caching.html#what"
+    },
+    {
+      "front": "Why caching works",
+      "back": "Traffic is skewed: a small share of keys gets most reads. Cache those and the database only sees the long tail.",
+      "link": "caching.html#what"
+    },
+    {
+      "front": "When not to cache",
+      "back": "Data that must always be exact, like an account balance at the moment of a payment.",
+      "link": "caching.html#what"
+    },
+    {
+      "front": "Cache-aside",
+      "back": "App reads the cache; on a miss it reads the database and fills the cache. Writes go to the database and delete the cache key.",
+      "link": "caching.html#patterns"
+    },
+    {
+      "front": "Write-through vs write-back",
+      "back": "Write-through updates cache and database together (always fresh, slower writes). Write-back writes the cache and flushes later (fastest writes, data loss if the cache dies).",
+      "link": "caching.html#patterns"
+    },
+    {
+      "front": "Why delete the key on write instead of updating it",
+      "back": "Two concurrent writers that each update the cache can leave the older value there; deleting avoids that race.",
+      "link": "caching.html#patterns"
+    },
+    {
+      "front": "LRU vs LFU",
+      "back": "LRU evicts the least recently used key and is the default; LFU evicts the least frequently used and resists a one-off scan flushing the cache.",
+      "link": "caching.html#eviction"
+    },
+    {
+      "front": "TTL jitter",
+      "back": "A little random spread on TTLs so keys written together don't all expire together.",
+      "link": "caching.html#eviction"
+    },
+    {
+      "front": "Cache stampede",
+      "back": "A hot key expires and thousands of requests hit the database at once. Fix with one rebuilder (lock or request coalescing) or refresh popular keys before expiry.",
+      "link": "caching.html#failure"
+    },
+    {
+      "front": "Hot key fixes",
+      "back": "Keep a short in-process copy on each app server, or replicate the key as key#1 to key#8 and read one at random.",
+      "link": "caching.html#failure"
+    },
+    {
+      "front": "Cache penetration",
+      "back": "Requests for keys that don't exist always miss. Cache the 'not found' with a short TTL, or check a Bloom filter first.",
+      "link": "caching.html#failure"
+    }
+  ],
+  "quiz": [
+    {
+      "q": "A celebrity profile key gets more traffic than one cache node can serve. What helps?",
+      "choices": [
+        "A longer TTL",
+        "Replicate it under several names or keep a short in-process copy",
+        "Switch to write-back",
+        "Use LFU eviction"
+      ],
+      "answer": 1,
+      "why": "Spreading the hot key across nodes or app servers removes the single-node bottleneck.",
+      "link": "caching.html#failure"
+    },
+    {
+      "q": "A popular key expires and the database spikes to 100% CPU for a few seconds. What is this, and the fix?",
+      "choices": [
+        "Penetration; add a Bloom filter",
+        "Stampede; let one request rebuild while others wait or get stale data",
+        "Hot partition; reshard",
+        "Cold start; warm the cache"
+      ],
+      "answer": 1,
+      "why": "Request coalescing or early refresh stops the herd hitting the database.",
+      "link": "caching.html#failure"
+    },
+    {
+      "q": "Bots request millions of product IDs that don't exist, and each one hits the database. What helps?",
+      "choices": [
+        "Cache the 'not found' result briefly or check a Bloom filter",
+        "Raise the cache size",
+        "Use write-through",
+        "Lower TTLs"
+      ],
+      "answer": 0,
+      "why": "Negative results otherwise always miss.",
+      "link": "caching.html#failure"
+    },
+    {
+      "q": "You need the fastest possible writes and can tolerate losing a few seconds of data in a crash. Which pattern?",
+      "choices": [
+        "Write-through",
+        "Write-back",
+        "Cache-aside",
+        "Write-around"
+      ],
+      "answer": 1,
+      "why": "Write-back buys fast writes and accepts that a crash can lose unflushed data.",
+      "link": "caching.html#patterns"
+    },
+    {
+      "q": "The cache tier restarts empty and the database collapses. What should the design include?",
+      "choices": [
+        "Nothing; caches never restart",
+        "A database sized for a cold cache at reduced traffic, cache warming and cache replication",
+        "Only longer TTLs",
+        "Write-back"
+      ],
+      "answer": 1,
+      "why": "Plan for cache loss so the full read load doesn't land at once.",
+      "link": "caching.html#failure"
+    },
+    {
+      "q": "A nightly batch job scans every product once and the hit ratio drops the next morning. Which eviction policy resists this?",
+      "choices": [
+        "LRU",
+        "FIFO",
+        "LFU",
+        "Random"
+      ],
+      "answer": 2,
+      "why": "LFU keeps frequently used keys even when a one-off scan touches everything.",
+      "link": "caching.html#eviction"
+    },
+    {
+      "q": "A stale price stays in the cache after an invalidation message was lost. What limits the damage?",
+      "choices": [
+        "Nothing can",
+        "A TTL as a safety net",
+        "Write-around",
+        "Bigger cache nodes"
+      ],
+      "answer": 1,
+      "why": "Always set a TTL so stale data heals itself even if an invalidation is missed.",
+      "link": "caching.html#eviction"
+    }
+  ]
+}

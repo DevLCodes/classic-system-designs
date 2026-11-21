@@ -1,0 +1,27 @@
+{
+  "title": "Nearby places",
+  "page": "nearby-places.html",
+  "cards": [
+    {"front": "The shape of a nearby-places system", "back": "Places change rarely and searches are constant, so build a read-optimized spatial index next to the search servers with a normal database behind it.", "link": "nearby-places.html#requirements"},
+    {"front": "Size of the geo index for 500M places", "back": "24 bytes each (id, lat, lng) is 12 GB, perhaps 20-30 GB with tree overhead. Every search server can hold a full copy in RAM.", "link": "nearby-places.html#estimates"},
+    {"front": "Why clients round their location to about 50 m", "back": "Nearby users' queries become identical and cacheable for a few seconds.", "link": "nearby-places.html#api"},
+    {"front": "Why plain SQL lat/lng ranges are slow", "back": "A B-tree index helps one column only, so the database scans a huge strip of the world for the other.", "link": "nearby-places.html#index"},
+    {"front": "The fixed grid's problem", "back": "One cell size fits nowhere: cells in Manhattan hold thousands of places and cells in the ocean hold none.", "link": "nearby-places.html#index"},
+    {"front": "How a quadtree adapts to density", "back": "Start with one cell; split any cell with more than about 500 places into four. About 10 levels for 500M places.", "link": "nearby-places.html#index"},
+    {"front": "Geohash cell sizes at lengths 5, 6 and 7", "back": "About 5 km, 1.2 km and 150 m.", "link": "nearby-places.html#numbers"},
+    {"front": "Why smooth ratings in ranking?", "back": "So 5 stars from 3 reviews doesn't beat 4.6 from 800.", "link": "nearby-places.html#ranking"},
+    {"front": "How 'open now' avoids a database call", "back": "An opening-hours bitmap is kept alongside the ids in memory with category and price.", "link": "nearby-places.html#ranking"},
+    {"front": "Full replicas vs sharding the index", "back": "At 12-30 GB every server holds the whole index. Once it outgrows memory, hash by place id and merge each shard's top-k in an aggregator.", "link": "nearby-places.html#sharding"},
+    {"front": "How the index stays fresh", "back": "Change data capture from the places database onto Kafka; servers apply deltas, and a nightly snapshot lets new servers load in minutes.", "link": "nearby-places.html#sharding"},
+    {"front": "Where reviews and rating averages live", "back": "Reviews in a wide-column store partitioned by place; averages maintained incrementally in Redis, never computed from raw reviews on search.", "link": "nearby-places.html#storage"}
+  ],
+  "quiz": [
+    {"q": "Searches in Manhattan scan thousands of candidates while rural searches find nothing nearby. The index is a fixed 10-mile grid. What fixes both?", "choices": ["A quadtree that splits dense cells and keeps sparse cells large", "A bigger fixed grid", "A B-tree on latitude", "More read replicas"], "answer": 0, "why": "Quadtree cells are small where places are dense and large where they are sparse.", "link": "nearby-places.html#index"},
+    {"q": "Thousands of users a minute search 'restaurants near Times Square' and the index is overloaded at lunch. What takes most load off?", "choices": ["Shard by city", "Compute ratings from raw reviews", "Round locations and cache results per cell and filters for 30-60 s", "Lower the radius"], "answer": 2, "why": "Identical queries in popular areas can be cached briefly.", "link": "nearby-places.html#ranking"},
+    {"q": "The index is sharded by place id and p99 latency is set by one slow shard. What helps?", "choices": ["Shard by region instead", "Send a hedged request to a replica when one shard is slow", "Increase the quadtree leaf limit", "Drop the slow shard's results"], "answer": 1, "why": "Scatter-gather tail latency depends on the slowest shard; hedging cuts it.", "link": "nearby-places.html#sharding"},
+    {"q": "A newly added café doesn't appear in search after an hour. Which signal points to the cause?", "choices": ["Result cache hit ratio", "Zero-result rate", "Candidates scanned per query", "Index lag between the newest applied change and now"], "answer": 3, "why": "Edits flow through CDC and Kafka; lag means servers aren't applying deltas.", "link": "nearby-places.html#observability"},
+    {"q": "A search server restarts. How does it get its index back quickly?", "choices": ["Rebuild from a full database scan", "Load the nightly snapshot, then replay the Kafka log since", "Copy from a neighbour over HTTP", "Start empty and fill from queries"], "answer": 1, "why": "Snapshot plus log replay loads the index in minutes.", "link": "nearby-places.html#sharding"},
+    {"q": "A new place with three 5-star reviews tops results above a beloved spot rated 4.6 from 800 reviews. What should change?", "choices": ["Sort by distance only", "Hide new places", "Smooth ratings so small review counts carry less weight", "Remove ratings from ranking"], "answer": 2, "why": "Smoothed ratings stop tiny samples from dominating.", "link": "nearby-places.html#ranking"},
+    {"q": "A business posts a burst of glowing reviews from new accounts. How should the system respond?", "choices": ["Score reviews with signals like account age and bursts, and hide suspicious ones from the rating", "Delete the place", "Rate limit all reviews site-wide", "Show the reviews but sort them last"], "answer": 0, "why": "Trust scores keep fake reviews out of averages.", "link": "nearby-places.html#reviews"}
+  ]
+}
