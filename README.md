@@ -4,6 +4,8 @@ Interactive pages on how large web systems are built, before any AI is involved:
 
 **Start here:** https://devlcodes.github.io/classic-system-designs/
 
+Not sure where to begin? The [learning path](https://devlcodes.github.io/classic-system-designs/learning-path.html) puts every page in a suggested order and saves your progress in the browser.
+
 ## Building blocks
 
 1. [Non-functional requirements](https://devlcodes.github.io/classic-system-designs/requirements.html)

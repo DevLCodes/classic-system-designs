@@ -1,0 +1,152 @@
+{
+  "title": "Network protocols and APIs",
+  "page": "protocols.html",
+  "cards": [
+    {
+      "front": "Three layers that matter in system design",
+      "back": "Network (IP: where a packet goes), transport (TCP or UDP: how reliably) and application (HTTP, gRPC, WebSocket, DNS: what the bytes mean).",
+      "link": "protocols.html#layers"
+    },
+    {
+      "front": "L4 vs L7 load balancer",
+      "back": "An L4 balancer sees only IPs and ports; an L7 balancer reads HTTP paths and headers.",
+      "link": "protocols.html#layers"
+    },
+    {
+      "front": "TCP vs UDP rule of thumb",
+      "back": "Use TCP unless a late packet is worthless. In a video call a frame 300 ms late is useless, so UDP lets the app skip it instead of waiting for a retransmit.",
+      "link": "protocols.html#transport"
+    },
+    {
+      "front": "Head-of-line blocking in TCP",
+      "back": "One lost segment stalls everything behind it on that connection, because TCP delivers in order.",
+      "link": "protocols.html#transport"
+    },
+    {
+      "front": "HTTP/2's key change",
+      "back": "Multiplexing: many requests interleaved on one TCP connection, with binary framing and header compression. One lost TCP packet still stalls every stream.",
+      "link": "protocols.html#http"
+    },
+    {
+      "front": "HTTP/3",
+      "back": "HTTP over QUIC on UDP. Streams are independent, the transport and TLS handshakes merge into one round trip, and connections survive a Wi-Fi to mobile switch.",
+      "link": "protocols.html#http"
+    },
+    {
+      "front": "REST vs GraphQL vs gRPC in one line",
+      "back": "REST for public APIs and easy HTTP caching, GraphQL when many screens need different fields, gRPC with protobuf for service-to-service calls.",
+      "link": "protocols.html#styles"
+    },
+    {
+      "front": "Protocol Buffers",
+      "back": "gRPC's binary payload format, typically 3 to 10× smaller than JSON and faster to parse.",
+      "link": "protocols.html#styles"
+    },
+    {
+      "front": "Server-sent events (SSE)",
+      "back": "One long HTTP response streaming events from server to client, with built-in reconnect by last event ID. Good for scores, notifications and token streams.",
+      "link": "protocols.html#push"
+    },
+    {
+      "front": "WebSocket",
+      "back": "An HTTP request upgraded to a full-duplex connection over TCP. Good when both sides send often, like chat, but gateways become stateful.",
+      "link": "protocols.html#push"
+    },
+    {
+      "front": "Three rules for receiving webhooks",
+      "back": "Verify the signature on every call, handle each event idempotently by its event ID, and reconcile anything still pending because a webhook can be lost.",
+      "link": "protocols.html#push"
+    },
+    {
+      "front": "Heartbeat interval for long-lived connections",
+      "back": "Every 20 to 30 seconds, treating two missed heartbeats as a disconnect, because NATs and load balancers drop idle connections silently.",
+      "link": "protocols.html#failure"
+    }
+  ],
+  "quiz": [
+    {
+      "q": "You deploy a WebSocket gateway and a million clients reconnect in the same second. What prevents this next time?",
+      "choices": [
+        "Shorter heartbeats",
+        "Drain connections slowly and reconnect with exponential backoff plus jitter",
+        "Switch to HTTP/1.1",
+        "Bigger TLS certificates"
+      ],
+      "answer": 1,
+      "why": "Slow draining plus jittered backoff spreads the reconnect load out.",
+      "link": "protocols.html#failure"
+    },
+    {
+      "q": "A live-score page needs one-way updates to many browsers. Which is the simplest good fit?",
+      "choices": [
+        "Short polling every second",
+        "gRPC streaming from the browser",
+        "Server-sent events",
+        "A webhook to each browser"
+      ],
+      "answer": 2,
+      "why": "SSE streams server-to-client events over HTTP with built-in reconnect.",
+      "link": "protocols.html#push"
+    },
+    {
+      "q": "A client timed out on POST /payments and retried, creating two payments. What was missing?",
+      "choices": [
+        "A longer timeout",
+        "HTTP/3",
+        "An idempotency key deduped on the server",
+        "A GraphQL schema"
+      ],
+      "answer": 2,
+      "why": "A timeout does not mean failure; idempotency keys make retries safe.",
+      "link": "protocols.html#failure"
+    },
+    {
+      "q": "On a lossy mobile network, why can HTTP/3 beat HTTP/2?",
+      "choices": [
+        "It uses bigger packets",
+        "Loss on one QUIC stream does not block the others",
+        "It skips encryption",
+        "It uses TCP fast open"
+      ],
+      "answer": 1,
+      "why": "HTTP/2 still suffers TCP head-of-line blocking; QUIC streams are independent.",
+      "link": "protocols.html#http"
+    },
+    {
+      "q": "Which API style is hardest to cache in a CDN?",
+      "choices": [
+        "REST GET endpoints",
+        "Static files",
+        "GraphQL, where everything is a POST to one URL",
+        "Versioned REST under /v2/"
+      ],
+      "answer": 2,
+      "why": "HTTP caches understand GET; GraphQL queries are POSTs to one endpoint.",
+      "link": "protocols.html#styles"
+    },
+    {
+      "q": "Your app makes ten sequential calls to a server 150 ms away. What is the best fix?",
+      "choices": [
+        "Add more servers",
+        "Batch them, for example a backend-for-frontend endpoint for the screen",
+        "Use UDP",
+        "Turn on gzip"
+      ],
+      "answer": 1,
+      "why": "Ten round trips at 150 ms is 1.5 s before any work; gather the screen's data in one call.",
+      "link": "protocols.html#failure"
+    },
+    {
+      "q": "A payment processor lets you register a URL that it calls when a payment settles. Which pattern is this?",
+      "choices": [
+        "Long polling",
+        "SSE",
+        "Webhook",
+        "WebSocket"
+      ],
+      "answer": 2,
+      "why": "A webhook replaces polling between companies: the provider POSTs to your endpoint.",
+      "link": "protocols.html#push"
+    }
+  ]
+}
