@@ -1,0 +1,26 @@
+{
+  "title": "Numbers to know",
+  "page": "numbers.html",
+  "cards": [
+    {"front": "Why estimate?", "back": "Estimates decide the design: 50 writes a second fits one Postgres node, 500,000 does not. You only need to be right to within a factor of ten, and the reasoning matters more than the number.", "link": "numbers.html#why"},
+    {"front": "Latency ratios to remember", "back": "Memory is about 1,000× faster than an SSD random read; a round trip inside a region is about 10× an SSD read; a trip across a continent is about 100× a round trip inside one region.", "link": "numbers.html#latency"},
+    {"front": "Round trip inside one data centre", "back": "About 0.5 ms. Every service hop costs at least this.", "link": "numbers.html#latency"},
+    {"front": "Round trip across and between continents", "back": "About 40 to 80 ms across a continent and 100 to 250 ms between continents, which is why CDNs and regional deployments exist.", "link": "numbers.html#latency"},
+    {"front": "Rough per-node ceilings", "back": "App server 1k to 10k req/s, Redis about 100k+ ops/s, Postgres a few thousand writes/s comfortably, Kafka 100 MB/s+ per broker, Cassandra 10k to 100k writes/s per node.", "link": "numbers.html#throughput"},
+    {"front": "Seconds in a day", "back": "86,400, round to 100,000. So 1 million requests a day is about 12 per second, and 1 billion is about 12,000 per second.", "link": "numbers.html#time"},
+    {"front": "Availability nines per year", "back": "99% is about 3.65 days of downtime, 99.9% about 8.8 hours, 99.99% about 53 minutes, and 99.999% about 5.3 minutes.", "link": "numbers.html#time"},
+    {"front": "Dependencies in series vs parallel", "back": "In series availability multiplies: three services at 99.9% give about 99.7%. Two independent 99% replicas in parallel give 99.99%.", "link": "numbers.html#time"},
+    {"front": "Typical read : write ratios", "back": "Social feeds 100:1 or more, e-commerce about 10:1, chat about 1:1, logging and metrics mostly writes.", "link": "numbers.html#time"},
+    {"front": "Cold vs warm API call", "back": "Cold ≈ DNS + 3 round trips (TCP, TLS 1.3, request) + processing + transfer. Warm on a reused connection ≈ 1 round trip + processing + transfer.", "link": "numbers.html#call"},
+    {"front": "The two-minute estimation method", "back": "Users and actions, requests per second (per day ÷ 100,000 × peak factor), storage with replication, bandwidth, cache memory for the hot 10 to 20%, then turn numbers into decisions.", "link": "numbers.html#method"}
+  ],
+  "quiz": [
+    {"q": "About how many requests per second is 1 billion requests a day, on average?", "choices": ["About 12,000", "About 1,200", "About 120,000", "About 12"], "answer": 0, "why": "1,000,000,000 ÷ ~100,000 seconds is about 10,000, more precisely about 12,000.", "link": "numbers.html#time"},
+    {"q": "With a 150 ms round trip, roughly what do a cold call's handshakes cost before 50 ms of processing?", "choices": ["About 450 ms", "About 150 ms", "About 50 ms", "About 1.5 s"], "answer": 0, "why": "DNS aside, TCP, TLS 1.3 and the request are three round trips.", "link": "numbers.html#call"},
+    {"q": "Three services in series each have 99.9% availability. What is the combined availability?", "choices": ["About 99.7%", "99.9%", "About 99.99%", "About 97%"], "answer": 0, "why": "0.999³ is about 0.997.", "link": "numbers.html#time"},
+    {"q": "How much downtime per month does 99.99% allow?", "choices": ["About 4.4 minutes", "About 44 minutes", "About 26 seconds", "About 7.3 hours"], "answer": 0, "why": "0.01% of a month is about 4.4 minutes.", "link": "numbers.html#time"},
+    {"q": "Which is the slowest?", "choices": ["Random read from a spinning disk", "Random read from NVMe SSD", "Round trip inside one data centre", "Read from main memory"], "answer": 0, "why": "An HDD seek is 5 to 10 ms, versus about 0.5 ms for a data-centre round trip.", "link": "numbers.html#latency"},
+    {"q": "What peak factor should you plan for over average traffic?", "choices": ["2 to 3×, more for spiky consumer apps", "Exactly 1×", "10 to 20× always", "0.5×"], "answer": 0, "why": "The page's handy conversions suggest planning for 2 to 3× average.", "link": "numbers.html#time"},
+    {"q": "Roughly how many WebSocket connections can one gateway node hold?", "choices": ["About 100k to 1M", "About 1k", "About 10k", "About 100M"], "answer": 0, "why": "Idle connections are cheap; message rate and memory per connection decide it.", "link": "numbers.html#throughput"}
+  ]
+}
