@@ -1,0 +1,27 @@
+{
+  "title": "UPI payments switch",
+  "page": "upi.html",
+  "cards": [
+    {"front": "What the UPI switch is, and isn't", "back": "Not a wallet: money stays in bank accounts. The switch is a referee that tells one bank to debit and another to credit, and records exactly what happened.", "link": "upi.html#requirements"},
+    {"front": "Peak payment rate and in-flight transactions", "back": "About 25,000 payments a second at peak; by Little's law, 25k/s × 2 s is about 50,000 open transactions.", "link": "upi.html#estimates"},
+    {"front": "The real throughput constraint", "back": "Banks' core banking systems, not the switch. A big bank may handle about 3,750 debits or credits a second at peak.", "link": "upi.html#estimates"},
+    {"front": "txnId vs RRN", "back": "The txnId is created once by the payer's PSP and travels on every message for matching, retries and dedupe; the switch adds a 12-digit RRN that users and support quote.", "link": "upi.html#api"},
+    {"front": "How a VPA like ravi@ybl is resolved", "back": "The handle after @ maps to a PSP (cached in memory); that PSP returns the account, IFSC and registered name. The IFSC's first four letters name the bank.", "link": "upi.html#vpa"},
+    {"front": "Why not cache VPA to account at the switch?", "back": "Users move a VPA to a new account, and a stale entry would send money to the old one. Caching the handle table is safe; caching the answer is not.", "link": "upi.html#vpa"},
+    {"front": "Why debit first, then credit?", "back": "If you credited first and the debit failed, you'd have handed out money you can't get back. A failed credit leaves money at the payer's bank, which can return it.", "link": "upi.html#flow"},
+    {"front": "Debit timeout", "back": "Send a reversal: the bank undoes the debit if it happened or answers 'nothing to reverse'.", "link": "upi.html#timeouts"},
+    {"front": "Credit timeout", "back": "Mark DEEMED: the payee may already have the money, so don't reverse. Chase with check status and settle by T+1.", "link": "upi.html#timeouts"},
+    {"front": "How retries stay safe at every bank", "back": "Each bank stores the txnId with the debit or credit in the same transaction as the balance change, so a repeat returns the first result.", "link": "upi.html#idempotency"},
+    {"front": "Net settlement", "back": "Per cycle the switch sums what each bank owes and is owed; only the difference moves between settlement accounts at the central bank.", "link": "upi.html#recon"},
+    {"front": "Per-bank circuit breakers", "back": "When a bank's timeouts jump, stop sending it new payments briefly and fail fast with 'bank unavailable' instead of building up open transactions.", "link": "upi.html#deployment"}
+  ],
+  "quiz": [
+    {"q": "The credit leg to the payee's bank times out after a successful debit. What should the switch do?", "choices": ["Reverse the debit immediately", "Mark the payment DEEMED, chase it with check status, and settle by T+1", "Retry the debit", "Mark it failed and tell the user to pay again"], "answer": 1, "why": "Reversing could create money if the payee was actually credited.", "link": "upi.html#timeouts"},
+    {"q": "The debit leg times out and the switch doesn't know if money left the payer's account. What is safe?", "choices": ["Send a reversal to the remitter bank", "Send the credit anyway", "Mark it deemed", "Wait 24 hours"], "answer": 0, "why": "Undoing a debit that may not have happened is harmless.", "link": "upi.html#timeouts"},
+    {"q": "A user's app retries ReqPay after a network drop. How is a double debit avoided?", "choices": ["The user enters the PIN again", "The switch waits 30 seconds", "The same txnId is reused, and the switch and banks dedupe on it", "The bank checks the amount and time"], "answer": 2, "why": "One id end to end makes retries idempotent.", "link": "upi.html#idempotency"},
+    {"q": "One large bank's core system slows down during a festival, and open transactions across the switch climb. What should happen?", "choices": ["Raise the timeout to 60 s", "Route that bank's payments through another bank", "Cache VPA answers longer", "Trip a per-bank circuit breaker and fail fast, with per-bank rate limits"], "answer": 3, "why": "Waiting on a dead bank only builds open transactions.", "link": "upi.html#deployment"},
+    {"q": "A user moved ravi@ybl to a new bank account yesterday, but a payment was credited to the old account. What design mistake causes this?", "choices": ["Caching VPA to account answers at the switch", "Caching the handle table", "Short timeouts", "Net settlement"], "answer": 0, "why": "The VPA lookup must run against the payee PSP on every payment.", "link": "upi.html#vpa"},
+    {"q": "A late SUCCESS response for the debit arrives after the payment already moved to REVERSAL_PENDING. What stops it moving the payment backwards?", "choices": ["The RRN", "Conditional writes on the txnId row guarded by the current state", "The settlement file", "Mutual TLS"], "answer": 1, "why": "Transitions are UPDATE ... WHERE state = expected.", "link": "upi.html#flow"},
+    {"q": "Which mechanism finally catches a deemed payment the beneficiary bank never actually credited?", "choices": ["The user's complaint", "A circuit breaker", "Reconciliation against the cycle's settlement file", "VPA resolution"], "answer": 2, "why": "Banks match the file by txnId or RRN and must credit or return by T+1.", "link": "upi.html#recon"}
+  ]
+}

@@ -1,0 +1,140 @@
+{
+  "title": "DNS",
+  "page": "dns.html",
+  "cards": [
+    {
+      "front": "What DNS is",
+      "back": "A distributed, heavily cached database that turns names into IP addresses: a hierarchy of name servers plus recursive resolvers that do the legwork and cache answers.",
+      "link": "dns.html#what"
+    },
+    {
+      "front": "Why DNS lookups use UDP",
+      "back": "A question and its answer each fit in one packet, so UDP on port 53 avoids a handshake. Large answers and zone transfers use TCP.",
+      "link": "dns.html#what"
+    },
+    {
+      "front": "A / AAAA record",
+      "back": "Maps a name to an IPv4 or IPv6 address: the answer most lookups want.",
+      "link": "dns.html#records"
+    },
+    {
+      "front": "CNAME record",
+      "back": "An alias to a canonical name, used to point at a CDN or load balancer whose IPs change. It can't sit at the bare domain, so providers offer ALIAS or CNAME flattening.",
+      "link": "dns.html#records"
+    },
+    {
+      "front": "Cold lookup path",
+      "back": "Stub resolver → recursive resolver → root (servers for .com) → TLD (NS records for the domain) → authoritative server, which returns the A record and a TTL.",
+      "link": "dns.html#resolve"
+    },
+    {
+      "front": "TTL",
+      "back": "How long, in seconds, browsers, OSes and resolvers may cache an answer. It also decides how fast a change spreads.",
+      "link": "dns.html#ttl"
+    },
+    {
+      "front": "TTL for automatic failover records",
+      "back": "30 to 60 seconds; 5 minutes is a reasonable default for service endpoints, and 1 hour to 1 day for things that never move like MX and NS.",
+      "link": "dns.html#ttl"
+    },
+    {
+      "front": "Before a planned migration",
+      "back": "Lower the TTL to 60 s a day or two before the change so caches already hold short TTLs, then raise it again afterwards.",
+      "link": "dns.html#ttl"
+    },
+    {
+      "front": "Negative caching",
+      "back": "Failed lookups are cached too, for a time set by the zone's SOA record, so a typo'd record can linger after you fix it.",
+      "link": "dns.html#ttl"
+    },
+    {
+      "front": "Anycast",
+      "back": "Many sites announce the same IP address and internet routing delivers each packet to the nearest one. Root servers, public resolvers and CDNs use it to absorb traffic and attacks.",
+      "link": "dns.html#routing"
+    },
+    {
+      "front": "Why DNS routing is coarse",
+      "back": "It sees the resolver, not the user, and caching slows changes. So DNS usually picks a region or CDN, and a load balancer spreads load inside it.",
+      "link": "dns.html#routing"
+    },
+    {
+      "front": "Dangling record",
+      "back": "A CNAME left pointing at a deleted cloud resource, which someone else can claim (subdomain takeover). Remove records when you delete what they point to.",
+      "link": "dns.html#failure"
+    }
+  ],
+  "quiz": [
+    {
+      "q": "You move api.shop.com to a new IP. The record had a 1-hour TTL. What happens?",
+      "choices": [
+        "Everyone switches within seconds",
+        "Some users keep hitting the old address for up to an hour or longer",
+        "Nobody switches until you restart resolvers",
+        "DNS rejects the change for an hour"
+      ],
+      "answer": 1,
+      "why": "Caches hold the old answer for the TTL, longer if a client ignores TTLs.",
+      "link": "dns.html#ttl"
+    },
+    {
+      "q": "You want to send 5% of traffic to a new region to test it. Which DNS routing policy fits?",
+      "choices": [
+        "Failover",
+        "Simple round robin",
+        "Weighted",
+        "Geo"
+      ],
+      "answer": 2,
+      "why": "Weighted records return answers in proportion to weights, ideal for shifting a small share.",
+      "link": "dns.html#routing"
+    },
+    {
+      "q": "A '60-second' DNS failover took many minutes for some users. Which is the likeliest cause?",
+      "choices": [
+        "The root servers were slow",
+        "Health-check interval plus TTL plus clients caching longer than the TTL",
+        "UDP packet loss",
+        "Too many A records"
+      ],
+      "answer": 1,
+      "why": "These delays add up, and some runtimes cache DNS far beyond the TTL.",
+      "link": "dns.html#failure"
+    },
+    {
+      "q": "A crawler resolving millions of hostnames is melting its resolver. What helps most?",
+      "choices": [
+        "Use TCP for DNS",
+        "Cache lookups in process, respecting TTLs, or run a local caching resolver",
+        "Lower every TTL to zero",
+        "Query the root servers directly"
+      ],
+      "answer": 1,
+      "why": "Caching takes lookups off the hot path and off the shared resolver.",
+      "link": "dns.html#failure"
+    },
+    {
+      "q": "You want www.shop.com served by a CDN whose IPs change often. Which record do you add?",
+      "choices": [
+        "A record with the CDN's current IP",
+        "MX record",
+        "CNAME to the CDN's hostname",
+        "TXT record"
+      ],
+      "answer": 2,
+      "why": "A CNAME aliases your name to the CDN's canonical name, so its IP changes don't affect you.",
+      "link": "dns.html#records"
+    },
+    {
+      "q": "Your service is healthy but unreachable because nobody can resolve its name. How do you guard against this?",
+      "choices": [
+        "Raise every TTL to a week",
+        "Use an anycast DNS provider at scale, and two providers for critical domains",
+        "Switch lookups to TCP",
+        "Add more A records at the same provider"
+      ],
+      "answer": 1,
+      "why": "A DNS provider outage makes healthy services unreachable; redundancy at the DNS layer avoids that.",
+      "link": "dns.html#failure"
+    }
+  ]
+}

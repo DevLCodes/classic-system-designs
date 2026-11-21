@@ -157,6 +157,17 @@
   .dg .dot-hr { fill: var(--c-gov); } .dg .dot-it { fill: var(--c-kb); } .dg .dot-eng { fill: var(--c-ingest); } .dg .dot-q { fill: var(--c-serve); stroke: var(--ink); stroke-width: 1.5; }
   .dg .halo { fill: none; stroke: var(--c-serve); stroke-width: 1.5; stroke-dasharray: 4 4; }
   .dg .zone { fill: var(--paper); stroke: var(--line); stroke-width: 1; }
+  /* Check yourself: self-test questions, answers in details/summary (see STYLES.md) */
+  .check { counter-reset: chk; }
+  .check details { counter-increment: chk; border: 1px solid var(--line); border-radius: 10px; background: var(--paper); margin: 0 0 10px; }
+  .check summary { position: relative; display: block; cursor: pointer; list-style: none; padding: 12px 44px 12px 48px; font-weight: 600; line-height: 1.45; }
+  .check summary::-webkit-details-marker { display: none; }
+  .check summary::before { content: "Q" counter(chk); position: absolute; left: 16px; top: 14px; font-family: var(--font-mono); font-size: 12px; font-weight: 500; color: var(--accent); }
+  .check summary::after { content: "+"; position: absolute; right: 16px; top: 10px; font-family: var(--font-mono); font-size: 18px; color: var(--muted); }
+  .check details[open] summary::after { content: "\2212"; }
+  .check summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 10px; }
+  .check .ans { margin: 0; padding: 0 16px 14px 48px; color: var(--ink); }
+  .check .ans a { font-family: var(--font-mono); font-size: 12.5px; white-space: nowrap; }
 </style>
 
 <style>
@@ -228,11 +239,11 @@
 </head>
 <body>
 <svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs><marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" class="ah" style="fill:#7d8996"/></marker></defs></svg>
-<header class="sitebar"><div class="wrap"><a class="brand" href="index.html">Classic System Design</a><nav aria-label="Site"><a href="index.html">Home</a><a href="index.html#blocks" aria-current="page">Building blocks</a><a href="index.html#designs">Designs</a><a href="https://devlcodes.github.io/agentic-ai-notebook/system-design/index.html">Agentic designs ↗</a></nav></div></header>
+<header class="sitebar"><div class="wrap"><a class="brand" href="index.html">Classic System Design</a><nav aria-label="Site"><a href="index.html">Home</a><a href="index.html#blocks" aria-current="page">Building blocks</a><a href="index.html#designs">Designs</a><a href="study.html">Study</a><a href="https://devlcodes.github.io/agentic-ai-notebook/system-design/index.html">Agentic designs ↗</a></nav></div></header>
 <main>
 <div class="wrap"><div class="intro"><p class="eyebrow">Building block · correctness</p><h1>Consistency and CAP</h1><p class="lead">When data lives on several machines, deciding what a reader is allowed to see, and what you give up when the network breaks.</p></div></div>
 <div class="wrap doc">
-  <nav class="toc" aria-label="On this page"><p>On this page</p><ol><li><a href="#why">Why it comes up</a></li><li><a href="#cap">CAP, said precisely</a></li><li><a href="#models">Consistency models</a></li><li><a href="#quorum">Quorums</a></li><li><a href="#lab">Try it: tune a quorum</a></li><li><a href="#practice">In practice</a></li><li><a href="#interview">Saying it in an interview</a></li><li><a href="#real-world">In the real world</a></li><li><a href="#related">Related</a></li></ol></nav>
+  <nav class="toc" aria-label="On this page"><p>On this page</p><ol><li><a href="#why">Why it comes up</a></li><li><a href="#cap">CAP, said precisely</a></li><li><a href="#models">Consistency models</a></li><li><a href="#quorum">Quorums</a></li><li><a href="#lab">Try it: tune a quorum</a></li><li><a href="#practice">In practice</a></li><li><a href="#interview">Saying it in an interview</a></li><li><a href="#real-world">In the real world</a></li><li><a href="#check">Check yourself</a></li><li><a href="#related">Related</a></li></ol></nav>
   <article>
 <section id="why"><h2>Why it comes up</h2>
 <p class="lead">As soon as you replicate data, copies can disagree for a moment. Consistency models describe how big that moment is, and what a reader might see during it.</p>
@@ -304,6 +315,15 @@
 <tr><td>etcd, ZooKeeper, Consul</td><td>Strong via Raft or Zab</td><td>For small coordination data, not bulk storage</td></tr>
 </tbody></table></div>
 <p class="muted" style="font-size:13.5px;color:var(--muted)">Products change quickly; names here are examples, not endorsements. Check current docs before choosing.</p></section>
+
+<section id="check" class="check"><h2>Check yourself</h2>
+  <p>Answer in your head first, then open each question to compare.</p>
+  <details><summary>Why is "CA" not a real choice for a distributed system?</summary><p class="ans"><strong>Partitions happen in every real network.</strong> When one happens, a replicated system must pick consistency or availability. CAP only bites during a partition. <a href="#cap">Read the section</a></p></details>
+  <details><summary>What does PACELC add to CAP?</summary><p class="ans"><strong>Without a partition you still trade latency for consistency.</strong> Waiting for replicas in other regions to confirm a write costs tens to hundreds of milliseconds, and that is the trade you feel most days. <a href="#cap">Read the section</a></p></details>
+  <details><summary>N = 3, W = 2, R = 1. Is every read guaranteed to see the latest successful write?</summary><p class="ans"><strong>No.</strong> R + W = 3, which is not greater than N, so the single replica read can be the one the write missed. W = 2 with R = 2 fixes it. <a href="#quorum">Read the section</a></p></details>
+  <details><summary>A user's comment appears, vanishes on refresh, then comes back. Which guarantee is missing?</summary><p class="ans"><strong>Monotonic reads.</strong> The second read hit a replica that was further behind. Monotonic reads promise never to show an older value after a newer one. <a href="#models">Read the section</a></p></details>
+  <details><summary>Reserving stock and charging a card live in two services with no shared transaction. Which pattern keeps them consistent?</summary><p class="ans"><strong>A saga with compensating actions.</strong> Each step is local; if the charge fails, a compensating step releases the stock. Pair it with the outbox pattern. <a href="#practice">Read the section</a></p></details>
+</section>
 
 <section id="related"><h2>Related</h2><ul class="related"><li><a href="databases.html#replication">Replication</a></li><li><a href="sharding.html">Sharding</a></li><li><a href="caching.html">Caching</a></li><li><a href="queues.html">Message queues</a></li><li><a href="raft.html">Consensus with Raft</a></li><li><a href="merkle-trees.html">Merkle trees</a></li></ul></section>
   </article>
