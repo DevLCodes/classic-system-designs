@@ -364,7 +364,7 @@ GET  /api/orders?page_token=…</code></pre>
 
 <section id="browse">
   <h2>Catalog and search</h2>
-  <ul class="tags"><li>Deep dive 1</li><li><a href="caching.html">Caching</a></li></ul>
+  <ul class="tags"><li>Deep dive 1</li><li><a href="caching.html">Caching</a></li><li><a href="search.html">Search indexes</a></li></ul>
   <ul class="plain">
     <li><strong>Catalog service:</strong> product attributes in a document store or sharded relational database, keyed by product id, with Redis in front and rendered pages at the CDN. A product page fans out to catalog, offers, reviews and recommendations in parallel, with timeouts; a slow reviews service shows the page without reviews, not an error.</li>
     <li><strong>Search:</strong> Elasticsearch or OpenSearch with the catalog denormalized into it: title, brand, category, attributes for facets, price and an "in stock" flag. It is updated from catalog and inventory change events, seconds behind, which is fine for browsing.</li>
