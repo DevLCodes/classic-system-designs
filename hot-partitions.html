@@ -157,6 +157,17 @@
   .dg .dot-hr { fill: var(--c-gov); } .dg .dot-it { fill: var(--c-kb); } .dg .dot-eng { fill: var(--c-ingest); } .dg .dot-q { fill: var(--c-serve); stroke: var(--ink); stroke-width: 1.5; }
   .dg .halo { fill: none; stroke: var(--c-serve); stroke-width: 1.5; stroke-dasharray: 4 4; }
   .dg .zone { fill: var(--paper); stroke: var(--line); stroke-width: 1; }
+  /* Check yourself: self-test questions, answers in details/summary (see STYLES.md) */
+  .check { counter-reset: chk; }
+  .check details { counter-increment: chk; border: 1px solid var(--line); border-radius: 10px; background: var(--paper); margin: 0 0 10px; }
+  .check summary { position: relative; display: block; cursor: pointer; list-style: none; padding: 12px 44px 12px 48px; font-weight: 600; line-height: 1.45; }
+  .check summary::-webkit-details-marker { display: none; }
+  .check summary::before { content: "Q" counter(chk); position: absolute; left: 16px; top: 14px; font-family: var(--font-mono); font-size: 12px; font-weight: 500; color: var(--accent); }
+  .check summary::after { content: "+"; position: absolute; right: 16px; top: 10px; font-family: var(--font-mono); font-size: 18px; color: var(--muted); }
+  .check details[open] summary::after { content: "\2212"; }
+  .check summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 10px; }
+  .check .ans { margin: 0; padding: 0 16px 14px 48px; color: var(--ink); }
+  .check .ans a { font-family: var(--font-mono); font-size: 12.5px; white-space: nowrap; }
 </style>
 
 <style>
@@ -227,11 +238,11 @@
 </style>
 <body>
 <svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs><marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" class="ah" style="fill:#7d8996"/></marker></defs></svg>
-<header class="sitebar"><div class="wrap"><a class="brand" href="index.html">Classic System Design</a><nav aria-label="Site"><a href="index.html">Home</a><a href="index.html#blocks" aria-current="page">Building blocks</a><a href="index.html#designs">Designs</a><a href="https://devlcodes.github.io/agentic-ai-notebook/system-design/index.html">Agentic designs ↗</a></nav></div></header>
+<header class="sitebar"><div class="wrap"><a class="brand" href="index.html">Classic System Design</a><nav aria-label="Site"><a href="index.html">Home</a><a href="index.html#blocks" aria-current="page">Building blocks</a><a href="index.html#designs">Designs</a><a href="study.html">Study</a><a href="https://devlcodes.github.io/agentic-ai-notebook/system-design/index.html">Agentic designs ↗</a></nav></div></header>
 <main>
 <div class="wrap"><div class="intro"><p class="eyebrow">Building block · data</p><h1>Hot partitions, sub-sharding and write buffering</h1><p class="lead">What to do when one key gets more traffic than a whole shard can take, even though your hash spreads every other key evenly.</p></div></div>
 <div class="wrap doc">
-  <nav class="toc" aria-label="On this page"><p>On this page</p><ol><li><a href="#what">How hot keys happen</a></li><li><a href="#salting">Key salting</a></li><li><a href="#dynamic">Dynamic sub-sharding</a></li><li><a href="#lab">Try it: a celebrity key</a></li><li><a href="#buffer">Write-ahead buffering</a></li><li><a href="#ryw">Read-your-writes trade-offs</a></li><li><a href="#failure">How it goes wrong</a></li><li><a href="#interview">Saying it in an interview</a></li><li><a href="#real-world">In the real world</a></li><li><a href="#related">Related</a></li></ol></nav>
+  <nav class="toc" aria-label="On this page"><p>On this page</p><ol><li><a href="#what">How hot keys happen</a></li><li><a href="#salting">Key salting</a></li><li><a href="#dynamic">Dynamic sub-sharding</a></li><li><a href="#lab">Try it: a celebrity key</a></li><li><a href="#buffer">Write-ahead buffering</a></li><li><a href="#ryw">Read-your-writes trade-offs</a></li><li><a href="#failure">How it goes wrong</a></li><li><a href="#interview">Saying it in an interview</a></li><li><a href="#real-world">In the real world</a></li><li><a href="#check">Check yourself</a></li><li><a href="#related">Related</a></li></ol></nav>
   <article>
 <section id="what"><h2>How hot keys happen</h2>
 <p class="lead">Hashing spreads <em>keys</em> evenly. It does nothing for traffic that piles onto <em>one</em> key. Every write for that key goes to the same shard, so adding shards does not help.</p>
@@ -369,6 +380,15 @@
 <tr><td>Kafka</td><td>Custom partitioners, keys with a salt</td><td>A hot message key makes a hot partition and a lagging consumer</td></tr>
 </tbody></table></div>
 <p class="muted" style="font-size:13.5px;color:var(--muted)">Products change quickly; names here are examples, not endorsements. Check current docs before relying on a specific limit.</p></section>
+
+<section id="check" class="check"><h2>Check yourself</h2>
+  <p>Answer in your head first, then open each question to compare.</p>
+  <details><summary>One key gets 5,000 writes a second on shards rated for 1,000. Why does doubling the shard count not help?</summary><p class="ans"><strong>Hashing still sends every write for that key to one shard.</strong> The limit is per key, not per cluster. In DynamoDB one partition takes at most 1,000 writes a second however big the table is. <a href="#what">Read the section</a></p></details>
+  <details><summary>A like counter is salted with 4 random suffixes. What does one read of the total cost?</summary><p class="ans"><strong>Four reads, summed.</strong> Writes per sub-key drop to W / 4, and every read of the total fans out to all 4 parts. <a href="#salting">Read the section</a></p></details>
+  <details><summary>A hot key is being widened from 4 parts to 8. Which side switches first?</summary><p class="ans"><strong>Readers first, then writers.</strong> If a writer uses part 8 before a reader knows about it, the reader misses data. When narrowing, it is the other way round: writers first. <a href="#dynamic">Read the section</a></p></details>
+  <details><summary>Can a write-ahead buffer batch "reserve the last seat" updates the way it batches likes?</summary><p class="ans"><strong>No.</strong> Batching only fits commutative updates such as increments, appends and set-adds. A reservation needs a single writer or a transaction. <a href="#buffer">Read the section</a></p></details>
+  <details><summary>4 aggregator workers each flush 10 times a second. How many writes a second reach the hot key's row?</summary><p class="ans"><strong>About 40, whether 500 or 50,000 likes arrive.</strong> Each worker sends one combined write per flush, so the write rate depends on workers and flush rate, not on traffic. <a href="#buffer">Read the section</a></p></details>
+</section>
 
 <section id="related"><h2>Related</h2><ul class="related"><li><a href="sharding.html">Sharding and consistent hashing</a></li><li><a href="caching.html">Caching</a></li><li><a href="queues.html">Message queues and streams</a></li><li><a href="databases.html">Databases and indexes</a></li><li><a href="consistency.html">Consistency</a></li><li><a href="news-feed.html">News feed</a></li><li><a href="live-comments.html">Live comments</a></li></ul></section>
   </article>

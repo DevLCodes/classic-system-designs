@@ -157,6 +157,17 @@
   .dg .dot-hr { fill: var(--c-gov); } .dg .dot-it { fill: var(--c-kb); } .dg .dot-eng { fill: var(--c-ingest); } .dg .dot-q { fill: var(--c-serve); stroke: var(--ink); stroke-width: 1.5; }
   .dg .halo { fill: none; stroke: var(--c-serve); stroke-width: 1.5; stroke-dasharray: 4 4; }
   .dg .zone { fill: var(--paper); stroke: var(--line); stroke-width: 1; }
+  /* Check yourself: self-test questions, answers in details/summary (see STYLES.md) */
+  .check { counter-reset: chk; }
+  .check details { counter-increment: chk; border: 1px solid var(--line); border-radius: 10px; background: var(--paper); margin: 0 0 10px; }
+  .check summary { position: relative; display: block; cursor: pointer; list-style: none; padding: 12px 44px 12px 48px; font-weight: 600; line-height: 1.45; }
+  .check summary::-webkit-details-marker { display: none; }
+  .check summary::before { content: "Q" counter(chk); position: absolute; left: 16px; top: 14px; font-family: var(--font-mono); font-size: 12px; font-weight: 500; color: var(--accent); }
+  .check summary::after { content: "+"; position: absolute; right: 16px; top: 10px; font-family: var(--font-mono); font-size: 18px; color: var(--muted); }
+  .check details[open] summary::after { content: "\2212"; }
+  .check summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 10px; }
+  .check .ans { margin: 0; padding: 0 16px 14px 48px; color: var(--ink); }
+  .check .ans a { font-family: var(--font-mono); font-size: 12.5px; white-space: nowrap; }
 </style>
 
 <style>
@@ -228,11 +239,11 @@
 </head>
 <body>
 <svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs><marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" class="ah" style="fill:#7d8996"/></marker></defs></svg>
-<header class="sitebar"><div class="wrap"><a class="brand" href="index.html">Classic System Design</a><nav aria-label="Site"><a href="index.html">Home</a><a href="index.html#blocks" aria-current="page">Building blocks</a><a href="index.html#designs">Designs</a><a href="https://devlcodes.github.io/agentic-ai-notebook/system-design/index.html">Agentic designs ↗</a></nav></div></header>
+<header class="sitebar"><div class="wrap"><a class="brand" href="index.html">Classic System Design</a><nav aria-label="Site"><a href="index.html">Home</a><a href="index.html#blocks" aria-current="page">Building blocks</a><a href="index.html#designs">Designs</a><a href="study.html">Study</a><a href="https://devlcodes.github.io/agentic-ai-notebook/system-design/index.html">Agentic designs ↗</a></nav></div></header>
 <main>
 <div class="wrap"><div class="intro"><p class="eyebrow">Building block · estimation</p><h1>Numbers to know</h1><p class="lead">The handful of latency, throughput and availability numbers that let you size a system on a whiteboard in two minutes.</p></div></div>
 <div class="wrap doc">
-  <nav class="toc" aria-label="On this page"><p>On this page</p><ol><li><a href="#why">Why estimate</a></li><li><a href="#latency">Latency by layer</a></li><li><a href="#throughput">What one machine can do</a></li><li><a href="#time">Handy conversions</a></li><li><a href="#lab">Try it: size a service</a></li><li><a href="#call">Anatomy of one API call</a></li><li><a href="#method">The two-minute method</a></li><li><a href="#related">Related</a></li></ol></nav>
+  <nav class="toc" aria-label="On this page"><p>On this page</p><ol><li><a href="#why">Why estimate</a></li><li><a href="#latency">Latency by layer</a></li><li><a href="#throughput">What one machine can do</a></li><li><a href="#time">Handy conversions</a></li><li><a href="#lab">Try it: size a service</a></li><li><a href="#call">Anatomy of one API call</a></li><li><a href="#method">The two-minute method</a></li><li><a href="#check">Check yourself</a></li><li><a href="#related">Related</a></li></ol></nav>
   <article>
 <section id="why"><h2>Why estimate</h2>
 <p class="lead">Estimates decide the design. 50 writes a second fits on one Postgres node; 500,000 does not. You only need to be right to within a factor of ten.</p>
@@ -328,6 +339,15 @@
 <li><strong>Memory for cache.</strong> Cache the hot 10–20% of a day's reads; check it fits in a few nodes.</li>
 <li><strong>Turn numbers into decisions.</strong> "40k peak reads/s means a cache and replicas; 1k writes/s fits one leader; 200 TB of photos means S3 and a CDN."</li>
 </ol></section>
+
+<section id="check" class="check"><h2>Check yourself</h2>
+  <p>Answer in your head first, then open each question to compare.</p>
+  <details><summary>1 billion requests a day is about how many per second on average?</summary><p class="ans"><strong>About 12,000.</strong> A day is 86,400 seconds, roughly 10⁵. Plan for 2 to 3 times the average at peak. <a href="#time">Read the section</a></p></details>
+  <details><summary>How much downtime a year does 99.99% availability allow?</summary><p class="ans"><strong>About 53 minutes.</strong> That is about 4.4 minutes a month. Three nines allow about 8.8 hours a year. <a href="#time">Read the section</a></p></details>
+  <details><summary>What does a round trip between continents cost?</summary><p class="ans"><strong>About 100 to 250 ms.</strong> That is why CDNs and regional deployments exist; inside one data centre a round trip is about 0.5 ms. <a href="#latency">Read the section</a></p></details>
+  <details><summary>What does a cold call from a new client pay before your code even runs?</summary><p class="ans"><strong>A DNS lookup plus TCP and TLS handshakes.</strong> Cold ≈ DNS + 3 × RTT + processing + transfer; a warm call on a reused connection is about 1 × RTT + processing + transfer. <a href="#call">Read the section</a></p></details>
+  <details><summary>A design needs 1,000 writes a second. Does it need sharding?</summary><p class="ans"><strong>No, one database leader handles a few thousand writes a second.</strong> Reads scale with replicas and caches; writes need sharding once they pass what one leader can take. <a href="#throughput">Read the section</a></p></details>
+</section>
 
 <section id="related"><h2>Related</h2><ul class="related"><li><a href="databases.html">Databases</a></li><li><a href="caching.html">Caching</a></li><li><a href="sharding.html">Sharding</a></li><li><a href="object-storage.html">Object storage</a></li><li><a href="https://devlcodes.github.io/agentic-ai-notebook/system-design/numbers.html">Numbers for AI systems</a></li></ul></section>
   </article>

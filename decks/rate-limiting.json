@@ -1,0 +1,135 @@
+{
+  "title": "Rate limiting",
+  "page": "rate-limiting.html",
+  "cards": [
+    {
+      "front": "Three reasons to rate limit",
+      "back": "Protect capacity from runaway clients, give each user or key a fair share (often tied to a plan), and slow abuse and cost such as password guessing or SMS spend.",
+      "link": "rate-limiting.html#why"
+    },
+    {
+      "front": "Over-limit response",
+      "back": "429 Too Many Requests with a Retry-After header, ideally plus headers showing the limit and what remains.",
+      "link": "rate-limiting.html#why"
+    },
+    {
+      "front": "Token bucket",
+      "back": "Tokens refill at rate r up to capacity b and each request spends one. It allows controlled bursts while holding the long-run rate.",
+      "link": "rate-limiting.html#algorithms"
+    },
+    {
+      "front": "Leaky bucket",
+      "back": "Requests queue and drain at a fixed rate: perfectly smooth output, but bursts wait or are dropped.",
+      "link": "rate-limiting.html#algorithms"
+    },
+    {
+      "front": "Fixed window's flaw",
+      "back": "A client can send up to 2× the limit around a window boundary.",
+      "link": "rate-limiting.html#algorithms"
+    },
+    {
+      "front": "Sliding window log",
+      "back": "Store every request timestamp in the last window: exact, but memory grows with the limit.",
+      "link": "rate-limiting.html#algorithms"
+    },
+    {
+      "front": "Sliding window counter",
+      "back": "Current window count plus the previous window's count weighted by overlap: nearly exact with two counters.",
+      "link": "rate-limiting.html#algorithms"
+    },
+    {
+      "front": "Why per-instance counters fail",
+      "back": "With 50 gateway instances each keeping its own count, a client can get 50× the limit. Keep counters in a shared store like Redis.",
+      "link": "rate-limiting.html#where"
+    },
+    {
+      "front": "Atomic check-and-increment in Redis",
+      "back": "One Lua script, or a single INCR plus EXPIRE per window.",
+      "link": "rate-limiting.html#where"
+    },
+    {
+      "front": "Fail open vs fail closed",
+      "back": "If the limiter's store is down, fail open (allow) for general API limits and fail closed (reject) for logins and expensive operations.",
+      "link": "rate-limiting.html#where"
+    },
+    {
+      "front": "Rate limits vs load shedding",
+      "back": "Per-client limits don't help when all well-behaved clients together exceed capacity. Load shedding rejects low-priority traffic first, whoever sent it.",
+      "link": "rate-limiting.html#where"
+    }
+  ],
+  "quiz": [
+    {
+      "q": "A client sends 20 requests at 0:59 and 20 more at 1:01 against a 20-per-minute fixed window. What happens?",
+      "choices": [
+        "Only 20 succeed",
+        "All 40 succeed within two seconds",
+        "The second batch waits a minute",
+        "The limiter blocks the client for an hour"
+      ],
+      "answer": 1,
+      "why": "Fixed windows reset at the boundary, allowing up to 2× the limit around it.",
+      "link": "rate-limiting.html#algorithms"
+    },
+    {
+      "q": "You need to allow short bursts but keep the long-run rate at the plan limit. Which algorithm?",
+      "choices": [
+        "Leaky bucket",
+        "Fixed window",
+        "Token bucket",
+        "No limiter"
+      ],
+      "answer": 2,
+      "why": "The capacity allows bursts while the refill rate holds the long-run average.",
+      "link": "rate-limiting.html#algorithms"
+    },
+    {
+      "q": "Your limit is 100/min, but customers get 5,000/min through 50 gateway pods. Why?",
+      "choices": [
+        "Clock skew",
+        "Each pod counts in its own memory",
+        "Redis is too slow",
+        "The window is too short"
+      ],
+      "answer": 1,
+      "why": "Counters must be shared, typically in Redis, so every pod sees one count.",
+      "link": "rate-limiting.html#where"
+    },
+    {
+      "q": "Redis, which holds the limiter state, goes down. What should the login endpoint do?",
+      "choices": [
+        "Fail open and allow everything",
+        "Fail closed and reject",
+        "Switch to a fixed window",
+        "Return 200 with a warning"
+      ],
+      "answer": 1,
+      "why": "Logins should fail closed to keep password guessing in check.",
+      "link": "rate-limiting.html#where"
+    },
+    {
+      "q": "Every customer is under their limit, but the service is still overloaded. What do you need?",
+      "choices": [
+        "Lower every customer's limit",
+        "Load shedding of low-priority traffic",
+        "A sliding window log",
+        "Longer Retry-After values"
+      ],
+      "answer": 1,
+      "why": "Per-client limits can't cap total load; shedding protects the service itself.",
+      "link": "rate-limiting.html#where"
+    },
+    {
+      "q": "At very high volume, the Redis hop on every request is too slow. What is the usual compromise?",
+      "choices": [
+        "Drop the limiter",
+        "Keep local counts and sync with Redis every few hundred ms, accepting a small overshoot",
+        "Move to a leaky bucket",
+        "Rate limit only at the database"
+      ],
+      "answer": 1,
+      "why": "Local counts with periodic sync trade a little precision for speed.",
+      "link": "rate-limiting.html#where"
+    }
+  ]
+}
